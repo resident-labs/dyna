@@ -14,6 +14,8 @@ type handoffRig struct {
 	ctx context.Context
 	now time.Time
 	n   int
+	// profile is the session's profile as the caller last read it.
+	profile contract.ProfileName
 }
 
 func newHandoffRig(t *testing.T) *handoffRig {
@@ -29,7 +31,7 @@ func newHandoffRig(t *testing.T) *handoffRig {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return &handoffRig{t: t, s: s, ctx: context.Background(), now: time.Unix(1000, 0)}
+	return &handoffRig{t: t, s: s, ctx: context.Background(), now: time.Unix(1000, 0), profile: "p"}
 }
 
 func (r *handoffRig) owner(text string) {
@@ -63,7 +65,11 @@ func (r *handoffRig) end(turn contract.TurnID, out contract.TurnOutputRequest) {
 
 func (r *handoffRig) switchTo(profile contract.ProfileName, harness *HarnessSwitch) error {
 	event := contract.Event{ID: contract.EventID("switch" + string(profile)), Room: "r", Time: r.now, From: contract.Principal{Kind: contract.PrincipalOwner}, Body: contract.SessionProfileChanged{Session: "s", Profile: profile}}
-	return r.s.SetSessionProfile(r.ctx, "s", profile, event, harness)
+	err := r.s.SetSessionProfile(r.ctx, "s", r.profile, profile, event, harness)
+	if err == nil {
+		r.profile = profile
+	}
+	return err
 }
 
 func (r *handoffRig) handoff() int64 {
@@ -93,7 +99,7 @@ func TestHandoffOutlastsTheTurnRunningWhenItWasSet(t *testing.T) {
 	r.owner("next")
 	r.now = r.now.Add(time.Second)
 	// The box restarts for the new harness; it says hello, and the turn that starts then carries the handoff.
-	if err := r.s.NoteBoxHello(r.ctx, "b", true); err != nil {
+	if err := r.s.NoteBoxHello(r.ctx, "b", r.handoff(), "agy", true); err != nil {
 		t.Fatal(err)
 	}
 	r.start("t2")
@@ -128,16 +134,19 @@ func TestHarnessSwitchRefusesAClosingSession(t *testing.T) {
 	}
 }
 
-// A turn records the profile it was dispatched under, so a switch while it runs does not change which harness served it.
-func TestTurnKeepsTheProfileItWasDispatchedUnder(t *testing.T) {
+// A turn records the harness of the box it was dispatched on, so a switch while it runs does not change which harness served it.
+func TestTurnKeepsTheHarnessItWasDispatchedOn(t *testing.T) {
 	r := newHandoffRig(t)
+	if _, err := r.s.writer.Exec("UPDATE boxes SET harness='pig' WHERE id='b'"); err != nil {
+		t.Fatal(err)
+	}
 	r.owner("work")
 	r.start("t1")
 	if err := r.switchTo("q", &HarnessSwitch{}); err != nil {
 		t.Fatal(err)
 	}
-	if got, err := r.s.TurnProfile(r.ctx, "s", "t1"); err != nil || got != "p" {
-		t.Fatalf("turn profile %q: %v", got, err)
+	if got, err := r.s.TurnHarness(r.ctx, "s", "t1"); err != nil || got != "pig" {
+		t.Fatalf("turn harness %q: %v", got, err)
 	}
 }
 
@@ -155,7 +164,7 @@ func TestDispatchHonoursTheFenceInItsOwnWrite(t *testing.T) {
 	if fence, err := r.s.HandoffFence(r.ctx, "s"); err != nil || fence == 0 {
 		t.Fatalf("fence %d: %v", fence, err)
 	}
-	if err := r.s.NoteBoxHello(r.ctx, "b", true); err != nil {
+	if err := r.s.NoteBoxHello(r.ctx, "b", r.handoff(), "agy", true); err != nil {
 		t.Fatal(err)
 	}
 	if fence, err := r.s.HandoffFence(r.ctx, "s"); err != nil || fence != 0 {
@@ -163,5 +172,66 @@ func TestDispatchHonoursTheFenceInItsOwnWrite(t *testing.T) {
 	}
 	if got := r.start("t1"); got != "t1" {
 		t.Fatalf("the restarted box got turn %q", got)
+	}
+}
+
+// A switch decided from a profile the session no longer has is refused in the write, so two overlapping requests cannot apply a
+// stale decision after the other has switched.
+func TestHarnessSwitchChecksTheProfileItDecidedFrom(t *testing.T) {
+	r := newHandoffRig(t)
+	event := contract.Event{ID: "stale", Room: "r", Time: r.now, From: contract.Principal{Kind: contract.PrincipalOwner}, Body: contract.SessionProfileChanged{Session: "s", Profile: "g"}}
+	if err := r.s.SetSessionProfile(r.ctx, "s", "old", "g", event, &HarnessSwitch{}); err != ErrProfileChanged {
+		t.Fatalf("err = %v", err)
+	}
+	if r.handoff() != 0 {
+		t.Fatal("a stale decision left a handoff")
+	}
+}
+
+// The box's ability to hand off is read in the same write as the switch.
+func TestHarnessSwitchChecksTheBoxInItsOwnWrite(t *testing.T) {
+	r := newHandoffRig(t)
+	if err := r.switchTo("g", &HarnessSwitch{RequireHandoff: true}); err != ErrNoHandoff {
+		t.Fatalf("err = %v", err)
+	}
+	if err := r.s.NoteBoxHello(r.ctx, "b", 0, "pig", true); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.switchTo("g", &HarnessSwitch{RequireHandoff: true}); err != nil {
+		t.Fatalf("err = %v", err)
+	}
+}
+
+// A harness switch does not post a waking event while a wake is scheduled (a usage limit's reset): that wake comes at its time.
+// With none scheduled, a failed session wakes to carry its input to the new profile.
+func TestHarnessSwitchLeavesAScheduledWakeAlone(t *testing.T) {
+	wakes := func(r *handoffRig) int {
+		var n int
+		if err := r.s.Read().QueryRowContext(r.ctx, "SELECT count(*) FROM deliveries WHERE to_id='s' AND state='pending' AND wake=1").Scan(&n); err != nil {
+			r.t.Fatal(err)
+		}
+		return n
+	}
+	for _, c := range []struct {
+		name  string
+		out   contract.TurnOutputRequest
+		wakes int
+	}{
+		{"scheduled", contract.TurnOutputRequest{Outcome: contract.TurnFailed, Cause: contract.CauseModelFailed, ModelRetryAfterSeconds: 3600, OneWake: true}, 0},
+		{"none scheduled", contract.TurnOutputRequest{Outcome: contract.TurnFailed, Cause: contract.CauseHarnessFailed, Error: "boom"}, 1},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			r := newHandoffRig(t)
+			r.owner("work")
+			r.start("t1")
+			r.end("t1", c.out)
+			before := wakes(r)
+			if err := r.switchTo("q", &HarnessSwitch{}); err != nil {
+				t.Fatal(err)
+			}
+			if got := wakes(r) - before; got != c.wakes {
+				t.Fatalf("the switch added %d waking inputs, want %d", got, c.wakes)
+			}
+		})
 	}
 }

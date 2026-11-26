@@ -14,13 +14,14 @@ const agentsTable = `CREATE TABLE agents (id TEXT PRIMARY KEY, session TEXT NOT 
 // steps below the floor go when the floor moves. Later steps are ordinary.
 var steps = map[int][]string{
 	// agy: the events seq from which a session's fresh conversation needs a handoff (it changed harness), what its box said at its last
-	// hello (the events seq it started from, and whether it can hand a conversation over), and the profile each turn was dispatched
-	// under, which names the harness that serves it.
+	// hello (the handoff generation its container was made for, the harness it was told, and whether it can hand a conversation over),
+	// and the harness of the box each turn was dispatched on, which is the one that serves it.
 	130: {
 		`ALTER TABLE sessions ADD COLUMN handoff INTEGER NOT NULL DEFAULT 0`,
-		`ALTER TABLE boxes ADD COLUMN hello_seq INTEGER NOT NULL DEFAULT 0`,
+		`ALTER TABLE boxes ADD COLUMN launch_gen INTEGER NOT NULL DEFAULT 0`,
+		`ALTER TABLE boxes ADD COLUMN harness TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE boxes ADD COLUMN can_handoff INTEGER NOT NULL DEFAULT 0`,
-		`ALTER TABLE turns ADD COLUMN profile TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE turns ADD COLUMN harness TEXT NOT NULL DEFAULT ''`,
 	},
 	// Session conversation clearing: pending clear timestamp on sessions, and the turn that consumed it.
 	129: {

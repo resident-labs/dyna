@@ -1085,9 +1085,10 @@ func (s *Store) dispatch(ctx context.Context, session contract.SessionID, turn c
 	var inputs []FeedInput
 	var profile contract.ProfileName
 	var paused bool
+	var harness string
 	err = s.Write(ctx, func(tx *sql.Tx) error {
 		var boxID contract.BoxID
-		err := tx.QueryRowContext(ctx, `SELECT b.id,s.profile,r.paused_at IS NOT NULL FROM sessions s JOIN boxes b ON b.session=s.id JOIN rooms r ON r.id=s.room WHERE s.id=? AND s.state='open' AND s.closed_at IS NULL AND b.want='run' AND b.state='ready' AND NOT (s.handoff>0 AND b.hello_seq<=s.handoff)`, session).Scan(&boxID, &profile, &paused)
+		err := tx.QueryRowContext(ctx, `SELECT b.id,s.profile,r.paused_at IS NOT NULL,b.harness FROM sessions s JOIN boxes b ON b.session=s.id JOIN rooms r ON r.id=s.room WHERE s.id=? AND s.state='open' AND s.closed_at IS NULL AND b.want='run' AND b.state='ready' AND NOT (s.handoff>0 AND b.launch_gen!=s.handoff)`, session).Scan(&boxID, &profile, &paused, &harness)
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil
 		}
@@ -1234,7 +1235,7 @@ func (s *Store) dispatch(ctx context.Context, session contract.SessionID, turn c
 			if err != nil {
 				return err
 			}
-			_, err = tx.ExecContext(ctx, "INSERT INTO turns(id,session,started_at,started_seq,outcome,model,input_tokens,output_tokens,cache_read_tokens,cache_write_tokens,cleared_at,profile) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)", active, session, started.Time.UnixMilli(), seq, "", "", 0, 0, 0, 0, clearedAt, profile)
+			_, err = tx.ExecContext(ctx, "INSERT INTO turns(id,session,started_at,started_seq,outcome,model,input_tokens,output_tokens,cache_read_tokens,cache_write_tokens,cleared_at,harness) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)", active, session, started.Time.UnixMilli(), seq, "", "", 0, 0, 0, 0, clearedAt, harness)
 			if err != nil {
 				return err
 			}

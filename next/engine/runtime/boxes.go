@@ -616,6 +616,7 @@ func (b *Boxes) container(spec lifecycle.BoxSpec, image string, shared box.Mount
 	}
 	if spec.Handoff > 0 {
 		c.Labels = append(c.Labels, box.Label{Key: box.HandoffLabel, Value: strconv.FormatInt(spec.Handoff, 10)})
+		c.Env = append(c.Env, box.EnvVar{Name: "DYNA_LAUNCH_GEN", Value: strconv.FormatInt(spec.Handoff, 10)})
 	}
 	if spec.Agy {
 		c.Mounts = append(c.Mounts, b.agyMounts()...)

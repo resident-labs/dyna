@@ -769,6 +769,9 @@ type BoxHelloRequest struct {
 	// CanHandoff says the box starts a new native conversation from a handoff of the session's earlier files when the hello carries
 	// one. Until a box says so, the engine neither switches its session between pig and agy nor moves it between agy accounts.
 	CanHandoff bool `json:"canHandoff,omitempty"`
+	// LaunchGen is the handoff generation its container was made for, from the container's environment, 0 for a container made with
+	// none. A box made before a session's pending handoff reports an older one, and takes no turn.
+	LaunchGen int64 `json:"launchGen,omitempty"`
 }
 type ModelProvider string
 

@@ -58,9 +58,6 @@ func (s *Service) BoxHello(ctx context.Context, caller contract.Principal, req c
 	if err := s.store.ForgetShellJobs(ctx, session.ID); err != nil {
 		return contract.BoxHelloResponse{}, failure(err)
 	}
-	if err := s.store.NoteBoxHello(ctx, session.Box, req.CanHandoff); err != nil {
-		return contract.BoxHelloResponse{}, failure(err)
-	}
 	model, _, err := s.profiles.Model(session.Profile)
 	if err != nil {
 		return contract.BoxHelloResponse{}, failure(err)
@@ -164,6 +161,9 @@ func (s *Service) BoxHello(ctx context.Context, caller contract.Principal, req c
 	if harness == contract.HarnessAgy {
 		agy = &agyMount
 	}
+	if err := s.store.NoteBoxHello(ctx, session.Box, req.LaunchGen, harness, req.CanHandoff); err != nil {
+		return contract.BoxHelloResponse{}, failure(err)
+	}
 	return contract.BoxHelloResponse{Harness: harness, Agy: agy, Discord: discordProblem == nil, Room: session.Room, GitName: gitName, GitEmail: gitEmail, GitSigningKey: signingKey, Session: session.ID, Box: session.Box, Model: model, ModelInstructions: prompt.ModelInstructions(model), TextOnlyModels: s.profiles.TextOnlyModels(), CompactTokens: s.profiles.CompactionTokens(session.Profile), Repos: repos, Transcripts: files, Instructions: prompt.Session(vars), WorkerInstructions: prompt.Core, Root: vars.Role == prompt.Root, Advisor: vars.Advisor, Workflow: workflow, GitHub: githubAvailable, Fresh: session.ClearedAt > 0, Handoff: session.Handoff, HandoffGen: handoffGen(session)}, nil
 }
 
@@ -209,16 +209,16 @@ func (s *Service) TurnOutput(ctx context.Context, caller contract.Principal, req
 		req.Outcome, req.Cause, req.Error = contract.TurnStopped, contract.CauseClosed, ""
 	}
 	req.Usage.Model = req.Model
-	// The harness that served the turn is the one its profile named when it was dispatched, not the session's now: the session may
-	// have changed harness while it ran.
-	servedProfile, err := s.store.TurnProfile(ctx, session.ID, req.Turn)
+	// The harness that served the turn is that of the box it was dispatched on, not the session's now: the session may have changed
+	// harness, or its profile been edited, while it ran.
+	served, err := s.store.TurnHarness(ctx, session.ID, req.Turn)
 	if err != nil {
 		return contract.TurnOutputResponse{}, failure(err)
 	}
-	if servedProfile == "" {
-		servedProfile = session.Profile
+	if served == "" {
+		served = s.profiles.Harness(session.Profile)
 	}
-	req.OneWake = s.profiles.Harness(servedProfile) == contract.HarnessAgy
+	req.OneWake = served == contract.HarnessAgy
 	run, err := s.store.SessionWorkflow(ctx, session.ID)
 	if err != nil && !errors.Is(err, store.ErrNotFound) {
 		return contract.TurnOutputResponse{}, failure(err)

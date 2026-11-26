@@ -12,7 +12,7 @@ import (
 func readySession(t *testing.T, s *Service, sid contract.SessionID) {
 	t.Helper()
 	err := s.store.Write(t.Context(), func(tx *sql.Tx) error {
-		_, err := tx.Exec("UPDATE boxes SET state='ready',can_handoff=1 WHERE session=?", sid)
+		_, err := tx.Exec("UPDATE boxes SET state='ready',can_handoff=1,harness=(CASE WHEN (SELECT profile FROM sessions WHERE id=boxes.session) IN ('gem','gem2') THEN 'agy' ELSE 'pig' END) WHERE session=?", sid)
 		return err
 	})
 	if err != nil {
@@ -41,7 +41,7 @@ func TestHarnessSwitchPigToAgyAndBack(t *testing.T) {
 	if err != nil || session.Profile != "gem" || !session.Handoff {
 		t.Fatalf("session after the switch: %+v %v", session, err)
 	}
-	hello, problem := s.BoxHello(ctx, boxCaller(sid), contract.BoxHelloRequest{CanHandoff: true})
+	hello, problem := s.BoxHello(ctx, boxCaller(sid), contract.BoxHelloRequest{CanHandoff: true, LaunchGen: launchGen(t, s, sid)})
 	if problem != nil || !hello.Handoff || hello.Harness != contract.HarnessAgy {
 		t.Fatalf("hello: %+v %v", hello, problem)
 	}
@@ -126,7 +126,7 @@ func TestSwitchHoldsDispatchUntilTheBoxRestarts(t *testing.T) {
 	if ok, err := s.store.CanDispatch(ctx, sid); err != nil || ok {
 		t.Fatalf("the old box may take a turn: %v %v", ok, err)
 	}
-	if _, p := s.BoxHello(ctx, boxCaller(sid), contract.BoxHelloRequest{CanHandoff: true}); p != nil {
+	if _, p := s.BoxHello(ctx, boxCaller(sid), contract.BoxHelloRequest{CanHandoff: true, LaunchGen: launchGen(t, s, sid)}); p != nil {
 		t.Fatal(p)
 	}
 	if ok, err := s.store.CanDispatch(ctx, sid); err != nil || !ok {
@@ -158,7 +158,7 @@ func TestHelloNamesEachHandoff(t *testing.T) {
 		t.Fatal(e)
 	}
 	hello := func() contract.BoxHelloResponse {
-		res, p := s.BoxHello(ctx, boxCaller(sid), contract.BoxHelloRequest{CanHandoff: true})
+		res, p := s.BoxHello(ctx, boxCaller(sid), contract.BoxHelloRequest{CanHandoff: true, LaunchGen: launchGen(t, s, sid)})
 		if p != nil {
 			t.Fatal(p)
 		}
@@ -222,10 +222,69 @@ func TestStoredFenceMakesTheBoxStale(t *testing.T) {
 	if !s.Stale(sid) {
 		t.Fatal("the box that has not started since the switch is not stale")
 	}
-	if _, p := s.BoxHello(ctx, boxCaller(sid), contract.BoxHelloRequest{CanHandoff: true}); p != nil {
+	if _, p := s.BoxHello(ctx, boxCaller(sid), contract.BoxHelloRequest{CanHandoff: true, LaunchGen: launchGen(t, s, sid)}); p != nil {
 		t.Fatal(p)
 	}
 	if s.Stale(sid) {
 		t.Fatal("stale after the box started")
+	}
+}
+
+// launchGen is the handoff generation a container made now for the session would carry, which the box reports in its hello.
+func launchGen(t *testing.T, s *Service, sid contract.SessionID) int64 {
+	t.Helper()
+	session, err := s.store.Session(t.Context(), sid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return session.HandoffGen
+}
+
+// A box made before the switch says hello late, with the old launch generation: the fence holds, so it takes no turn.
+func TestLateHelloFromTheOldContainerKeepsTheFence(t *testing.T) {
+	s, room, _, owner := agySetup(t)
+	ctx := t.Context()
+	sid := startOn(t, s, room, "late", "other", "hermeslab")
+	readySession(t, s, sid)
+	if _, e := s.SessionSetProfile(ctx, owner, contract.SessionSetProfileRequest{Session: sid, Profile: "gem"}); e != nil {
+		t.Fatal(e)
+	}
+	if _, p := s.BoxHello(ctx, boxCaller(sid), contract.BoxHelloRequest{CanHandoff: true}); p != nil {
+		t.Fatal(p)
+	}
+	if ok, err := s.store.CanDispatch(ctx, sid); err != nil || ok {
+		t.Fatalf("the old container may take a turn: %v %v", ok, err)
+	}
+	if !s.Stale(sid) {
+		t.Fatal("the old container is not stale")
+	}
+}
+
+// The harness of a turn is the one of the box it was dispatched on, so removing the profile it ran on while it ends, after the
+// session moved to Pi, does not send its quota reset into Pi's ladder.
+func TestRunningAgyTurnKeepsItsHarnessWhenItsProfileIsRemoved(t *testing.T) {
+	s, room, _, owner := agySetup(t)
+	ctx := t.Context()
+	sid := startOn(t, s, room, "gone", "gem", "")
+	readySession(t, s, sid)
+	if err := s.store.Write(ctx, func(tx *sql.Tx) error {
+		_, err := tx.Exec("UPDATE boxes SET harness='agy' WHERE session=?", sid)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	openTurn(t, s, ctx, room, sid, "t1")
+	if _, e := s.SessionSetProfile(ctx, owner, contract.SessionSetProfileRequest{Session: sid, Profile: "other"}); e != nil {
+		t.Fatal(e)
+	}
+	if _, e := s.ProfileRemove(ctx, owner, contract.ProfileRemoveRequest{Name: "gem"}); e != nil {
+		t.Fatal(e)
+	}
+	if _, p := s.TurnOutput(ctx, boxCaller(sid), contract.TurnOutputRequest{Turn: "t1", Outcome: contract.TurnFailed, Cause: contract.CauseModelFailed, ModelRetryAfterSeconds: 7}); p != nil {
+		t.Fatal(p)
+	}
+	var retries int
+	if err := s.store.Read().QueryRowContext(ctx, "SELECT model_retries FROM sessions WHERE id=?", sid).Scan(&retries); err != nil || retries != 0 {
+		t.Fatalf("retries %d: %v", retries, err)
 	}
 }

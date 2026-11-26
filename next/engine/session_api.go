@@ -781,15 +781,21 @@ func (s *Service) SessionSetProfile(ctx context.Context, caller contract.Princip
 	problem = s.withProfile(req.Profile, func() *contract.Error {
 		var harness *store.HarnessSwitch
 		if switching {
-			harness = &store.HarnessSwitch{}
+			harness = &store.HarnessSwitch{RequireHandoff: true}
 			harness.Profiles, harness.Limit = s.agyAccount(req.Profile)
 		}
-		if err := s.store.SetSessionProfile(ctx, target.ID, req.Profile, event, harness); err != nil {
+		if err := s.store.SetSessionProfile(ctx, target.ID, target.Profile, req.Profile, event, harness); err != nil {
 			if errors.Is(err, store.ErrProfileFull) {
 				return &contract.Error{Code: contract.ErrConflict, Message: fmt.Sprintf("the agy account allows %d open sessions at once across every agy profile, and they are open; close one, or ask the owner to raise max-concurrent on the agy profiles", harness.Limit)}
 			}
 			if harness != nil && errors.Is(err, store.ErrSessionClosing) {
 				return &contract.Error{Code: contract.ErrConflict, Message: "session is closing"}
+			}
+			if errors.Is(err, store.ErrProfileChanged) {
+				return &contract.Error{Code: contract.ErrConflict, Message: fmt.Sprintf("session %s changed profile while this request was being made; read its profile again and decide from that", target.Name)}
+			}
+			if errors.Is(err, store.ErrNoHandoff) {
+				return &contract.Error{Code: contract.ErrConflict, Message: fmt.Sprintf("session %s runs in a box that cannot hand its conversation to another harness yet; try again after its box has restarted, or start a new session on profile %s", target.Name, req.Profile)}
 			}
 			if errors.Is(err, store.ErrTreeForbidden) {
 				return &contract.Error{Code: contract.ErrForbidden, Message: fmt.Sprintf("session %s is not under you; you manage only sessions below you, so ask your parent", target.Name)}
