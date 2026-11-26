@@ -61,6 +61,7 @@ type Store struct {
 	checkDone     chan struct{}
 	mu            sync.Mutex
 	admission     sync.Mutex // capacity reads through reservation writes: boxes, services and runner claims
+	prPollStatus  sync.Map   // repository poll failures, for the live room context
 	unreadable    sync.Map   // rooms whose stored githubWrites did not decode, which room.list has logged
 	dispatchMu    sync.RWMutex
 	draining      bool

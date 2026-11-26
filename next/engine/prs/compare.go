@@ -141,6 +141,16 @@ func ComparePR(row store.TrackedPR, items []contract.GitHubItem, listed *FeedIte
 	if listed != nil {
 		next.URL, next.Title, next.Author, next.Draft = listed.URL, listed.Title, listed.Author, listed.Draft
 		items = append(slices.Clone(items), refresh(&meta, listed, contract.GitHubItem{Repo: row.Repo, Author: listed.Author})...)
+	} else {
+		// A capped walk can still return readiness actions without the PR's snapshot.
+		for _, item := range items {
+			switch item.Action {
+			case contract.GitHubConvertedToDraft:
+				next.Draft = true
+			case contract.GitHubReadyForReview:
+				next.Draft = false
+			}
+		}
 	}
 	var kinds []contract.PrChangeKind
 	if next.Draft != row.Draft {

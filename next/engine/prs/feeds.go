@@ -377,13 +377,14 @@ func (c *Client) main(ctx context.Context, repo contract.RepoName, row store.Git
 
 // Probe is what one repository's feeds showed in one pass.
 type Probe struct {
-	Items  []contract.GitHubItem // oldest first
-	Seen   map[int]*FeedItem     // each item the issues feed listed anew, as it last stood
-	Feeds  []store.GitHubFeed    // the rows that moved
-	Branch string                // the default branch's name, as far as the feed knows it
-	Main   string                // the default branch's head, when this pass read one
-	Moved  bool                  // the default branch moved
-	Resync bool                  // a feed lost its place or has none, so anything may have happened unseen
+	Items   []contract.GitHubItem // oldest first
+	Seen    map[int]*FeedItem     // each item the issues feed listed anew, as it last stood
+	Feeds   []store.GitHubFeed    // the rows that moved
+	Branch  string                // the default branch's name, as far as the feed knows it
+	Main    string                // the default branch's head, when this pass read one
+	Moved   bool                  // the default branch moved
+	GapFrom time.Time             // oldest lower bound of a capped walk, including overlap
+	Resync  bool                  // a feed lost its place or has none, so anything may have happened unseen
 }
 
 // Probe makes one conditional GET of each feed, and pages back only where one has news.
@@ -399,6 +400,12 @@ func (c *Client) Probe(ctx context.Context, repo contract.RepoName, rows map[str
 			return probe, err
 		}
 		probe.Resync = probe.Resync || read.gap || rows[feed.name].Repo == ""
+		if read.gap {
+			from := rows[feed.name].Cursor.At.Add(-feedOverlap)
+			if probe.GapFrom.IsZero() || from.Before(probe.GapFrom) {
+				probe.GapFrom = from
+			}
+		}
 		if read.moved {
 			probe.Feeds = append(probe.Feeds, read.row)
 		}

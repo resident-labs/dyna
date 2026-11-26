@@ -209,7 +209,11 @@ func (s *Service) ContextSnapshot(ctx context.Context, caller contract.Principal
 	var prEvents []string
 	for _, repo := range repos {
 		if repo.PREvents {
-			prEvents = append(prEvents, string(repo.Repo))
+			shown := string(repo.Repo)
+			if status := s.store.PRPollStatus(repo.Repo); status != "" {
+				shown += " (" + status + ")"
+			}
+			prEvents = append(prEvents, shown)
 		}
 	}
 	if len(prEvents) > 0 {

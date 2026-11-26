@@ -172,6 +172,10 @@ func TestContextShowsRoomWidePREventsOnlyWhenEnabled(t *testing.T) {
 	if !strings.Contains(snapshot(), "Room-wide PR events: owner/review") {
 		t.Fatal("enabled setting absent")
 	}
+	r.s.store.SetPRPollStatus("owner/review", "stalled: GitHub HTTP 504")
+	if !strings.Contains(snapshot(), "Room-wide PR events: owner/review (stalled: GitHub HTTP 504)") {
+		t.Fatal("stalled status absent")
+	}
 	if err := r.s.store.AddRoomRepo(t.Context(), r.room, "owner/review", false, func() *bool { v := false; return &v }()); err != nil {
 		t.Fatal(err)
 	}

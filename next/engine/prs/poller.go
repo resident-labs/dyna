@@ -3,8 +3,10 @@ package prs
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/resident-labs/dyna/contract"
@@ -27,8 +29,7 @@ type Poller struct {
 	Accounts *Accounts
 	Now      func() time.Time
 
-	last   map[contract.RepoName]time.Time // when each repository was last read
-	failed map[contract.RepoName]string    // the last error logged for each, so a repository that stays broken logs once
+	last map[contract.RepoName]time.Time // when each repository was last read
 }
 
 // Run runs a pass on each tick until ctx ends.
@@ -48,7 +49,7 @@ func (p *Poller) Run(ctx context.Context, ticks <-chan time.Time) {
 // due lists the repositories to read now. That is every one of them, until the quota runs low.
 func (p *Poller) due(ctx context.Context, repos map[contract.RepoName]bool) []contract.RepoName {
 	if p.last == nil {
-		p.last, p.failed = map[contract.RepoName]time.Time{}, map[contract.RepoName]string{}
+		p.last = map[contract.RepoName]time.Time{}
 	}
 	now := p.Now()
 	low := false
@@ -85,10 +86,27 @@ func reopens(items []contract.GitHubItem) bool {
 	return slices.ContainsFunc(items, func(item contract.GitHubItem) bool { return item.Action == contract.GitHubReopened })
 }
 
-// repository reads one repository's feeds and works out what they mean. A failure anywhere keeps its cursors unmoved, so the
-// next pass reads the same news again.
-func (p *Poller) repository(ctx context.Context, repo contract.RepoName, pulls []store.TrackedPR, issues []store.TrackedIssue, heads map[contract.RepoName]store.RepoState, feeds map[string]store.GitHubFeed) (store.GitHubPass, error) {
-	var pass store.GitHubPass
+// repository keeps feed writes and events together. After a gap, failed enrichment
+// cannot hold the cursor behind the feed's available history.
+func (p *Poller) repository(ctx context.Context, repo contract.RepoName, pulls []store.TrackedPR, issues []store.TrackedIssue, heads map[contract.RepoName]store.RepoState, feeds map[string]store.GitHubFeed) (pass store.GitHubPass, problem error) {
+	var degraded error
+	defer func() {
+		if ctx.Err() != nil {
+			return
+		}
+		status := ""
+		switch {
+		case problem != nil && !errors.Is(problem, ErrPaused):
+			status = "stalled: " + problem.Error()
+		case degraded != nil:
+			status = "degraded: " + strings.ReplaceAll(degraded.Error(), "\n", "; ")
+		case problem != nil:
+			return // A quota pause is expected; it does not clear a previous failure.
+		}
+		if p.Store.SetPRPollStatus(repo, status) {
+			log.Printf("github %s PR events: %s", repo, status)
+		}
+	}()
 	client := p.GitHub
 	if p.Accounts != nil {
 		var err error
@@ -119,7 +137,10 @@ func (p *Poller) repository(ctx context.Context, repo contract.RepoName, pulls [
 	}
 	observed, err := client.Read(ctx, repo, numbers)
 	if err != nil {
-		return pass, err
+		if probe.GapFrom.IsZero() || ctx.Err() != nil {
+			return pass, err
+		}
+		degraded = fmt.Errorf("tracked PR details: %w", err)
 	}
 	for _, row := range pulls {
 		if !watched(row.State == contract.PrOpen, row.Number) {
@@ -139,7 +160,10 @@ func (p *Poller) repository(ctx context.Context, repo contract.RepoName, pulls [
 		if probe.Resync {
 			_, item, err := client.Issue(ctx, repo, row.Number)
 			if err != nil && !errors.Is(err, ErrNotFound) {
-				return pass, err
+				if probe.GapFrom.IsZero() || ctx.Err() != nil {
+					return pass, err
+				}
+				degraded = fmt.Errorf("tracked issue recovery: %w", err)
 			}
 			if err == nil {
 				listed, state = &item, contract.IssueState(item.State)
@@ -174,34 +198,30 @@ func (p *Poller) repository(ctx context.Context, repo contract.RepoName, pulls [
 		}
 		reads, err := client.CommitsCI(ctx, repo, shas)
 		if err != nil {
-			return pass, err
+			if probe.GapFrom.IsZero() || ctx.Err() != nil {
+				return pass, err
+			}
+			degraded = fmt.Errorf("default branch checks: %w", err)
 		}
 		for _, head := range unsettled {
-			ci := reads[head.Sha]
+			ci, ok := reads[head.Sha]
+			if !ok {
+				continue
+			}
 			// A head with no checks may be one GitHub has not started them for, so none settles it only after the grace from its own first read.
 			if ci.Result == contract.PrCISuccess || ci.Result == contract.PrCIFailure || ci.Result == contract.PrCICancelled || ci.Result == contract.PrCINone && !now.Before(head.SeenAt.Add(ciGrace)) {
 				pass.MainCIs = append(pass.MainCIs, store.MainCI{Repo: repo, Branch: probe.Branch, Head: head.Sha, Result: ci.Result, Runs: ci.Runs, RunsTruncated: ci.Truncated})
 			}
 		}
 	}
-	pass.RoomPRs, err = p.roomPRs(ctx, client, repo, probe, now, observed)
+	var roomProblem error
+	pass.RoomPRs, roomProblem, err = p.roomPRs(ctx, client, repo, &probe, feeds[feedRoomRecovery], now, observed)
+	degraded = errors.Join(degraded, roomProblem)
 	if err != nil {
 		return pass, err
 	}
 	pass.Feeds = probe.Feeds
 	return pass, nil
-}
-
-// report logs a repository's failure when it changes.
-func (p *Poller) report(repo contract.RepoName, err error) {
-	text := ""
-	if err != nil && !errors.Is(err, ErrPaused) {
-		text = err.Error()
-	}
-	if text != "" && text != p.failed[repo] {
-		log.Printf("github %s: %v", repo, err)
-	}
-	p.failed[repo] = text
 }
 
 // Pass reads every due repository, then writes all they found at once, so one pass gives a session one wake.
@@ -251,7 +271,6 @@ func (p *Poller) Pass(ctx context.Context) error {
 	var pass store.GitHubPass
 	for _, repo := range due {
 		found, err := p.repository(ctx, repo, pullsIn[repo], issuesIn[repo], heads, feeds[repo])
-		p.report(repo, err)
 		if err != nil {
 			continue
 		}
