@@ -277,7 +277,7 @@ func TestAPromptAgyRefusesAsInvalidKeepsTheHandoffPending(t *testing.T) {
 		t.Fatal("the refusal was not reported")
 	}
 	meta, _ := readMeta(c.SessionDir)
-	if meta.Handoff == "" || meta.Sending || handoffDelivered(h.SessionFile(), meta.Gen) {
+	if meta.Status != handoffPending || meta.Handoff == "" || handoffDelivered(h.SessionFile(), meta.Gen) {
 		t.Fatalf("meta = %+v: the refused prompt consumed the handoff", meta)
 	}
 	start(t, h, "t2", input(2, "say hello"))
@@ -292,7 +292,7 @@ func TestAHandoffWhoseDeliveryIsUncertainIsGivenToAFreshSession(t *testing.T) {
 	_ = res
 	h.Close()
 	meta, _ := readMeta(c.SessionDir)
-	if meta.Handoff == "" || !meta.Sending {
+	if meta.Handoff == "" || meta.Status != handoffSending {
 		t.Fatalf("meta = %+v: an unanswered prompt is not marked as being sent", meta)
 	}
 	// The next run cannot know whether agy took it: a fresh native session gets it again (T3 ContextHandoffDeliveryUncertainError).
@@ -332,7 +332,7 @@ func TestASteerCannotConsumeTheHandoffAnotherPromptCarries(t *testing.T) {
 	tn := &turn{id: "t", open: 2, wake: make(chan struct{}, 1), queued: make(chan struct{})}
 	var warnings atomic.Int32
 	paused, release := make(chan struct{}), make(chan struct{})
-	h := &Harness{p: p, turn: tn, sessionID: "native", mirror: filepath.Join(dir, "agy-1.jsonl"), handoff: "PENDING_HISTORY", cfg: Config{GeminiDir: dir, SessionDir: dir, Notice: func(string) {
+	h := &Harness{p: p, turn: tn, sessionID: "native", mirror: filepath.Join(dir, "agy-1.jsonl"), handoff: "PENDING_HISTORY", hstatus: handoffPending, cfg: Config{GeminiDir: dir, SessionDir: dir, Notice: func(string) {
 		if warnings.Add(1) == 1 {
 			close(paused)
 			<-release
@@ -362,5 +362,101 @@ func TestASteerCannotConsumeTheHandoffAnotherPromptCarries(t *testing.T) {
 	}
 	if n := strings.Count(sent.String(), "PENDING_HISTORY"); n != 1 {
 		t.Fatalf("the history was sent %d times", n)
+	}
+}
+
+func TestAnExplicitNewGenerationWinsOverAnUncertainOldOne(t *testing.T) {
+	h, r, c := open(t, nil, func(c *Config) { c.Handoff, c.HandoffGen = "OLD HISTORY", "1" })
+	h.Start(context.Background(), "t1", []contract.TurnInput{input(1, "crash")}, nil)
+	h.Close()
+	c.Handoff, c.HandoffGen = "NEW HISTORY", "2"
+	h2, err := Open(context.Background(), c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer h2.Close()
+	start(t, h2, "t2", input(2, "say hello"))
+	got := lastPrompt(t, r)
+	if !strings.Contains(got, "NEW HISTORY\n\nUser message:\nsay hello") || strings.Contains(got, "OLD HISTORY") {
+		t.Fatalf("prompt = %s", got)
+	}
+}
+
+func TestAClearedGenerationIsNeverSuppliedAgain(t *testing.T) {
+	h, r, c := open(t, nil, func(c *Config) { c.Handoff, c.HandoffGen = "CLEARED HISTORY", "7" })
+	if err := h.NewConversation(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	h.Close()
+	// The same generation replayed, and agy cannot resume the session: nothing brings the cleared history back.
+	t.Setenv("FAKE_AGY_MISSING", "fake-session-1")
+	h2, err := Open(context.Background(), c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer h2.Close()
+	start(t, h2, "t1", input(1, "say hello"))
+	if strings.Contains(lastPrompt(t, r), "CLEARED HISTORY") {
+		t.Fatalf("prompt = %s", lastPrompt(t, r))
+	}
+}
+
+func TestAnExplicitGenerationWithNoHistoryStillStandsForItsSession(t *testing.T) {
+	h, r, c := open(t, nil, func(c *Config) { c.Handoff, c.HandoffGen = "", "9" })
+	start(t, h, "t1", input(1, "say hello"))
+	h.Close()
+	h2, err := Open(context.Background(), c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer h2.Close()
+	if n := len(r.calls(t, "session/new")); n != 1 {
+		t.Fatalf("the same empty generation opened session %d", n)
+	}
+}
+
+func TestAHandoffMarkThatCannotBeSavedStopsTheSend(t *testing.T) {
+	h, r, c := open(t, nil, func(c *Config) { c.Handoff = "EARLIER CONTEXT" })
+	// The session file is written through a temporary file; a directory in its place makes every save fail.
+	if err := os.Mkdir(filepath.Join(c.SessionDir, "agy-session.json.tmp"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.Start(context.Background(), "t1", []contract.TurnInput{input(1, "say hello")}, nil); err == nil {
+		t.Fatal("the prompt was sent without its handoff mark being saved")
+	}
+	if n := len(r.calls(t, "session/prompt")); n != 0 {
+		t.Fatalf("%d prompts reached agy", n)
+	}
+	// The handoff is pending again, for the next prompt.
+	os.Remove(filepath.Join(c.SessionDir, "agy-session.json.tmp"))
+	start(t, h, "t2", input(2, "say hello"))
+	if !strings.Contains(lastPrompt(t, r), "EARLIER CONTEXT\n\nUser message:\nsay hello") {
+		t.Fatalf("prompt = %s", lastPrompt(t, r))
+	}
+}
+
+func TestAHandoffAfterAClearReadsOnlyWhatCameAfterIt(t *testing.T) {
+	h, r, c := open(t, nil, nil)
+	start(t, h, "t1", input(1, "say before the clear"))
+	if err := h.NewConversation(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	start(t, h, "t2", input(2, "say after the clear"))
+	h.Close()
+	t.Setenv("FAKE_AGY_MISSING", "fake-session-2")
+	c.New = false
+	h2, err := Open(context.Background(), c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer h2.Close()
+	start(t, h2, "t3", input(3, "say more"))
+	got := lastPrompt(t, r)
+	if !strings.Contains(got, "say after the clear") || strings.Contains(got, "say before the clear") {
+		t.Fatalf("prompt = %s", got)
+	}
+	// The earlier files are still there for the transcript.
+	if _, err := os.Stat(filepath.Join(c.SessionDir, "agy-1.jsonl")); err != nil {
+		t.Fatal(err)
 	}
 }

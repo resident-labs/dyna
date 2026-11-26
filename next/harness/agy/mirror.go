@@ -36,8 +36,11 @@ type sessionMeta struct {
 	Handoff string `json:"handoff,omitempty"`
 	// Gen is the generation of the handoff the session was opened for, pending or delivered.
 	Gen string `json:"handoffGen,omitempty"`
-	// Sending is set while the handoff is on its way to agy. A restart that finds it set cannot tell whether agy took it.
-	Sending bool `json:"handoffSending,omitempty"`
+	// Status is the handoff's state (handoffstate.go). A restart that finds it sending cannot tell whether agy took the history.
+	Status string `json:"handoffStatus,omitempty"`
+	// ClearFrom is the mirror file a /clear began: a handoff built from the mirrors reads this file and the ones after it, never the
+	// conversation before. The files stay for the transcript.
+	ClearFrom string `json:"clearFrom,omitempty"`
 }
 
 func readMeta(dir string) (sessionMeta, error) {
@@ -82,6 +85,13 @@ func nextMirror(dir string) (string, error) {
 
 // mirrorFiles is every mirror file in the session directory, oldest first: the conversations this harness has had.
 func (h *Harness) mirrorFiles() []string {
+	h.mu.Lock()
+	from := h.clearFrom
+	h.mu.Unlock()
+	first := 0
+	if m := mirrorName.FindStringSubmatch(from); m != nil {
+		first, _ = strconv.Atoi(m[1])
+	}
 	entries, _ := os.ReadDir(h.cfg.SessionDir)
 	type numbered struct {
 		n    int
@@ -91,6 +101,9 @@ func (h *Harness) mirrorFiles() []string {
 	for _, entry := range entries {
 		if m := mirrorName.FindStringSubmatch(entry.Name()); m != nil {
 			n, _ := strconv.Atoi(m[1])
+			if n < first {
+				continue
+			}
 			found = append(found, numbered{n, filepath.Join(h.cfg.SessionDir, entry.Name())})
 		}
 	}
@@ -233,23 +246,6 @@ func handoffDelivered(path, gen string) bool {
 	}
 }
 
-// handoffSending records that the history is on its way to agy, in the session file, before it is written to agy.
-func (h *Harness) handoffSending() {
-	h.mu.Lock()
-	pending, id, gen := h.handoff, h.sessionID, h.gen
-	h.mu.Unlock()
-	h.writeHandoffMeta(sessionMeta{SessionID: id, Handoff: pending, Gen: gen, Sending: true})
-}
-
-func (h *Harness) writeHandoffMeta(meta sessionMeta) {
-	h.fm.Lock()
-	meta.Mirror = filepath.Base(h.mirror)
-	h.fm.Unlock()
-	if err := writeMeta(h.cfg.SessionDir, meta); err != nil {
-		log.Printf("agy: record the handoff's state: %v", err)
-	}
-}
-
 // handoffResult settles a handoff by what agy answered the prompt that carried it (T3 ContextHandoffDelivery.ts persists the delivery as
 // pending around the injection and restores it when the provider refused the prompt before consuming it):
 //   - agy took it (a result, or an error of its own): the handoff is delivered, and the mirror says so;
@@ -260,30 +256,18 @@ func (h *Harness) writeHandoffMeta(meta sessionMeta) {
 func (h *Harness) handoffResult(err error) {
 	var rpc *acp.Error
 	rejected := errors.As(err, &rpc)
-	h.mu.Lock()
-	pending, id, gen := h.handoff, h.sessionID, h.gen
 	switch {
 	case err != nil && !rejected:
-		h.broken = true // the conversation is replaced; h.handoff still holds the history for it
+		h.mu.Lock()
+		h.broken = true // the conversation is replaced; the history stays sending, and is given to the replacement
 		h.mu.Unlock()
-		return
 	case rejected && rpc.Code >= -32602 && rpc.Code <= -32600:
-		h.sending = false
-		h.mu.Unlock()
-		h.writeHandoffMeta(sessionMeta{SessionID: id, Handoff: pending, Gen: gen})
-		return
+		if err := h.handoffMove(handoffPending); err != nil {
+			log.Printf("agy: restore the handoff: %v", err)
+		}
+	default:
+		if err := h.handoffMove(handoffAccepted); err != nil {
+			log.Printf("agy: record the handoff as delivered: %v", err)
+		}
 	}
-	h.handoff, h.supplied, h.sending = "", "", false
-	h.mu.Unlock()
-	line, _ := json.Marshal(map[string]any{"type": "handoff", "gen": gen})
-	h.fm.Lock()
-	path := h.mirror
-	h.fm.Unlock()
-	if file, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600); err != nil {
-		log.Printf("agy: record the handoff as delivered: %v", err)
-	} else {
-		file.Write(append(line, '\n'))
-		file.Close()
-	}
-	h.writeHandoffMeta(sessionMeta{SessionID: id, Gen: gen})
 }

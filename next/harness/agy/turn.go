@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"path/filepath"
 	"regexp"
 	"slices"
 	"strconv"
@@ -343,11 +342,11 @@ func (h *Harness) promptBlocks(t *turn, inputs []contract.TurnInput, p *process,
 	}
 	for i, input := range inputs {
 		text := input.Text
-		if i == 0 && !slash && !steer && h.handoff != "" && !h.sending {
+		if i == 0 && !slash && !steer && h.handoff != "" && h.hstatus == handoffPending {
 			// T3 puts the history ahead of the user's text in the same message (ContextHandoffDelivery.ts withInlineContext); a slash command is
 			// not given it, as T3 defers the context to the turn after (isSlashCommandMessage).
 			text = handoff.Prompt(h.handoff, text)
-			carried, h.sending = true, true
+			carried, h.hstatus = true, handoffSending
 		}
 		if i == 0 && instructions != "" {
 			text = instructions + "\n\n<user_request>\n" + text + "\n</user_request>"
@@ -433,8 +432,16 @@ func (h *Harness) begin(t *turn, inputs []contract.TurnInput, started func(), st
 	}
 	if carried {
 		// The history is marked as being sent before the wire write, so a crash after it is told from one before it (T3 persists the
-		// delivery as pending around the injection, ContextHandoffDelivery.ts).
-		h.handoffSending()
+		// delivery as pending around the injection, ContextHandoffDelivery.ts). A mark that cannot be saved stops the send.
+		if err := h.writeState(); err != nil {
+			h.mu.Lock()
+			h.hstatus = handoffPending
+			t.open--
+			t.settle()
+			h.mu.Unlock()
+			t.signal()
+			return err
+		}
 	}
 	h.mu.Lock()
 	t.recording++
@@ -1174,21 +1181,22 @@ func (h *Harness) NewConversation(ctx context.Context) error {
 	h.mu.Lock()
 	p := h.p
 	h.mu.Unlock()
-	// /clear drops a handoff that has not been delivered; the generation stays, so the same one replayed does not bring it back.
+	// /clear drops a handoff that was not delivered, whatever the mirror holds; the generation stays, so the same one replayed does not
+	// bring it back.
 	h.mu.Lock()
-	gen := h.gen
-	dropped := h.handoff != ""
-	h.handoff, h.supplied = "", ""
-	id := h.sessionID
+	gen, pending := h.gen, h.handoff != ""
 	h.mu.Unlock()
-	path := h.mirrorPath()
-	if info, err := os.Stat(path); err != nil || info.Size() == 0 {
-		if dropped {
-			return writeMeta(h.cfg.SessionDir, sessionMeta{SessionID: id, Mirror: filepath.Base(path), Gen: gen})
+	if gen != "" || pending {
+		if err := h.handoffMove(handoffCleared); err != nil {
+			return err
 		}
-		return nil
 	}
-	return h.newSession(ctx, p, "", gen)
+	if info, err := os.Stat(h.mirrorPath()); err == nil && info.Size() > 0 {
+		if err := h.newSession(ctx, p, "", gen); err != nil {
+			return err
+		}
+	}
+	return h.markCleared()
 }
 
 // NewConversationForce opens a new session even when the conversation has entries.
@@ -1212,7 +1220,15 @@ func (h *Harness) freshConversation(ctx context.Context, carried, gen string) er
 
 func (h *Harness) newSession(ctx context.Context, p *process, carried, gen string) error {
 	h.mu.Lock()
-	h.handoff, h.gen, h.sending = carried, gen, false
+	h.handoff, h.gen = carried, gen
+	switch {
+	case carried != "":
+		h.hstatus = handoffPending
+	case gen != "" && h.hstatus != handoffCleared:
+		h.hstatus = handoffAccepted
+	case gen == "":
+		h.hstatus = ""
+	}
 	h.mu.Unlock()
 	if err := h.openSession(ctx, p, ""); err != nil {
 		return err

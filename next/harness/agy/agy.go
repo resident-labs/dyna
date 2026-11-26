@@ -6,8 +6,6 @@ package agy
 import (
 	"bufio"
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -87,7 +85,8 @@ type Harness struct {
 	mu          sync.Mutex
 	handoff     string // the handoff the next prompt carries, until agy has accepted a prompt that did
 	gen         string // the generation of the handoff, pending or delivered, that the session was opened for
-	sending     bool   // a prompt carrying the handoff was sent and agy has not answered it yet
+	clearFrom   string // the mirror file the last /clear began (sessionMeta.ClearFrom)
+	hstatus     string // the handoff's status (handoffstate.go)
 	suppliedGen string
 	supplied    string // Config.Handoff, kept for a resume that fails, until a prompt carried a handoff
 	p           *process
@@ -191,35 +190,14 @@ func Open(ctx context.Context, c Config) (*Harness, error) {
 	}
 	h := &Harness{cfg: c, done: make(chan struct{}), modelText: c.ModelInstructions, nonce: time.Now().UnixNano(),
 		promptInactivity: defaultPromptInactivity, holdMax: defaultHoldMax, watchEvery: defaultWatchEvery}
-	// A handoff has a generation, from the engine, and the session file keeps the one its session was opened for. The same generation
-	// again (a restart, a replayed hello) is that session, never a second one; a new generation starts a fresh session with the new
-	// history. The handoff waits in the session file until agy accepted the prompt that carried it, unless the mirror says it was: a
-	// crash between the two, which must never resend it.
-	gen := c.HandoffGen
-	if gen == "" && c.Handoff != "" {
-		sum := sha256.Sum256([]byte(c.Handoff))
-		gen = hex.EncodeToString(sum[:8])
+	plan := planOpen(c, meta, meta.Mirror != "" && handoffDelivered(filepath.Join(c.SessionDir, meta.Mirror), meta.Gen))
+	if plan.notice != "" {
+		h.notice(plan.notice)
 	}
-	mirror := filepath.Join(c.SessionDir, meta.Mirror)
-	// A history that was on its way to agy when the last run ended may or may not have reached it: T3 replaces the native thread
-	// (ContextHandoffDeliveryUncertainError), so a fresh session is opened and given it again.
-	ambiguous := meta.Sending && meta.Handoff != "" && !handoffDelivered(mirror, meta.Gen)
-	sameGen := c.Handoff != "" && meta.Mirror != "" && meta.Gen == gen
-	fresh := (c.New && !sameGen) || ambiguous
-	h.gen = meta.Gen
-	switch {
-	case ambiguous:
-		h.handoff = meta.Handoff
-		h.notice("the earlier conversation may not have reached agy; a new session is opened and it is handed over again")
-	case fresh:
-		h.handoff, h.gen = c.Handoff, gen
-	case meta.Handoff != "" && !handoffDelivered(mirror, meta.Gen):
-		h.handoff = meta.Handoff
-	}
-	// A handoff the caller gave stands in for the mirror when agy cannot resume, unless it is the one already delivered.
-	if c.Handoff != "" && !(sameGen && handoffDelivered(mirror, gen)) {
-		h.supplied, h.suppliedGen = c.Handoff, gen
-	}
+	h.handoff, h.gen, h.hstatus = plan.text, plan.gen, plan.status
+	h.clearFrom = meta.ClearFrom
+	h.supplied, h.suppliedGen = plan.supplied, plan.suppliedGen
+	fresh := plan.fresh
 	if !fresh {
 		h.sessionID, h.mirror = meta.SessionID, filepath.Join(c.SessionDir, meta.Mirror)
 	}
@@ -625,10 +603,7 @@ func (h *Harness) openSession(ctx context.Context, p *process, resume string) er
 	h.fm.Lock()
 	h.mirror = mirror
 	h.fm.Unlock()
-	h.mu.Lock()
-	pending, gen := h.handoff, h.gen
-	h.mu.Unlock()
-	if err := writeMeta(h.cfg.SessionDir, sessionMeta{SessionID: id, Mirror: filepath.Base(mirror), Handoff: pending, Gen: gen}); err != nil {
+	if err := h.writeState(); err != nil {
 		return err
 	}
 	// Dyna answers permissions itself, as T3's full-access mode does, which keeps agy in `default` (T3 antigravitySessionMode,
