@@ -284,7 +284,7 @@ func TestStopReachesAnAgyHarnessWithNoTurn(t *testing.T) {
 	if e != nil {
 		t.Fatal(e)
 	}
-	// A quota failure with a stated reset leaves a retry pending.
+	// The session has a live channel and no turn.
 	handle, _ := s.live.CreateSession(started.Session)
 	handle.Lock()
 	channel := live.NewChannel(func() {})
