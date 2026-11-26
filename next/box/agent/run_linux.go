@@ -250,12 +250,11 @@ func Run(ctx context.Context) error {
 			}
 			h, files = session, func() []string { return []string{session.SessionFile()} }
 		} else {
-			var history string
-			state, err := loadHandoff(hello, handoffMarker)
+			rec, err := adoptHandoff(hello, handoffMarker)
 			if err != nil {
 				return err
 			}
-			pigNew, resume, state, err := state.openPlan(sessions, hello.Fresh)
+			open, next, err := planOpen(rec, sessions, hello.Fresh)
 			if err != nil {
 				return err
 			}
@@ -268,27 +267,25 @@ func Run(ctx context.Context) error {
 				CompactTokens:     hello.CompactTokens,
 				Instructions:      hello.Instructions,
 				ModelInstructions: hello.ModelInstructions,
-				New:               pigNew,
-				Resume:            resume,
+				New:               open.New,
+				Resume:            open.Resume,
 				Extensions:        []extension.InlineExtension{dynaext.Extension(dynaext.Config{Dir: workdir, Shell: jobs, Dyna: dynaTools, Interrupts: interrupts})},
 				Notice:            func(text string) { go notice(text) },
 			})
 			if err != nil {
 				return err
 			}
-			// A carried history whose input Pi never recorded is owed again, on the conversation it already opened. Each start checks the
-			// carrier again, so a prompt Pi refuses before writing it carries the history with the next one.
-			if state.Pending, err = state.owed(func(seq contract.DeliverySeq) (bool, error) { return session.Delivered(ctx, seq) }); err != nil {
-				return err
-			}
-			if state.Pending {
-				if history, err = handoffHistory(sessions); err != nil {
+			session.Activity = activity.set
+			session.Finished = activity.finish
+			piHarness := &handoffStart{boxHarness: session, file: session.SessionFile, sessions: sessions, path: handoffMarker, rec: rec}
+			if next != rec {
+				if err := piHarness.move(next); err != nil {
 					return err
 				}
 			}
-			session.Activity = activity.set
-			session.Finished = activity.finish
-			piHarness := &handoffStart{boxHarness: session, file: session.SessionFile, sessions: sessions, history: history, marker: handoffMarker, state: state}
+			if err := piHarness.attach(ctx); err != nil {
+				return err
+			}
 			h, files, steered = piHarness, func() []string { return []string{session.SessionFile()} }, func(sender contract.Interrupt) { jobs.StepAside(sender); interrupts.Send(sender) }
 		}
 	}

@@ -2,11 +2,11 @@ package agent
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -28,6 +28,10 @@ func conversation(t *testing.T, dir, name string, age time.Duration, question st
 	}
 }
 
+func hello(gen string) contract.BoxHelloResponse {
+	return contract.BoxHelloResponse{Handoff: gen != "", HandoffGen: gen}
+}
+
 // The history reads only conversation files, oldest first, so agy's own record and a stray file never reach the prompt.
 func TestHandoffHistoryReadsConversationFilesOldestFirst(t *testing.T) {
 	dir := t.TempDir()
@@ -45,155 +49,12 @@ func TestHandoffHistoryReadsConversationFilesOldestFirst(t *testing.T) {
 	}
 }
 
-func hello(gen string) contract.BoxHelloResponse {
-	return contract.BoxHelloResponse{Handoff: gen != "", HandoffGen: gen}
-}
-
-type startRecorder struct {
-	boxHarness
-	ledger  map[contract.DeliverySeq]bool // the inputs Pi's session file records
-	texts   []string
-	refuse  bool
-	cleared int
-}
-
-func (r *startRecorder) Start(_ context.Context, _ contract.TurnID, inputs []contract.TurnInput, accepted func()) (contract.TurnEnded, error) {
-	r.texts = append(r.texts, inputs[0].Text)
-	if r.refuse {
-		return contract.TurnEnded{}, errors.New("refused before the prompt was accepted")
-	}
-	accepted()
-	return contract.TurnEnded{}, nil
-}
-
-func (r *startRecorder) Delivered(_ context.Context, seq contract.DeliverySeq) (bool, error) {
-	return r.ledger[seq], nil
-}
-
-func (r *startRecorder) NewConversation(context.Context) error {
-	r.cleared++
-	return nil
-}
-
-func savedState(t *testing.T, path string) handoffState {
-	t.Helper()
-	var state handoffState
-	data, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := json.Unmarshal(data, &state); err != nil {
-		t.Fatal(err)
-	}
-	return state
-}
-
-func pending(t *testing.T, rec boxHarness, marker, history string) *handoffStart {
-	t.Helper()
-	state, err := loadHandoff(hello("7"), marker)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return &handoffStart{boxHarness: rec, file: func() string { return "" }, sessions: t.TempDir(), history: history, marker: marker, state: state}
-}
-
-// A new generation is written as pending as soon as the hello is read, before Pi opens; a later hello that carries no handoff (the
-// engine stops sending it after the first turn output, even a rejected one) still finds it owed.
-func TestLoadHandoffKeepsAPendingGenerationOverAHelloWithoutOne(t *testing.T) {
-	marker := filepath.Join(t.TempDir(), "state.json")
-	if state, err := loadHandoff(hello("7"), marker); err != nil || !state.Pending || state.Gen != "7" {
-		t.Fatalf("state %+v: %v", state, err)
-	}
-	if state, err := loadHandoff(hello(""), marker); err != nil || !state.Pending {
-		t.Fatalf("a hello with no handoff lost the pending one: %+v: %v", state, err)
-	}
-	if state, err := loadHandoff(hello("9"), marker); err != nil || state.Gen != "9" || !state.Pending {
-		t.Fatalf("a new generation is not pending: %+v: %v", state, err)
-	}
-	other := filepath.Join(t.TempDir(), "none.json")
-	if state, err := loadHandoff(hello(""), other); err != nil || state.Pending {
-		t.Fatalf("no handoff and no record is pending: %+v: %v", state, err)
-	}
-}
-
-// The first start that reaches the harness carries the history and records its input as the carrier; the generation is no longer
-// pending in the record, and the next start carries nothing. A refused start before the harness ran leaves nothing recorded as done.
-func TestHandoffStartRecordsTheCarrierAndCarriesOnce(t *testing.T) {
-	marker := filepath.Join(t.TempDir(), "state.json")
-	rec := &startRecorder{}
-	h := pending(t, rec, marker, "HISTORY")
-	inputs := []contract.TurnInput{{Delivery: 41, Text: "hello"}}
-	if _, err := h.Start(t.Context(), "t", inputs, func() {}); err != nil {
-		t.Fatal(err)
-	}
-	if state := savedState(t, marker); state.Gen != "7" || state.Pending || state.Carrier != 41 {
-		t.Fatalf("state %+v", state)
-	}
-	rec.ledger = map[contract.DeliverySeq]bool{41: true}
-	if _, err := h.Start(t.Context(), "t", inputs, func() {}); err != nil {
-		t.Fatal(err)
-	}
-	if len(rec.texts) != 2 || !strings.Contains(rec.texts[0], "HISTORY") || !strings.Contains(rec.texts[0], "hello") || rec.texts[1] != "hello" {
-		t.Fatalf("prompts %q", rec.texts)
-	}
-	if inputs[0].Text != "hello" {
-		t.Fatal("the caller's input was changed")
-	}
-	// The second start saw the carrier delivered and settled the handoff.
-	if state := savedState(t, marker); state.Carrier != 0 {
-		t.Fatalf("settled state %+v", state)
-	}
-}
-
-// When the record cannot be written, the start fails before the prompt runs, so the history is not carried unrecorded.
-func TestHandoffStartFailsWhenItCannotRecordTheCarrier(t *testing.T) {
-	marker := filepath.Join(t.TempDir(), "state.json")
-	rec := &startRecorder{}
-	h := pending(t, rec, marker, "HISTORY")
-	h.marker = t.TempDir() // a folder: the record cannot replace it
-	if _, err := h.Start(t.Context(), "t", []contract.TurnInput{{Delivery: 1, Text: "hi"}}, func() {}); err == nil || len(rec.texts) != 0 {
-		t.Fatalf("err %v, prompts %q", err, rec.texts)
-	}
-}
-
-// A /clear before the first prompt drops the pending history and records the generation alone, so a reload does not bring it back.
-func TestClearDropsThePendingHandoff(t *testing.T) {
-	marker := filepath.Join(t.TempDir(), "state.json")
-	rec := &startRecorder{}
-	h := pending(t, rec, marker, "HISTORY")
-	if err := h.NewConversation(t.Context()); err != nil || rec.cleared != 1 {
-		t.Fatalf("cleared %d: %v", rec.cleared, err)
-	}
-	if _, err := h.Start(t.Context(), "t", []contract.TurnInput{{Delivery: 2, Text: "after the clear"}}, func() {}); err != nil {
-		t.Fatal(err)
-	}
-	if rec.texts[0] != "after the clear" {
-		t.Fatalf("the cleared history was sent: %q", rec.texts[0])
-	}
-	if state := savedState(t, marker); state.Gen != "7" || state.Pending || state.Carrier != 0 {
-		t.Fatalf("state %+v", state)
-	}
-	if state, err := loadHandoff(hello("7"), marker); err != nil || state.Pending {
-		t.Fatalf("a reload owes the cleared history: %+v: %v", state, err)
-	}
-}
-
-// A /clear that cannot record its generation fails, so a reload never finds the cleared history due again after a /clear that reported success.
-func TestClearFailsWhenItCannotRecordTheGeneration(t *testing.T) {
-	marker := filepath.Join(t.TempDir(), "state.json")
-	h := pending(t, &startRecorder{}, marker, "HISTORY")
-	h.marker = t.TempDir() // a folder: the record cannot replace it
-	if err := h.NewConversation(t.Context()); err == nil {
-		t.Fatal("the /clear reported success without recording it")
-	}
-}
-
 // Pi's /clear leaves the earlier files behind in the record agy's /clear uses, so a switch to agy carries none of their text.
 func TestPiClearThenAHandoffCarriesNothingBeforeIt(t *testing.T) {
 	dir := t.TempDir()
 	conversation(t, dir, "old-pi.jsonl", 3*time.Hour, "question before the pi clear")
 	conversation(t, dir, "new-pi.jsonl", 2*time.Hour, "question after the pi clear")
-	h := &handoffStart{boxHarness: &startRecorder{}, file: func() string { return filepath.Join(dir, "new-pi.jsonl") }, sessions: dir}
+	h := &handoffStart{boxHarness: &fakePi{}, file: func() string { return filepath.Join(dir, "new-pi.jsonl") }, sessions: dir, path: filepath.Join(t.TempDir(), "rec")}
 	if err := h.NewConversation(t.Context()); err != nil {
 		t.Fatal(err)
 	}
@@ -209,22 +70,18 @@ func TestPiClearThenAHandoffCarriesNothingBeforeIt(t *testing.T) {
 	}
 }
 
-// agy's /clear (its harness records the files it leaves behind) then a switch to Pi carries none of them, and a Pi message written
-// after the clear survives whatever its file's modification time.
+// agy's /clear (its harness records the files it leaves behind) then a switch to Pi carries none of them, and a Pi message written after
+// the clear survives whatever its file's modification time.
 func TestAgyClearBoundaryKeepsPostClearPiMessages(t *testing.T) {
 	dir := t.TempDir()
 	conversation(t, dir, "pi-before.jsonl", 5*time.Hour, "pi question before the clear")
 	conversation(t, dir, "agy-1.jsonl", 4*time.Hour, "agy question before the clear")
 	conversation(t, dir, "agy-2.jsonl", time.Hour, "agy question after the clear")
-	// A Pi file from after the clear whose modification time is older than the mirror's last write.
-	conversation(t, dir, "pi-after.jsonl", 2*time.Hour, "pi question after the clear")
 	if err := agy.MarkCleared(dir, "agy-2.jsonl"); err != nil {
 		t.Fatal(err)
 	}
-	// MarkCleared left behind every file but agy-2; the Pi file written after the clear is a new file and not in the record.
-	if err := os.WriteFile(filepath.Join(dir, "agy-session.json"), []byte(`{"cleared":["pi-before.jsonl","agy-1.jsonl"]}`), 0o600); err != nil {
-		t.Fatal(err)
-	}
+	// A Pi file from after the clear, older by modification time than the mirror's last write.
+	conversation(t, dir, "pi-after.jsonl", 2*time.Hour, "pi question after the clear")
 	got, err := handoffHistory(dir)
 	if err != nil {
 		t.Fatal(err)
@@ -236,51 +93,6 @@ func TestAgyClearBoundaryKeepsPostClearPiMessages(t *testing.T) {
 	}
 	if strings.Contains(got, "before the clear") {
 		t.Fatalf("history carries text from before the clear:\n%s", got)
-	}
-}
-
-// When Pi rejects the carrying prompt before it is delivered, the next start in the same box carries the history again, and once the
-// ledger holds the carrier the handoff settles.
-func TestHandoffCarriedAgainAfterAPromptPiNeverRecorded(t *testing.T) {
-	marker := filepath.Join(t.TempDir(), "state.json")
-	rec := &startRecorder{refuse: true}
-	h := pending(t, rec, marker, "HISTORY")
-	if _, err := h.Start(t.Context(), "t1", []contract.TurnInput{{Delivery: 5, Text: "first"}}, func() {}); err == nil {
-		t.Fatal("the refusal was swallowed")
-	}
-	rec.refuse = false
-	if _, err := h.Start(t.Context(), "t2", []contract.TurnInput{{Delivery: 6, Text: "second"}}, func() {}); err != nil {
-		t.Fatal(err)
-	}
-	if len(rec.texts) != 2 || !strings.Contains(rec.texts[0], "HISTORY") || !strings.Contains(rec.texts[1], "HISTORY") || !strings.Contains(rec.texts[1], "second") {
-		t.Fatalf("prompts %q", rec.texts)
-	}
-	if state := savedState(t, marker); state.Carrier != 6 {
-		t.Fatalf("the carrier is %d, want the input that carried it last", state.Carrier)
-	}
-}
-
-// After a delivered handoff, a successful /clear retires the old carrier: a restart onto the new file must not find an input its ledger
-// cannot see and reopen a settled generation.
-func TestClearRetiresTheCarrierOfADeliveredHandoff(t *testing.T) {
-	marker := filepath.Join(t.TempDir(), "state.json")
-	rec := &startRecorder{}
-	h := pending(t, rec, marker, "HISTORY")
-	if _, err := h.Start(t.Context(), "t", []contract.TurnInput{{Delivery: 41, Text: "hi"}}, func() {}); err != nil {
-		t.Fatal(err)
-	}
-	rec.ledger = map[contract.DeliverySeq]bool{41: true}
-	if err := h.NewConversation(t.Context()); err != nil {
-		t.Fatal(err)
-	}
-	if state := savedState(t, marker); state.Gen != "7" || state.Pending || state.Carrier != 0 {
-		t.Fatalf("state %+v", state)
-	}
-	if _, err := h.Start(t.Context(), "t2", []contract.TurnInput{{Delivery: 42, Text: "after"}}, func() {}); err != nil {
-		t.Fatal(err)
-	}
-	if rec.texts[1] != "after" {
-		t.Fatalf("the history was carried again after the clear: %q", rec.texts[1])
 	}
 }
 
@@ -296,91 +108,259 @@ func TestHandoffHistoryFailsOnAnUnreadableClearRecord(t *testing.T) {
 	}
 }
 
-// After a restart the history is owed again when the input that carried it is not in Pi's ledger, and not when it is.
-func TestHandoffOwedFollowsTheCarriersDelivery(t *testing.T) {
-	ledger := map[contract.DeliverySeq]bool{41: true}
-	delivered := func(seq contract.DeliverySeq) (bool, error) { return ledger[seq], nil }
-	for _, c := range []struct {
-		name  string
-		state handoffState
-		owed  bool
-	}{
-		{"never carried", handoffState{Gen: "7", Pending: true}, true},
-		{"carried and delivered", handoffState{Gen: "7", Carrier: 41}, false},
-		{"carried, never recorded", handoffState{Gen: "7", Carrier: 42}, true},
-		{"cleared or empty", handoffState{Gen: "7"}, false},
-	} {
-		if got, err := c.state.owed(delivered); err != nil || got != c.owed {
-			t.Errorf("%s: owed %v, %v", c.name, got, err)
+// fakePi stands in for Pi where no file or ledger is in play: its ledger is a set it fills when told to write.
+type fakePi struct {
+	boxHarness
+	texts  []string
+	refuse bool                          // Start fails before the prompt is written
+	writes bool                          // Start records its first input in the ledger
+	ledger map[contract.DeliverySeq]bool // the inputs the session file records
+}
+
+func (f *fakePi) Start(_ context.Context, _ contract.TurnID, inputs []contract.TurnInput, accepted func()) (contract.TurnEnded, error) {
+	f.texts = append(f.texts, inputs[0].Text)
+	if f.refuse {
+		return contract.TurnEnded{}, errors.New("refused before the prompt was written")
+	}
+	if f.writes {
+		if f.ledger == nil {
+			f.ledger = map[contract.DeliverySeq]bool{}
 		}
+		f.ledger[inputs[0].Delivery] = true
+	}
+	accepted()
+	return contract.TurnEnded{}, nil
+}
+
+func (f *fakePi) Delivered(_ context.Context, seq contract.DeliverySeq) (bool, error) {
+	return f.ledger[seq], nil
+}
+
+func (f *fakePi) NewConversation(context.Context) error { return nil }
+
+// onDisk is the record a restart would read.
+func onDisk(t *testing.T, path string) handoffRecord {
+	t.Helper()
+	rec, err := adoptHandoff(hello(""), path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return rec
+}
+
+// start is a handoffStart over fake whose record at path begins as rec.
+func start(t *testing.T, fake *fakePi, rec handoffRecord) *handoffStart {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "state", "handoff-gen")
+	if rec.Gen != "" {
+		if err := rec.save(path); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return &handoffStart{boxHarness: fake, file: func() string { return "/sessions/new.jsonl" }, sessions: t.TempDir(), path: path, rec: rec, history: "HISTORY"}
+}
+
+// The states x events table of Pi's handoff record. Every cell checks that what a restart would read is what this process holds, so no
+// event edits the record in memory alone.
+func TestHandoffRecordStatesAndEvents(t *testing.T) {
+	statuses := []string{handoffPending, handoffSending, handoffAccepted, handoffCleared}
+	sending := handoffRecord{Gen: "7", Status: handoffSending, Carrier: 41, File: "target.jsonl"}
+	recordOf := func(status string) handoffRecord {
+		if status == handoffSending {
+			return sending
+		}
+		return handoffRecord{Gen: "7", Status: status}
+	}
+	input := func(delivery contract.DeliverySeq, text string) []contract.TurnInput {
+		return []contract.TurnInput{{Delivery: delivery, Text: text}}
+	}
+	for _, status := range statuses {
+		owed := status == handoffPending || status == handoffSending
+		// start: an owed history rides on the prompt; the carrier is recorded before the prompt runs
+		t.Run(status+"/start", func(t *testing.T) {
+			fake := &fakePi{}
+			h := start(t, fake, recordOf(status))
+			if _, err := h.Start(t.Context(), "t", input(42, "hello"), func() {}); err != nil {
+				t.Fatal(err)
+			}
+			if carried := strings.Contains(fake.texts[0], "HISTORY"); carried != owed {
+				t.Fatalf("history carried %v, want %v: %q", carried, owed, fake.texts[0])
+			}
+			want := recordOf(status)
+			if owed {
+				want = handoffRecord{Gen: "7", Status: handoffSending, Carrier: 42, File: "new.jsonl"}
+			}
+			if h.rec != want || onDisk(t, h.path) != want {
+				t.Fatalf("memory %+v, disk %+v, want %+v", h.rec, onDisk(t, h.path), want)
+			}
+		})
+		// start with the ledger showing the carrier: sending settles and carries nothing
+		t.Run(status+"/start after the ledger shows the carrier", func(t *testing.T) {
+			fake := &fakePi{ledger: map[contract.DeliverySeq]bool{41: true}}
+			h := start(t, fake, recordOf(status))
+			if _, err := h.Start(t.Context(), "t", input(42, "hello"), func() {}); err != nil {
+				t.Fatal(err)
+			}
+			wantCarried := status == handoffPending
+			if carried := strings.Contains(fake.texts[0], "HISTORY"); carried != wantCarried {
+				t.Fatalf("history carried %v, want %v", carried, wantCarried)
+			}
+			if status == handoffSending && (h.rec.Status != handoffAccepted || onDisk(t, h.path) != h.rec) {
+				t.Fatalf("memory %+v, disk %+v", h.rec, onDisk(t, h.path))
+			}
+		})
+		// refusal: the prompt was built and recorded, Pi wrote nothing; the next start carries the history again
+		t.Run(status+"/refusal then another start", func(t *testing.T) {
+			fake := &fakePi{refuse: true}
+			h := start(t, fake, recordOf(status))
+			if _, err := h.Start(t.Context(), "t1", input(42, "first"), func() {}); err == nil {
+				t.Fatal("the refusal was swallowed")
+			}
+			if onDisk(t, h.path) != h.rec {
+				t.Fatalf("memory %+v, disk %+v", h.rec, onDisk(t, h.path))
+			}
+			fake.refuse = false
+			if _, err := h.Start(t.Context(), "t2", input(43, "second"), func() {}); err != nil {
+				t.Fatal(err)
+			}
+			if carried := strings.Contains(fake.texts[1], "HISTORY"); carried != owed {
+				t.Fatalf("second start carried %v, want %v", carried, owed)
+			}
+		})
+		// accept: a start Pi writes settles the record as accepted, and a restart sees it
+		t.Run(status+"/accept", func(t *testing.T) {
+			fake := &fakePi{writes: true}
+			h := start(t, fake, recordOf(status))
+			if _, err := h.Start(t.Context(), "t", input(42, "hello"), func() {}); err != nil {
+				t.Fatal(err)
+			}
+			want := recordOf(status)
+			if owed {
+				want = handoffRecord{Gen: "7", Status: handoffAccepted}
+			}
+			if h.rec != want || onDisk(t, h.path) != want {
+				t.Fatalf("memory %+v, disk %+v, want %+v", h.rec, onDisk(t, h.path), want)
+			}
+		})
+		// clear: from any state the record is cleared on disk, whatever this process holds
+		t.Run(status+"/clear", func(t *testing.T) {
+			h := start(t, &fakePi{}, recordOf(status))
+			if err := h.NewConversation(t.Context()); err != nil {
+				t.Fatal(err)
+			}
+			want := handoffRecord{Gen: "7", Status: handoffCleared}
+			if h.rec != want || onDisk(t, h.path) != want || h.history != "" {
+				t.Fatalf("memory %+v, disk %+v, history %q", h.rec, onDisk(t, h.path), h.history)
+			}
+			fake := h.boxHarness.(*fakePi)
+			if _, err := h.Start(t.Context(), "t", input(44, "after the clear"), func() {}); err != nil {
+				t.Fatal(err)
+			}
+			if strings.Contains(fake.texts[0], "HISTORY") {
+				t.Fatal("the history was carried after a clear")
+			}
+		})
+		// a clear that cannot be recorded fails
+		t.Run(status+"/clear that cannot record", func(t *testing.T) {
+			h := start(t, &fakePi{}, recordOf(status))
+			h.path = t.TempDir() // a folder: the record cannot replace it
+			if err := h.NewConversation(t.Context()); err == nil {
+				t.Fatal("the /clear reported success without recording it")
+			}
+		})
 	}
 }
 
-// A carrier whose file Pi never wrote opens a fresh conversation, never the newest older file (which a /clear left behind), and one
-// whose file exists resumes exactly that file.
-func TestOpenPlanNeverFallsBackToAnOlderFile(t *testing.T) {
+// planOpen: the open each state asks for, with or without the owner's clear in the hello, and when the carrier's file is missing or
+// was cleared.
+func TestHandoffPlanOpen(t *testing.T) {
 	sessions := t.TempDir()
 	conversation(t, sessions, "old.jsonl", time.Hour, "PRE_CLEAR")
 	conversation(t, sessions, "target.jsonl", 2*time.Hour, "carrier file")
+	target := filepath.Join(sessions, "target.jsonl")
+	sending := func(file string) handoffRecord {
+		return handoffRecord{Gen: "7", Status: handoffSending, Carrier: 3, File: file}
+	}
 	for _, c := range []struct {
-		name       string
-		state      handoffState
-		fresh      bool
-		wantNew    bool
-		wantResume string
-		wantOwed   bool
-		wantCarry  contract.DeliverySeq
+		name  string
+		rec   handoffRecord
+		fresh bool
+		want  piOpen
+		next  handoffRecord
 	}{
-		{"file never written", handoffState{Gen: "7", Carrier: 3, File: "never.jsonl"}, false, true, "", true, 0},
-		{"record without a file", handoffState{Gen: "7", Carrier: 3}, false, true, "", true, 0},
-		{"file written", handoffState{Gen: "7", Carrier: 3, File: "target.jsonl"}, false, false, filepath.Join(sessions, "target.jsonl"), false, 3},
-		{"fresh after a delivered handoff", handoffState{Gen: "7", Carrier: 3, File: "target.jsonl"}, true, true, "", false, 0},
-		{"nothing carried", handoffState{Gen: "7"}, false, false, "", false, 0},
+		{"pending", handoffRecord{Gen: "7", Status: handoffPending}, false, piOpen{New: true}, handoffRecord{Gen: "7", Status: handoffPending}},
+		{"pending with the owner's clear", handoffRecord{Gen: "7", Status: handoffPending}, true, piOpen{New: true}, handoffRecord{Gen: "7", Status: handoffPending}},
+		{"sending, file written", sending("target.jsonl"), false, piOpen{Resume: target}, sending("target.jsonl")},
+		{"sending, file never written", sending("never.jsonl"), false, piOpen{New: true}, handoffRecord{Gen: "7", Status: handoffPending}},
+		{"sending, no file named", sending(""), false, piOpen{New: true}, handoffRecord{Gen: "7", Status: handoffPending}},
+		{"sending, owner cleared since", sending("target.jsonl"), true, piOpen{New: true}, handoffRecord{Gen: "7", Status: handoffCleared}},
+		{"accepted", handoffRecord{Gen: "7", Status: handoffAccepted}, false, piOpen{}, handoffRecord{Gen: "7", Status: handoffAccepted}},
+		{"accepted, owner cleared", handoffRecord{Gen: "7", Status: handoffAccepted}, true, piOpen{New: true}, handoffRecord{Gen: "7", Status: handoffAccepted}},
+		{"cleared", handoffRecord{Gen: "7", Status: handoffCleared}, false, piOpen{}, handoffRecord{Gen: "7", Status: handoffCleared}},
+		{"no handoff ever", handoffRecord{}, false, piOpen{}, handoffRecord{}},
 	} {
-		newConversation, resume, plan, err := c.state.openPlan(sessions, c.fresh)
-		if err != nil || newConversation != c.wantNew || resume != c.wantResume || plan.Carrier != c.wantCarry {
-			t.Errorf("%s: new=%v resume=%q plan=%+v: %v", c.name, newConversation, resume, plan, err)
-			continue
-		}
-		// The ledger of a conversation that never saw the carrier owes the history; one that holds it does not.
-		owed, err := plan.owed(func(seq contract.DeliverySeq) (bool, error) { return seq == 3 && resume != "", nil })
-		if err != nil || owed != c.wantOwed {
-			t.Errorf("%s: owed %v: %v", c.name, owed, err)
+		got, next, err := planOpen(c.rec, sessions, c.fresh)
+		if err != nil || got != c.want || next != c.next {
+			t.Errorf("%s: open %+v next %+v: %v; want %+v %+v", c.name, got, next, err, c.want, c.next)
 		}
 	}
-}
-
-// The recovery record is written with a rename after creating its folder, so a box that never set up a repository can record it.
-func TestHandoffStateCreatesItsFolderAndSurvivesAReload(t *testing.T) {
-	marker := filepath.Join(t.TempDir(), "state", "handoff-gen")
-	if state, err := loadHandoff(hello("7"), marker); err != nil || !state.Pending {
-		t.Fatalf("%+v: %v", state, err)
-	}
-	if state, err := loadHandoff(hello(""), marker); err != nil || !state.Pending || state.Gen != "7" {
-		t.Fatalf("%+v: %v", state, err)
-	}
-}
-
-// A marker that cannot be read for a reason other than being absent is an error, not "no handoff".
-func TestLoadHandoffReportsAnUnexpectedReadError(t *testing.T) {
-	marker := filepath.Join(t.TempDir(), "state")
-	if err := os.Mkdir(marker, 0o700); err != nil {
+	// Once a /clear left files behind, a restart never continues one of them.
+	if err := agy.MarkCleared(sessions, "target.jsonl"); err != nil {
 		t.Fatal(err)
 	}
-	if state, err := loadHandoff(hello(""), marker); err == nil {
-		t.Fatalf("a marker that cannot be read became %+v", state)
+	for _, c := range []struct {
+		name string
+		rec  handoffRecord
+		want piOpen
+	}{
+		{"cleared set, nothing carried", handoffRecord{Gen: "7", Status: handoffAccepted}, piOpen{Resume: target}},
+		{"cleared set, carrier's file cleared", sending("old.jsonl"), piOpen{New: true}},
+	} {
+		got, _, err := planOpen(c.rec, sessions, false)
+		if err != nil || got != c.want {
+			t.Errorf("%s: open %+v: %v; want %+v", c.name, got, err, c.want)
+		}
 	}
 }
 
-// The carrier's file is recorded when the history is sent, so a restart can find it.
-func TestHandoffStartRecordsTheCarrierFile(t *testing.T) {
-	marker := filepath.Join(t.TempDir(), "state.json")
-	h := pending(t, &startRecorder{}, marker, "HISTORY")
-	h.file = func() string { return "/box/pi/sessions/new.jsonl" }
-	if _, err := h.Start(t.Context(), "t", []contract.TurnInput{{Delivery: 9, Text: "hi"}}, func() {}); err != nil {
+// A new generation from the hello is recorded as pending before Pi opens; a later hello with no handoff (the engine stops sending it
+// after the first turn output, even a rejected one) still finds it owed; a record that cannot be read is an error.
+func TestAdoptHandoff(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "state", "handoff-gen") // its folder does not exist yet
+	if rec, err := adoptHandoff(hello("7"), path); err != nil || rec != (handoffRecord{Gen: "7", Status: handoffPending}) {
+		t.Fatalf("%+v: %v", rec, err)
+	}
+	if rec, err := adoptHandoff(hello(""), path); err != nil || !rec.owed() {
+		t.Fatalf("a hello with no handoff lost the pending one: %+v: %v", rec, err)
+	}
+	if rec, err := adoptHandoff(hello("9"), path); err != nil || rec != (handoffRecord{Gen: "9", Status: handoffPending}) {
+		t.Fatalf("a new generation: %+v: %v", rec, err)
+	}
+	if rec, err := adoptHandoff(hello(""), filepath.Join(t.TempDir(), "none")); err != nil || rec != (handoffRecord{}) {
+		t.Fatalf("no handoff and no record: %+v: %v", rec, err)
+	}
+	folder := t.TempDir()
+	if rec, err := adoptHandoff(hello(""), folder); err == nil {
+		t.Fatalf("a record that cannot be read became %+v", rec)
+	}
+}
+
+// A restart reads what each event wrote and arrives at the same plan, for every event.
+func TestRestartAfterEachEventPlansFromTheDiskRecord(t *testing.T) {
+	fake := &fakePi{refuse: true}
+	h := start(t, fake, handoffRecord{Gen: "7", Status: handoffPending})
+	sessions := t.TempDir()
+	h.sessions = sessions
+	if _, err := h.Start(t.Context(), "t", []contract.TurnInput{{Delivery: 5, Text: "x"}}, func() {}); err == nil {
+		t.Fatal("no refusal")
+	}
+	rec, err := adoptHandoff(hello(""), h.path)
+	if err != nil {
 		t.Fatal(err)
 	}
-	if state := savedState(t, marker); state.File != "new.jsonl" || state.Carrier != 9 {
-		t.Fatalf("state %+v", state)
+	// The refusal left it sending on a file that was never written: the restart opens fresh and the history is pending again.
+	open, next, err := planOpen(rec, sessions, false)
+	if err != nil || !open.New || next.Status != handoffPending || !slices.Equal([]string{next.Gen}, []string{"7"}) {
+		t.Fatalf("open %+v next %+v: %v", open, next, err)
 	}
 }
