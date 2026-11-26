@@ -1022,3 +1022,80 @@ func TestBrowserCommandOpensNothing(t *testing.T) {
 		t.Fatalf("browser command = %q %v", out, err)
 	}
 }
+
+func TestALaunchStaysTrackedUntilItsChildrenAreIdle(t *testing.T) {
+	h, _, _ := open(t, nil, nil)
+	h.watchEvery = 20 * time.Millisecond
+	brain := filepath.Join(h.cfg.GeminiDir, "antigravity-acp", "brain")
+	write := func(session, rel, data string) {
+		path := filepath.Join(brain, session, ".system_generated", rel)
+		os.MkdirAll(filepath.Dir(path), 0o700)
+		if err := os.WriteFile(path, []byte(data), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write("fake-session-1", "subagents/child-1.json", `{"conversationId":"child-1","state":"SUBAGENT_STATE_RUNNING"}`)
+	write("child-1", "messages/m.json", `{"sender":"fake-session-1","sourceMetadata":{"tool":{"conversationId":"fake-session-1","toolCall":{"id":"call_9","name":"invoke_subagent"}}}}`)
+	done := make(chan contract.TurnEnded, 1)
+	go func() {
+		res, _ := h.Start(context.Background(), "t1", []contract.TurnInput{input(1, "launch")}, func() {})
+		done <- res
+	}()
+	// The launch call completed, but its child works: the turn is held.
+	select {
+	case res := <-done:
+		t.Fatalf("the turn ended with a child at work: %+v", res)
+	case <-time.After(500 * time.Millisecond):
+	}
+	// The child's report reaches the parent's inbox: the turn ends.
+	write("fake-session-1", "messages/r.json", `{"sender":"child-1"}`)
+	select {
+	case res := <-done:
+		if res.Outcome != contract.TurnCompleted {
+			t.Fatalf("res = %+v", res)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("the turn was not released by the child's report")
+	}
+}
+
+func TestActivityWithNoTurnIsMirrored(t *testing.T) {
+	h, _, _ := open(t, nil, nil)
+	start(t, h, "t1", input(1, "late"))
+	eventually(t, "the late reply in the mirror", func() bool {
+		data, _ := os.ReadFile(h.SessionFile())
+		return strings.Contains(string(data), "late reply")
+	})
+}
+
+func TestAnOverlappingSteerCarriesOnlyWhatIsNew(t *testing.T) {
+	h, _, _ := open(t, nil, func(c *Config) { c.Instructions = "be brief" })
+	ctx := context.Background()
+	h.SetPromptSections(ctx, []contract.ContextSection{{Key: "dyna_goal", Text: "ship it"}})
+	h.mu.Lock()
+	p := h.p
+	h.mu.Unlock()
+	tn := &turn{}
+	first, _, err := h.promptBlocks(tn, []contract.TurnInput{input(1, "go")}, p, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(mustJSON(first)), "be brief") || !strings.Contains(string(mustJSON(first)), "dyna_goal") || !strings.Contains(string(mustJSON(first)), "runtime_info") {
+		t.Fatalf("first = %s", mustJSON(first))
+	}
+	// The first prompt is still in flight: the steer repeats nothing it offered, and carries no instructions or runtime info.
+	h.SetPromptSections(ctx, []contract.ContextSection{{Key: "dyna_goal", Text: "ship it"}, {Key: "dyna_time", Text: "noon"}})
+	steer, _, err := h.promptBlocks(tn, []contract.TurnInput{input(2, "also")}, p, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := string(mustJSON(steer))
+	if strings.Contains(got, "be brief") || strings.Contains(got, "runtime_info") || strings.Contains(got, "dyna_goal") || !strings.Contains(got, "dyna_time") || !strings.Contains(got, "also") {
+		t.Fatalf("steer = %s", got)
+	}
+}
+
+func mustJSON(v any) []byte {
+	data, _ := json.Marshal(v)
+	return data
+}

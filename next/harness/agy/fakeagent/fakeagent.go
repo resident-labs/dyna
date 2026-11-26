@@ -376,6 +376,19 @@ func (a *agent) prompt(id json.RawMessage, text string, steered, held chan strin
 		a.send(map[string]any{"method": "session/update", "params": map[string]any{"sessionId": "old-session", "update": map[string]any{"sessionUpdate": "agent_message_chunk", "content": map[string]any{"type": "text", "text": "STALE"}}}})
 		a.text("fresh")
 		a.end(id, "end_turn")
+	// A launch that completed whose child goes on, and a reply that comes after the turn ended.
+	case "launch":
+		call := map[string]any{"toolCallId": "call_9", "name": "invoke_subagent", "kind": "other", "title": "Invoke subagent", "rawInput": map[string]any{"Role": "r", "Prompt": "p"}}
+		a.update(merge(call, map[string]any{"sessionUpdate": "tool_call", "status": "in_progress"}))
+		a.update(merge(call, map[string]any{"sessionUpdate": "tool_call_update", "status": "completed"}))
+		a.text("launched")
+		a.end(id, "end_turn")
+	case "late":
+		a.text("ok")
+		a.end(id, "end_turn")
+		time.Sleep(400 * time.Millisecond)
+		a.text("late reply")
+		a.update(map[string]any{"sessionUpdate": "usage_update", "used": 10, "size": 100})
 	case "rpcerror":
 		a.fail(id, -32603, "boom")
 	case "refusal":
