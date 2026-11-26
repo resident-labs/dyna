@@ -854,6 +854,7 @@ export type BoxMessageBody =
   | { type: "workflow.reload"; body: WorkflowReload }
 ;
 export const MaxModelRetryAfterSeconds = 3600;
+export const MaxModelQuotaResetSeconds = 2678400;
 export const SessionListPage = 25;
 export const GoalTextLimit = 300;
 export const GoalItemTextLimit = 160;
