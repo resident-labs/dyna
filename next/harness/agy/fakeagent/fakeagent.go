@@ -263,7 +263,7 @@ func (a *agent) handle(id json.RawMessage, method string, raw json.RawMessage) {
 			steered = nil
 		}
 		var held chan string
-		if steered == nil && (verb == "hold" || verb == "stubborn") {
+		if steered == nil && (verb == "hold" || verb == "stubborn" || verb == "holdperm") {
 			held = make(chan string, 4)
 			a.held = held
 		}
@@ -322,7 +322,7 @@ func (a *agent) prompt(id json.RawMessage, text string, steered, held chan strin
 		a.update(merge(call, map[string]any{"sessionUpdate": "tool_call_update", "status": "completed", "rawOutput": map[string]any{"output": "a.txt\n", "exit_code": 0}}))
 		a.text("tool done")
 		a.end(id, "end_turn")
-	case "hold", "stubborn":
+	case "hold", "stubborn", "holdperm":
 		a.text("working")
 		if verb == "stubborn" {
 			select {}
@@ -332,6 +332,10 @@ func (a *agent) prompt(id json.RawMessage, text string, steered, held chan strin
 		a.held = nil
 		a.mu.Unlock()
 		if reason == "cancel" {
+			if verb == "holdperm" {
+				a.permission("aborting") // asked while the aborted turn settles
+				time.Sleep(100 * time.Millisecond)
+			}
 			a.end(id, "cancelled")
 			return
 		}

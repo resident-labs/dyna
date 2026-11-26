@@ -60,6 +60,8 @@ type turn struct {
 	detached   bool            // what agy does on its own, with no turn: its mirror entries are marked, so Recover never takes them for a turn's answer (T3 runs them as a continuation run of their own, adapter.ts:10676-10756)
 	resumed    bool            // T3's outcomeResumed: "continue" was sent once after a late 404 (adapter.ts:10244-10275)
 	offered    *told           // what the turn's prompts have offered so far, so an overlapping steer does not repeat it (T3 appContextOffered, adapter.ts:10875-10899)
+	seq        int             // the last prompt offer made, numbered; committed holds the offer each context key was last committed from, so a late response of an older prompt never overwrites a newer one (T3 appContextCommittedSequence, adapter.ts:10096-10125)
+	committed  map[string]int
 	openCalls  int
 	outlive    int  // open calls that outlive the prompt
 	answered   bool // agy has gone on from the prompt: a tool call or a thought came (a 404 after that is transient)
@@ -346,6 +348,8 @@ func (h *Harness) promptBlocks(t *turn, inputs []contract.TurnInput, p *process,
 		}
 	}
 	t.offered = &next
+	t.seq++
+	seq := t.seq
 	// commit runs with Harness.mu held, in the same scope that settles the prompt, before anything wakes the turn.
 	commit := func(failed bool) {
 		if h.told.gen != next.gen {
@@ -361,8 +365,14 @@ func (h *Harness) promptBlocks(t *turn, inputs []contract.TurnInput, p *process,
 			if h.told.context == nil {
 				h.told.context = map[string]string{}
 			}
+			if t.committed == nil {
+				t.committed = map[string]int{}
+			}
 			for k, v := range sent {
-				h.told.context[k] = v
+				if t.committed[k] < seq {
+					t.committed[k] = seq
+					h.told.context[k] = v
+				}
 			}
 		}
 		h.told.instructions = h.told.instructions || next.instructions
@@ -536,9 +546,8 @@ func (h *Harness) watch(t *turn, stop <-chan struct{}) {
 // kind (clientPolicy.ts:257-305), and antigravityPermissionDisposition adds nothing (AntigravityAcpSupport.ts:207-223: its scoped
 // MCP rule only applies in T3's auto modes, and "ask" only in auto). T3 rejects nothing in full-access mode, so neither does
 // this. The answer is the first allow_once option, else allow_always (adapter.ts:1749 selectAutoApprovedPermissionOption,
-// 8308). A request of another session is cancelled (adapter.ts:8224-8230). A request with no turn running is allowed too: T3
-// waits for a continuation run to exist and then answers the same way (awaitRequestTurn, adapter.ts:6537-6557, 8288), which
-// only attaches it to a turn. A question agy puts as a permission (an interaction_ id) goes to the user in T3
+// 8308). A request of another session is cancelled (adapter.ts:8224-8230). A request with no turn that can take it is cancelled: T3
+// waits for a continuation run and then answers the same way (awaitRequestTurn, adapter.ts:6537-6557, 8288); Dyna has no such run. A question agy puts as a permission (an interaction_ id) goes to the user in T3
 // (extractPermissionQuestion, adapter.ts:8236-8258); Dyna has nobody to ask, so it is cancelled, which agy reads as no answer.
 
 func (h *Harness) request(method string, raw json.RawMessage) (any, error) {
@@ -566,11 +575,13 @@ func (h *Harness) request(method string, raw json.RawMessage) (any, error) {
 	cancelled := map[string]any{"outcome": map[string]any{"outcome": "cancelled"}}
 	h.mu.Lock()
 	foreign := h.sessionID != "" && req.SessionID != h.sessionID
-	// After Stop a request with no turn is cancelled, as T3 does (awaitRequestTurn, adapter.ts:6547). Without a quarantine T3
-	// waits for a continuation run to answer it; Dyna has none, so it is answered at once.
-	stopped := h.turn == nil && h.quarantine
+	// T3 checks the Stop quarantine first, and then waits for a turn to attach the request to (awaitRequestTurn, adapter.ts:6537-6557,
+	// 8285-8291). The quarantine is set when Stop is sent, so a turn that is still settling answers nothing. Dyna has no continuation
+	// run to wait for, so a request with no running turn that can take it is cancelled instead of waited for.
+	t := h.turn
+	eligible := !h.quarantine && t != nil && !t.closing && !t.aborted
 	h.mu.Unlock()
-	if foreign || stopped {
+	if foreign || !eligible {
 		return cancelled, nil
 	}
 	// Choices of a question are not approvals (AntigravityProtocol.ts:78-83).

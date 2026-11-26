@@ -424,16 +424,10 @@ func TestAbortKillsAnAgentThatIgnoresCancelAndTheNextTurnResumes(t *testing.T) {
 	}
 }
 
-func TestPermissionWithNoTurnIsAllowedAsT3Does(t *testing.T) {
+func TestPermissionWithNoTurnIsCancelled(t *testing.T) {
 	_, r, _ := open(t, map[string]string{"FAKE_AGY_STARTUP_PERMISSION": "1"}, nil)
-	eventually(t, "the allowed answer", func() bool {
-		for _, m := range r.messages(t) {
-			if string(m.ID) == `"perm-startup"` {
-				return strings.Contains(string(m.Result), `"selected"`)
-			}
-		}
-		return false
-	})
+	// No turn can take it, and Dyna has no continuation run to wait for.
+	eventually(t, "the cancelled answer", func() bool { return strings.Contains(answerOf(t, r, "perm-startup"), `"cancelled"`) })
 }
 
 func TestDeliveredSurvivesACrashAndTheInputMayArriveTwice(t *testing.T) {
@@ -1136,14 +1130,27 @@ func TestDetachedOutputAfterAFailureDoesNotCompleteTheTurn(t *testing.T) {
 
 func TestStopQuarantinesWhatAgyDoesOnItsOwn(t *testing.T) {
 	h, r, _ := open(t, nil, nil)
-	start(t, h, "t1", input(1, "permlate"))
+	// A request that comes while the aborted turn settles is cancelled, not approved.
+	done := make(chan contract.TurnEnded, 1)
+	go func() {
+		res, _ := h.Start(context.Background(), "t1", []contract.TurnInput{input(1, "holdperm")}, func() {})
+		done <- res
+	}()
+	eventually(t, "the prompt", func() bool { d, _ := h.Delivered(context.Background(), 1); return d })
+	if err := h.Abort(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	<-done
+	eventually(t, "the cancelled answer", func() bool { return strings.Contains(answerOf(t, r, "perm-aborting"), `"cancelled"`) })
+	// After it settled, still quarantined: cancelled.
+	start(t, h, "t2", input(2, "permlate"))
 	if err := h.Abort(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	eventually(t, "the cancelled answer", func() bool { return strings.Contains(answerOf(t, r, "perm-late"), `"cancelled"`) })
-	// The next turn lifts it.
-	start(t, h, "t2", input(2, "permlate"))
-	eventually(t, "the allowed answer", func() bool { return strings.Contains(answerOf(t, r, "perm-late"), `"selected"`) })
+	// A request in a running turn is allowed, after the next Start lifted the quarantine.
+	start(t, h, "t3", input(3, "tool"))
+	eventually(t, "the allowed answer", func() bool { return strings.Contains(answerOf(t, r, "perm-ls"), `"selected"`) })
 }
 
 func TestAgysQuestionsAreAnsweredCancelled(t *testing.T) {
@@ -1155,11 +1162,37 @@ func TestAgysQuestionsAreAnsweredCancelled(t *testing.T) {
 		"elicit-url":    `{"action":"decline"}`,
 		"perm-question": `{"outcome":{"outcome":"cancelled"}}`,
 	} {
-		if got := answerOf(t, r, id); got != want {
-			t.Errorf("%s answered %s, want %s", id, got, want)
-		}
+		eventually(t, id+" answered "+want, func() bool { return answerOf(t, r, id) == want })
 	}
 	if p := r.prompts(t); !strings.Contains(strings.Join(p[0], "\n"), "Dyna's question tool") {
 		t.Errorf("the instructions do not name the question tool: %q", p[0])
+	}
+}
+
+func TestAnOlderPromptsLateCommitDoesNotOverwriteANewerOne(t *testing.T) {
+	h, _, _ := open(t, nil, nil)
+	ctx := context.Background()
+	h.SetPromptSections(ctx, []contract.ContextSection{{Key: "dyna_goal", Text: "v1"}})
+	h.mu.Lock()
+	p := h.p
+	h.mu.Unlock()
+	tn := &turn{}
+	_, commitA, err := h.promptBlocks(tn, []contract.TurnInput{input(1, "go")}, p, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	h.SetPromptSections(ctx, []contract.ContextSection{{Key: "dyna_goal", Text: "v2"}})
+	_, commitB, err := h.promptBlocks(tn, []contract.TurnInput{input(2, "also")}, p, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The steer is answered first, and the first prompt's response comes after it.
+	h.mu.Lock()
+	commitB(false)
+	commitA(false)
+	got := h.told.context["dyna_goal"]
+	h.mu.Unlock()
+	if got != "v2" {
+		t.Fatalf("told dyna_goal = %q, want v2", got)
 	}
 }
