@@ -17,6 +17,8 @@ import (
 	"github.com/MichaelKinsy/PiG/ai"
 	"github.com/gin-gonic/gin"
 	"github.com/router-for-me/CLIProxyAPI/v8/sdk/api/handlers"
+	"github.com/router-for-me/CLIProxyAPI/v8/sdk/api/handlers/claude"
+	"github.com/router-for-me/CLIProxyAPI/v8/sdk/api/handlers/openai"
 	"github.com/router-for-me/CLIProxyAPI/v8/sdk/cliproxy"
 	coreauth "github.com/router-for-me/CLIProxyAPI/v8/sdk/cliproxy/auth"
 	"github.com/router-for-me/CLIProxyAPI/v8/sdk/cliproxy/executor"
@@ -38,10 +40,24 @@ func (e cooldownHTTPError) RetryAfter() *time.Duration { return e.retryAfter }
 // mutation below are the pinned CLIProxyAPI implementation, not a fake manager.
 type cooldownHTTPExecutor struct {
 	coreauth.ProviderExecutor
-	url string
+	url      string
+	provider string
 }
 
-func (e cooldownHTTPExecutor) Identifier() string { return "codex" }
+func (e cooldownHTTPExecutor) Identifier() string {
+	if e.provider != "" {
+		return e.provider
+	}
+	return "codex"
+}
+
+func (e cooldownHTTPExecutor) ExecuteStream(ctx context.Context, auth *coreauth.Auth, req executor.Request, opts executor.Options) (*executor.StreamResult, error) {
+	response, err := e.Execute(ctx, auth, req, opts)
+	chunks := make(chan executor.StreamChunk, 1)
+	chunks <- executor.StreamChunk{Payload: response.Payload, Err: err}
+	close(chunks)
+	return &executor.StreamResult{Chunks: chunks}, nil
+}
 func (e cooldownHTTPExecutor) Execute(ctx context.Context, _ *coreauth.Auth, input executor.Request, _ executor.Options) (executor.Response, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, e.url, bytes.NewReader(input.Payload))
 	if err != nil {
@@ -364,8 +380,78 @@ func TestProxyFreshSpentCodexReturnsResetToBox(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/model/v1/responses", strings.NewReader(`{"model":"gpt-5.1-codex"}`))
 	resp := httptest.NewRecorder()
 	Handler(proxy.Listener.Addr().String(), "secret", "session", []string{model}, []string{id}, "", nil, false).ServeHTTP(resp, req)
-	if resp.Code != http.StatusTooManyRequests || resp.Header().Get("Retry-After") != "259200" || !strings.Contains(resp.Body.String(), `"reset_seconds":259200`) || calls.Load() != 0 {
+	if resp.Code != http.StatusTooManyRequests || resp.Header().Get("Retry-After") != "259200" || resp.Header().Get("X-Should-Retry") != "false" || !strings.Contains(resp.Body.String(), `"reset_seconds":259200`) || calls.Load() != 0 {
 		t.Fatalf("status=%d headers=%v body=%s upstream calls=%d", resp.Code, resp.Header(), resp.Body, calls.Load())
+	}
+}
+
+func TestProxyManagedQuotaDoesNotReplayPoolThroughPiGRetries(t *testing.T) {
+	for _, tc := range []struct{ upstream, model string }{{"codex", "gpt-5.1-codex"}, {"claude", "claude-opus-4-6"}} {
+		t.Run(tc.upstream, func(t *testing.T) {
+			var calls atomic.Int32
+			upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				calls.Add(1)
+				w.Header().Set("Retry-After", "1")
+				w.WriteHeader(http.StatusTooManyRequests)
+				_, _ = io.WriteString(w, `{"error":{"message":"weekly limit reached"}}`)
+			}))
+			defer upstream.Close()
+			cfg := &config.Config{}
+			cfg.Streaming.BootstrapRetries = 1
+			manager := coreauth.NewManager(nil, &coreauth.SoonestResetSelector{}, nil)
+			manager.SetConfig(cfg)
+			manager.RegisterExecutor(cooldownHTTPExecutor{url: upstream.URL, provider: tc.upstream})
+			ids := []string{"request-quota-a", "request-quota-b"}
+			for _, id := range ids {
+				cliproxy.GlobalModelRegistry().RegisterClient(id, tc.upstream, []*cliproxy.ModelInfo{{ID: tc.model}})
+				t.Cleanup(func() { cliproxy.GlobalModelRegistry().UnregisterClient(id) })
+				if _, err := manager.Register(t.Context(), &coreauth.Auth{ID: id, Provider: tc.upstream, Status: coreauth.StatusActive, Metadata: map[string]any{coreauth.DynaRequestQuotaOnly: true}}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			base := handlers.NewBaseAPIHandlers(&cfg.SDKConfig, manager)
+			gin.SetMode(gin.TestMode)
+			router := gin.New()
+			router.POST("/v1/responses", openai.NewOpenAIResponsesAPIHandler(base).Responses)
+			router.POST("/v1/messages", claude.NewClaudeCodeAPIHandler(base).ClaudeMessages)
+			unix := unixServer(t, router)
+			defer unix.Close()
+			boxRoute := Handler(unix.Listener.Addr().String(), "secret", "session", []string{tc.model}, ids, "", nil, false)
+			downstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				rec := httptest.NewRecorder()
+				boxRoute.ServeHTTP(rec, r)
+				if rec.Code != 429 || rec.Header().Get("X-Should-Retry") != "false" || !strings.Contains(rec.Body.String(), `"reset_seconds":1`) {
+					t.Errorf("box response: status=%d headers=%v body=%s", rec.Code, rec.Header(), rec.Body)
+				}
+				for key, values := range rec.Header() {
+					w.Header()[key] = values
+				}
+				w.WriteHeader(rec.Code)
+				_, _ = w.Write(rec.Body.Bytes())
+			}))
+			defer downstream.Close()
+			var provider ai.Provider
+			if tc.upstream == "codex" {
+				provider = ai.NewOpenAIResponsesProvider(ai.OpenAIResponsesConfig{BaseURL: downstream.URL + "/model/v1", APIKey: "fixture", Model: tc.model})
+			} else {
+				provider = ai.NewAnthropicProvider(ai.AnthropicConfig{BaseURL: downstream.URL + "/model", APIKey: "fixture", Model: tc.model})
+			}
+			ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+			defer cancel()
+			input := ai.NormalizeContext(ai.Context{Messages: []ai.Message{ai.UserMessage{Content: ai.UserContentBlocks{ai.TextContent{Text: "hi"}}}}})
+			result, err := ai.RetryAssistantCall(ctx, func() (ai.AssistantMessage, error) {
+				stream, err := provider.Stream(ctx, input, ai.StreamOptions{MaxRetries: new(1), MaxRetryDelayMs: new(2000)})
+				if err != nil {
+					return ai.AssistantMessage{}, err
+				}
+				for range stream.Events(ctx) {
+				}
+				return *stream.Result(), nil
+			}, &ai.RetryPolicy{Enabled: true, MaxRetries: 3, BaseDelayMs: 1}, ai.RetryCallbacks{})
+			if err != nil || result.StopReason != ai.StopReasonError || !strings.Contains(result.ErrorMessage, "Quota exceeded") || !strings.Contains(result.ErrorMessage, `"reset_seconds":1`) || calls.Load() != 2 {
+				t.Fatalf("one pool pass expected: result=%+v err=%v upstream calls=%d", result, err, calls.Load())
+			}
+		})
 	}
 }
 
