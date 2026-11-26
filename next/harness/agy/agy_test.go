@@ -1210,7 +1210,7 @@ func TestAnswerArrivingBeforeTheInputsAreRecordedIsWrittenAfterThem(t *testing.T
 	if data, _ := os.ReadFile(h.SessionFile()); strings.Contains(string(data), "early answer") {
 		t.Fatal("the answer was written before the inputs")
 	}
-	if err := h.recordInputs([]contract.TurnInput{input(1, "go")}); err != nil {
+	if err := h.recordInputs([]contract.TurnInput{input(1, "go")}, false); err != nil {
 		t.Fatal(err)
 	}
 	h.recorded(tn)
