@@ -112,6 +112,10 @@ func (e *XAIExecutor) Execute(ctx context.Context, auth *cliproxyauth.Auth, req 
 		validJSON := gjson.ValidBytes(eventData)
 		if validJSON {
 			upstreamUsage.ObserveResponsesStream(eventData)
+		} else if scanner.Unterminated() && errRead != nil {
+			// ScanLines also yields a short final line on a read error. Unlike
+			// intact JSON, plain text needs the line ending to prove completion.
+			break
 		}
 		if terminalErr, failed := xaiTerminalFailure(eventName, eventData, validJSON, httpResp.Header); failed {
 			return resp, terminalErr

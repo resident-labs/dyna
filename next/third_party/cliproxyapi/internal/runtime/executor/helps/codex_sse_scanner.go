@@ -19,9 +19,10 @@ const codexSSEDiagnosticLines = 8
 var codexSSEDataPrefix = []byte("data:")
 
 type codexSSEQueuedItem struct {
-	payload  []byte
-	rawLines int
-	rawBytes int
+	payload      []byte
+	rawLines     int
+	rawBytes     int
+	unterminated bool
 }
 
 // CodexSSEScanner reads an upstream Responses SSE stream line by line, as bufio.Scanner does, but
@@ -61,13 +62,15 @@ type CodexSSEScanner struct {
 	// held is the event being collected: its data lines as read, joined with "\n" in one buffer, so
 	// its memory follows its bytes, not its line count. count is how many lines it holds and size
 	// their bytes. joined is their joined value, and nesting follows it.
-	held    []byte
-	count   int
-	size    int
-	joined  []byte
-	nesting codexJSONNesting
-	queue   []codexSSEQueuedItem
-	current codexSSEQueuedItem
+	held          []byte
+	count         int
+	size          int
+	joined        []byte
+	nesting       codexJSONNesting
+	heldNoNewline bool
+	lineNoNewline bool
+	queue         []codexSSEQueuedItem
+	current       codexSSEQueuedItem
 	// warned is set once the stream has had its invalid-event warning.
 	warned      bool
 	onLine      func(line []byte)
@@ -79,7 +82,13 @@ type CodexSSEScanner struct {
 func NewCodexSSEScanner(ctx context.Context, r io.Reader, maxBytes int) *CodexSSEScanner {
 	lines := bufio.NewScanner(r)
 	lines.Buffer(nil, maxBytes)
-	return &CodexSSEScanner{ctx: ctx, lines: lines, maxBytes: maxBytes}
+	s := &CodexSSEScanner{ctx: ctx, lines: lines, maxBytes: maxBytes}
+	lines.Split(func(data []byte, atEOF bool) (int, []byte, error) {
+		advance, token, err := bufio.ScanLines(data, atEOF)
+		s.lineNoNewline = advance > 0 && data[advance-1] != '\n'
+		return advance, token, err
+	})
+	return s
 }
 
 // SetOnLine sets a callback invoked for every physical line read from upstream.
@@ -125,12 +134,12 @@ func (s *CodexSSEScanner) Scan() bool {
 				s.release([]byte{})
 				return s.Scan()
 			}
-			s.current = codexSSEQueuedItem{payload: line, rawLines: 1, rawBytes: len(line)}
+			s.current = codexSSEQueuedItem{payload: line, rawLines: 1, rawBytes: len(line), unterminated: s.lineNoNewline}
 			return true
 		}
 		if s.count == 0 {
 			if s.stock || !codexSSEIncompleteJSON(bytes.TrimSpace(line[len(codexSSEDataPrefix):])) {
-				s.current = codexSSEQueuedItem{payload: line, rawLines: 1, rawBytes: len(line)}
+				s.current = codexSSEQueuedItem{payload: line, rawLines: 1, rawBytes: len(line), unterminated: s.lineNoNewline}
 				return true
 			}
 		} else if s.size+len(line) > s.maxBytes {
@@ -169,6 +178,7 @@ func (s *CodexSSEScanner) hold(line []byte) bool {
 	s.joined = append(s.joined, value...)
 	s.count++
 	s.size += len(line)
+	s.heldNoNewline = s.lineNoNewline
 	return s.nesting.feed(value)
 }
 
@@ -177,15 +187,17 @@ func (s *CodexSSEScanner) hold(line []byte) bool {
 func (s *CodexSSEScanner) release(end ...[]byte) {
 	assembled := s.assemble(s.held, s.count, s.joined)
 	s.queue = append(s.queue, codexSSEQueuedItem{
-		payload:  assembled,
-		rawLines: s.count,
-		rawBytes: s.size,
+		payload:      assembled,
+		rawLines:     s.count,
+		rawBytes:     s.size,
+		unterminated: s.heldNoNewline,
 	})
 	for _, e := range end {
 		s.queue = append(s.queue, codexSSEQueuedItem{
-			payload:  e,
-			rawLines: 1,
-			rawBytes: len(e),
+			payload:      e,
+			rawLines:     1,
+			rawBytes:     len(e),
+			unterminated: s.lineNoNewline,
 		})
 	}
 	s.held, s.count, s.size, s.joined, s.nesting = nil, 0, 0, nil, codexJSONNesting{}
@@ -252,6 +264,9 @@ func (n *codexJSONNesting) feed(p []byte) bool {
 
 // Bytes returns the current line. It stays valid until the next call to Scan.
 func (s *CodexSSEScanner) Bytes() []byte { return s.current.payload }
+
+// Unterminated reports whether the current token's last physical line was not newline-terminated.
+func (s *CodexSSEScanner) Unterminated() bool { return s.current.unterminated }
 
 // RawLines returns the count of physical upstream lines consumed to produce the current event.
 func (s *CodexSSEScanner) RawLines() int {

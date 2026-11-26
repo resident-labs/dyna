@@ -25,16 +25,18 @@ import (
 
 func TestXAIHTTPTerminal(t *testing.T) {
 	const (
-		model     = "grok-4.7"
-		delta     = `data: {"type":"response.output_text.delta","delta":"partial"}` + "\n"
-		malformed = `data: {"type":"response.completed","response":{"output":[` + "\n"
-		limited   = "event: response.failed\ndata: {\"type\":\"response.failed\",\ndata: \"response\":{\"status\":\"failed\",\"error\":{\"code\":\"resource_exhausted\",\"message\":\"provider overloaded\"}}}\n"
-		done      = `data: {"type":"response.done","response":{"id":"resp_ok","status":"completed","model":"grok-4.7","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"ready"}]}],"usage":{"input_tokens":7,"output_tokens":3}}}` + "\n\n"
+		model        = "grok-4.7"
+		delta        = `data: {"type":"response.output_text.delta","delta":"partial"}` + "\n"
+		malformed    = `data: {"type":"response.completed","response":{"output":[` + "\n"
+		limited      = "event: response.failed\ndata: {\"type\":\"response.failed\",\ndata: \"response\":{\"status\":\"failed\",\"error\":{\"code\":\"resource_exhausted\",\"message\":\"provider overloaded\"}}}\n"
+		wrappedLimit = `data: {"type":"error","error":{},"body":{"error":{"code":"resource_exhausted","message":"wrapped provider limit"}}}`
+		plainError   = "event: error\ndata: upstream gateway refusal"
+		done         = `data: {"type":"response.done","response":{"id":"resp_ok","status":"completed","model":"grok-4.7","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"ready"}]}],"usage":{"input_tokens":7,"output_tokens":3}}}` + "\n\n"
 	)
 	for _, tc := range []struct {
-		name, body, want                    string
-		stream, chat, short, limit, recover bool
-		status, posts, cooled               int
+		name, body, want                               string
+		stream, chat, short, limit, recover, truncated bool
+		status, posts, cooled                          int
 	}{
 		{name: "buffered_empty", body: ": comment\n\n", want: "empty upstream stream", status: 502, posts: 1},
 		{name: "buffered_cut", body: malformed, want: "closed before", short: true, status: 502, posts: 1},
@@ -53,6 +55,14 @@ func TestXAIHTTPTerminal(t *testing.T) {
 		{name: "stream_chat_done_incomplete", stream: true, chat: true, body: delta + "\n" + strings.Replace(done, `"status":"completed"`, `"status":"incomplete","incomplete_details":{"reason":"max_output_tokens"}`, 1), want: `"finish_reason":"length"`, status: 200, posts: 1},
 		{name: "stream_429_returns_retry_after", stream: true, body: limited, want: "provider overloaded", limit: true, status: 429, posts: 2, cooled: 2},
 		{name: "buffered_done", body: done, want: "ready", status: 200, posts: 1},
+		{name: "buffered_plain_error_read_cut", body: "event: error\ndata: upstream ga", want: "closed before", short: true, status: 502, posts: 1, truncated: true},
+		{name: "stream_plain_error_read_cut", stream: true, body: "event: error\ndata: upstream ga", want: "closed before", short: true, status: 502, posts: 1, truncated: true},
+		{name: "buffered_complete_plain_error", body: plainError + "\n", want: "upstream gateway refusal", short: true, status: 502, posts: 2, cooled: 2},
+		{name: "stream_complete_plain_error", stream: true, body: delta + "\n" + plainError + "\n", want: "upstream gateway refusal", short: true, status: 200, posts: 1, cooled: 1},
+		{name: "buffered_wrapped_429", body: wrappedLimit, want: "wrapped provider limit", short: true, limit: true, status: 429, posts: 2, cooled: 2},
+		{name: "stream_wrapped_429_before_output", stream: true, body: wrappedLimit, want: "response.done", short: true, limit: true, recover: true, status: 200, posts: 2, cooled: 1},
+		{name: "stream_wrapped_429_after_output", stream: true, body: delta + "\n" + wrappedLimit, want: "wrapped provider limit", short: true, limit: true, status: 200, posts: 1, cooled: 1},
+		{name: "stream_wrapped_429_retry_after", stream: true, body: wrappedLimit, want: "wrapped provider limit", short: true, limit: true, status: 429, posts: 2, cooled: 2},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			var posts atomic.Int32
@@ -81,6 +91,7 @@ func TestXAIHTTPTerminal(t *testing.T) {
 			manager := coreauth.NewManager(nil, &coreauth.FillFirstSelector{}, nil)
 			manager.SetConfig(cfg)
 			manager.RegisterExecutor(executor.NewXAIAutoExecutor(cfg))
+			records := make(chan usage.Record, 4)
 			for i := range 2 {
 				id := fmt.Sprintf("%s/%d", t.Name(), i)
 				auth := &coreauth.Auth{ID: id, Provider: "xai", Status: coreauth.StatusActive, Attributes: map[string]string{"base_url": upstream.URL, "api_key": fmt.Sprint(i)}}
@@ -89,6 +100,10 @@ func TestXAIHTTPTerminal(t *testing.T) {
 				}
 				registry.GetGlobalRegistry().RegisterClient(id, "xai", []*registry.ModelInfo{{ID: model}})
 				t.Cleanup(func() { registry.GetGlobalRegistry().UnregisterClient(id) })
+				if tc.truncated {
+					usage.RegisterNamedPlugin(id, xaiHTTPUsageCapture{id: id, records: records})
+					t.Cleanup(func() { usage.RegisterNamedPlugin(id, xaiHTTPUsageCapture{}) })
+				}
 			}
 			base := handlers.NewBaseAPIHandlers(&cfg.SDKConfig, manager)
 			router := gin.New()
@@ -115,7 +130,7 @@ func TestXAIHTTPTerminal(t *testing.T) {
 				auth, _ := manager.GetByID(fmt.Sprintf("%s/%d", t.Name(), i))
 				if state := auth.ModelStates[model]; state != nil && !state.NextRetryAfter.IsZero() {
 					cooled++
-					if state.LastError == nil || state.LastError.HTTPStatus != http.StatusTooManyRequests || time.Until(state.NextRetryAfter) < 65*time.Second {
+					if tc.limit && (state.LastError == nil || state.LastError.HTTPStatus != http.StatusTooManyRequests || time.Until(state.NextRetryAfter) < 65*time.Second) {
 						t.Errorf("lost provider 429 or its retry delay: %+v", state)
 					}
 				} else if !auth.NextRetryAfter.IsZero() {
@@ -124,6 +139,16 @@ func TestXAIHTTPTerminal(t *testing.T) {
 			}
 			if cooled != tc.cooled {
 				t.Errorf("cooled=%d, want %d", cooled, tc.cooled)
+			}
+			if tc.truncated {
+				select {
+				case record := <-records:
+					if !record.Failed || record.Fail.StatusCode != http.StatusBadGateway || record.Fail.Code != usage.FailureStreamTruncatedCode {
+						t.Errorf("cut plain error is not typed 502 truncation: %+v", record.Fail)
+					}
+				case <-time.After(3 * time.Second):
+					t.Fatal("missing usage failure record")
+				}
 			}
 		})
 	}

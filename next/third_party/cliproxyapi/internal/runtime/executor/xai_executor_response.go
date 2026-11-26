@@ -1187,9 +1187,10 @@ func xaiTerminalFailure(eventName string, data []byte, validJSON bool, headers h
 		eventType = eventName
 	}
 	responseStatus := root.Get("response.status").String()
-	failure := root.Get("error")
+	outerFailure := root.Get("error")
+	failure := outerFailure
 	switch {
-	case eventType == "error", eventType == "" && (failure.IsObject() || failure.Type == gjson.String) && !root.Get("output").Exists():
+	case eventType == "error", eventType == "" && (outerFailure.IsObject() || outerFailure.Type == gjson.String) && !root.Get("output").Exists():
 		if root.Type == gjson.String {
 			failure = root
 		}
@@ -1199,11 +1200,13 @@ func xaiTerminalFailure(eventName string, data []byte, validJSON bool, headers h
 	default:
 		return statusErr{}, false
 	}
-	if failure.Type == gjson.Null {
-		failure = root.Get("error")
-	}
-	if failure.Type == gjson.Null {
-		failure = root.Get("body.error")
+	// Wrapper errors sometimes provide an empty outer error object and
+	// put the real reason and code under body.error.
+	if xaiErrorDetailEmpty(failure) {
+		failure = outerFailure
+		if xaiErrorDetailEmpty(failure) {
+			failure = root.Get("body.error")
+		}
 	}
 
 	body := []byte(`{"error":{}}`)
@@ -1269,6 +1272,13 @@ func xaiTerminalFailure(eventName string, data []byte, validJSON bool, headers h
 		status = http.StatusTooManyRequests
 	}
 	return xaiHTTPStatusErr(status, body, headers), true
+}
+
+func xaiErrorDetailEmpty(value gjson.Result) bool {
+	if value.IsObject() {
+		return len(value.Map()) == 0
+	}
+	return value.Type != gjson.String || strings.TrimSpace(value.String()) == ""
 }
 
 func xaiHTTPStatusErr(code int, body []byte, headers http.Header) statusErr {
