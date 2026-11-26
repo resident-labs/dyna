@@ -14,10 +14,13 @@ import (
 
 // PiG reports model failures to the harness as status and JSON body, not
 // headers. Copy a known reset into the error body of the box route while
-// leaving Retry-After intact for PiG's own provider retry policy.
+// retaining valid Retry-After values for PiG's own provider retry policy.
 func preserveModelRetryHint(resp *http.Response) error {
+	limit := int64(contract.MaxModelRetryAfterSeconds)
 	switch resp.StatusCode {
-	case http.StatusTooManyRequests, http.StatusBadGateway, http.StatusServiceUnavailable:
+	case http.StatusTooManyRequests:
+		limit = contract.MaxModelQuotaResetSeconds
+	case http.StatusBadGateway, http.StatusServiceUnavailable:
 	default:
 		return nil
 	}
@@ -32,12 +35,12 @@ func preserveModelRetryHint(resp *http.Response) error {
 			return nil
 		}
 		delay := time.Until(date)
-		if delay <= 0 || delay > contract.MaxModelRetryAfterSeconds*time.Second {
+		if delay <= 0 || delay > time.Duration(limit)*time.Second {
 			return nil
 		}
 		seconds = int64((delay + time.Second - 1) / time.Second)
 	}
-	if seconds <= 0 || seconds > contract.MaxModelRetryAfterSeconds {
+	if seconds <= 0 || seconds > limit {
 		return nil
 	}
 	const maxErrorBody = 16 << 10
@@ -65,13 +68,15 @@ func preserveModelRetryHint(resp *http.Response) error {
 	if detail == nil {
 		detail, envelope = envelope, nil
 	}
-	if resp.StatusCode == http.StatusTooManyRequests {
+	if seconds > contract.MaxModelRetryAfterSeconds {
+		// PiG can report Retry-After without the JSON code when it exceeds
+		// its own retry cap. Do not forward an out-of-range transient hint.
 		code := strings.Trim(string(detail["code"]), `"`)
 		var message string
 		_ = json.Unmarshal(detail["message"], &message)
-		if code != "model_cooldown" && code != "1302" && code != "1305" &&
-			message != "Rate limit reached for requests" && message != "The service may be temporarily overloaded" &&
-			!(strings.HasPrefix(message, "All credentials for model ") && strings.Contains(message, " are cooling down")) {
+		if code == "1302" || code == "1305" || code == "transient_rate_limit" ||
+			message == "Rate limit reached for requests" || message == "The service may be temporarily overloaded" {
+			resp.Header.Del("Retry-After")
 			return nil
 		}
 	}

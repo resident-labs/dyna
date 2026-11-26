@@ -47,33 +47,34 @@ func modelRetryAfterSeconds(message string) int64 {
 			detail = *nested
 		}
 	}
+	limit := int64(contract.MaxModelRetryAfterSeconds)
 	var fallback int64
-	switch strings.Trim(string(detail.Code), `"`) {
-	case "1302":
-		fallback = 60
-	case "1305":
-		fallback = 20
-	case "model_cooldown":
-	default:
-		// OpenAI's capped-delay error can preserve the message but omit the
-		// code and body. Accept only the messages of those same 429s.
-		text := detail.Message
-		if text == "" {
-			text = body
-		}
-		known429 := text == "Rate limit reached for requests" || text == "The service may be temporarily overloaded" ||
-			(strings.HasPrefix(text, "All credentials for model ") && strings.Contains(text, " are cooling down"))
-		if status == "429" && !known429 {
-			return 0
+	if status == "429" {
+		switch strings.Trim(string(detail.Code), `"`) {
+		case "1302":
+			fallback = 60
+		case "1305":
+			fallback = 20
+		case "transient_rate_limit":
+		default:
+			text := detail.Message
+			if text == "" {
+				text = body
+			}
+			if text != "Rate limit reached for requests" && text != "The service may be temporarily overloaded" {
+				limit = contract.MaxModelQuotaResetSeconds
+			}
 		}
 	}
+	// PiG's OpenAI adapters may drop the body when the delay exceeds their
+	// retry cap. In that case the prefix still carries the route's hint.
 	seconds, _ := strconv.ParseInt(hint, 10, 64)
 	seconds = max(seconds, detail.ResetSeconds)
-	if seconds > contract.MaxModelRetryAfterSeconds {
+	if seconds <= 0 || seconds > limit {
+		if status == "429" && seconds == 0 {
+			return fallback
+		}
 		return 0
-	}
-	if status == "429" && seconds == 0 {
-		return fallback
 	}
 	return seconds
 }

@@ -835,9 +835,12 @@ type BoxHelloResponse struct {
 	Fresh bool `json:"fresh,omitempty"`
 }
 
-// MaxModelRetryAfterSeconds bounds the reset hints the box may report. Longer
-// cooldowns use the normal retry ladder so a changed account can recover sooner.
+// MaxModelRetryAfterSeconds bounds hints for transient provider failures.
 const MaxModelRetryAfterSeconds = 3600
+
+// MaxModelQuotaResetSeconds bounds quota reset hints the box may report. It
+// covers monthly quota windows; other input can still wake a session earlier.
+const MaxModelQuotaResetSeconds = 31 * 24 * 3600
 
 type TurnOutputRequest struct {
 	DataAttachment *int         `json:"-"`

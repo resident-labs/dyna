@@ -46,10 +46,23 @@ func TestModelFailureRetries(t *testing.T) {
 		}
 	}
 	post("initial")
-	finish(100, contract.TurnFailed, contract.CauseModelFailed, 120)
+	reset := now.Add(72 * time.Hour)
+	finish(100, contract.TurnFailed, contract.CauseModelFailed, int64(reset.Sub(now)/time.Second))
 	var hintedTimer int64
-	if err := s.Read().QueryRowContext(ctx, "SELECT model_retry_at FROM sessions WHERE id='s'").Scan(&hintedTimer); err != nil || hintedTimer < now.Add(120*time.Second).UnixMilli() || hintedTimer >= now.Add(132*time.Second).UnixMilli() {
+	if err := s.Read().QueryRowContext(ctx, "SELECT model_retry_at FROM sessions WHERE id='s'").Scan(&hintedTimer); err != nil || hintedTimer < reset.UnixMilli() || hintedTimer >= reset.Add(30*time.Second).UnixMilli() {
 		t.Fatalf("hinted retry wasn't scheduled at the reset plus jitter: %d %v", hintedTimer, err)
+	}
+	for _, check := range []struct {
+		at   time.Time
+		wake bool
+	}{{now.Add(time.Hour), false}, {time.UnixMilli(hintedTimer), true}} {
+		if err := s.WakeModelRetries(ctx, check.at); err != nil {
+			t.Fatal(err)
+		}
+		var wake bool
+		if err := s.Read().QueryRowContext(ctx, "SELECT wake FROM deliveries WHERE to_id='s' AND state='pending'").Scan(&wake); err != nil || wake != check.wake {
+			t.Fatalf("wake at %v: got %t, want %t (error %v)", check.at, wake, check.wake, err)
+		}
 	}
 	post("owner-intervenes")
 	started := contract.Event{ID: "manual-start", Room: "r", Time: now, From: contract.Principal{Kind: contract.PrincipalEngine}, Body: contract.TurnStarted{}}

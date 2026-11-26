@@ -21,7 +21,12 @@ func TestModelRouteCarriesRetryHintInPiGError(t *testing.T) {
 		{"messages", `{"type":"error","error":{"type":"rate_limit_error","message":"All credentials for model fixture are cooling down"}}`, "120", 429, `"reset_seconds":120`},
 		{"responses", `{"error":{"code":"1305","message":"The service may be temporarily overloaded"}}`, "76", 429, `"reset_seconds":76`},
 		{"completions", "", "42", 502, `"reset_seconds":42`},
-		{"unrelated_429", `{"error":{"code":"other_quota","message":"failed"}}`, "42", 429, ""},
+		{"provider_quota", `{"error":{"code":"usage_limit_reached","message":"Weekly quota exhausted"}}`, "259200", 429, `"reset_seconds":259200`},
+		{"provider_quota_capped", `{"error":{"code":"usage_limit_reached","message":"Weekly quota exhausted"}}`, "259200", 429, `Server requested 259200s retry delay (max: 1s). 429 Weekly quota exhausted`},
+		{"guard_quota", `{"type":"error","error":{"type":"rate_limit_error","message":"All accounts are out of quota"}}`, "1209600", 429, `"reset_seconds":1209600`},
+		{"no_hint_429", `{"error":{"code":"unknown","message":"failed"}}`, "", 429, ""},
+		{"excessive_quota_hint", `{"error":{"message":"failed"}}`, "2678401", 429, ""},
+		{"long_transient_429", `{"error":{"code":"transient_rate_limit","message":"failed"}}`, "7200", 429, ""},
 		{"long_503", `{"error":{"message":"try again later"}}`, "7200", 503, ""},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -36,7 +41,7 @@ func TestModelRouteCarriesRetryHintInPiGError(t *testing.T) {
 			defer down.Close()
 			var provider ai.Provider
 			switch tc.name {
-			case "messages":
+			case "messages", "guard_quota":
 				provider = ai.NewAnthropicProvider(ai.AnthropicConfig{BaseURL: down.URL + "/model", APIKey: "box", Model: "fixture"})
 			case "completions":
 				provider = ai.NewOpenAIProvider(ai.OpenAIConfig{BaseURL: down.URL + "/model/v1", APIKey: "box", Model: "fixture"})
@@ -45,7 +50,11 @@ func TestModelRouteCarriesRetryHintInPiGError(t *testing.T) {
 			}
 			defer provider.Close()
 			ctx := t.Context()
-			stream, err := provider.Stream(ctx, ai.NormalizeContext(ai.Context{Messages: []ai.Message{ai.UserMessage{Content: ai.UserText("hi")}}}), ai.StreamOptions{MaxRetries: new(0)})
+			opts := ai.StreamOptions{MaxRetries: new(0)}
+			if tc.name == "provider_quota_capped" || tc.name == "guard_quota" {
+				opts = ai.StreamOptions{MaxRetries: new(1), MaxRetryDelayMs: new(1000)}
+			}
+			stream, err := provider.Stream(ctx, ai.NormalizeContext(ai.Context{Messages: []ai.Message{ai.UserMessage{Content: ai.UserText("hi")}}}), opts)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -53,7 +62,7 @@ func TestModelRouteCarriesRetryHintInPiGError(t *testing.T) {
 			}
 			result := stream.Result()
 			if result.StopReason != ai.StopReasonError || (tc.want != "" && !strings.Contains(result.ErrorMessage, tc.want)) || (tc.want == "" && strings.Contains(result.ErrorMessage, `"reset_seconds"`)) {
-				t.Fatalf("wanted reset %q in a model failure; got %q, %q", tc.want, result.StopReason, result.ErrorMessage)
+				t.Fatalf("wanted retry hint %q in a model failure; got %q, %q", tc.want, result.StopReason, result.ErrorMessage)
 			}
 		})
 	}
