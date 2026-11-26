@@ -202,6 +202,7 @@ func Run(ctx context.Context) error {
 		return problem
 	}
 	mux.Handle("/dyna/", dynaTools)
+	mux.Handle(agyDynaPath, dynaTools.Agy())
 	err = pig.WriteAgentMCPConfig(mcpPath, dynaTools.Description(), !hello.Root && hello.Workflow == nil, hello.Advisor, addedServers)
 	if err != nil {
 		return err

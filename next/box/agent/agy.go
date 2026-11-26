@@ -28,13 +28,16 @@ func agyProjectInstructions(paths []string) []string {
 	return out
 }
 
+// agyDynaPath is where the box serves the dyna tools' compact listing, which agy declares in full; Pi reads /dyna/.
+const agyDynaPath = "/dyna-agy/"
+
 // openAgy opens the session's agy harness in place of PiG: the dyna tools, and GitHub's when the engine serves them, are its MCP servers.
 // The profile directory is the host's own, mounted read-write: the box never reads or copies a file in it.
 func openAgy(ctx context.Context, hello contract.BoxHelloResponse, workdir, sessions string, contextFiles []string, activity *activity, notice func(string)) (*agy.Harness, error) {
 	if hello.Agy == nil {
 		return nil, errors.New("the hello names the agy harness without its files")
 	}
-	servers := []agy.MCPServer{{Name: "dyna", URL: pig.DynaMCPURL}}
+	servers := []agy.MCPServer{{Name: "dyna", URL: "http://127.0.0.1:7781" + agyDynaPath}}
 	if hello.GitHub {
 		servers = append(servers, agy.MCPServer{Name: "github", URL: pig.GitHubMCPURL})
 	}
