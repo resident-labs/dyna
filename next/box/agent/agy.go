@@ -8,7 +8,6 @@ import (
 
 	"github.com/resident-labs/dyna/contract"
 	"github.com/resident-labs/dyna/harness/agy"
-	"github.com/resident-labs/dyna/harness/pig"
 )
 
 // agyContextFiles are the two instruction files PiG loads from its agent folder and from the parent of the work folder. agy reads
@@ -47,7 +46,7 @@ func openAgy(ctx context.Context, hello contract.BoxHelloResponse, workdir, sess
 	}
 	servers := []agy.MCPServer{{Name: "dyna", URL: "http://127.0.0.1:7781" + agyDynaPath}}
 	if hello.GitHub {
-		servers = append(servers, agy.MCPServer{Name: "github", URL: pig.GitHubMCPURL})
+		servers = append(servers, agy.MCPServer{Name: "github", URL: "http://127.0.0.1:7781" + contract.GitHubAgyPath})
 	}
 	h, err := agy.Open(ctx, agy.Config{
 		Binary:              hello.Agy.Binary,

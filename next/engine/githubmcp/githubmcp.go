@@ -92,14 +92,22 @@ func Handler(ctx context.Context, token string, reads http.RoundTripper, owns fu
 
 	var mu sync.Mutex
 	servers := map[string]*mcp.Server{}
-	serverFor := func(grant contract.GitHubWrites) (*mcp.Server, error) {
+	// compact is agy's listing of the same tools (compact.go); there is one server for each set of groups and each listing.
+	serverFor := func(grant contract.GitHubWrites, compact bool) (*mcp.Server, error) {
 		mu.Lock()
 		defer mu.Unlock()
 		names := githubwrites.ToolNames(grant)
 		key := strings.Join(names, " ")
+		if compact {
+			key += "|agy"
+		}
 		if servers[key] != nil {
 			return servers[key], nil
 		}
+		offered := func(tool *inventory.ServerTool) bool {
+			return !slices.Contains(excluded, tool.Tool.Name) && (tool.IsReadOnly() || slices.Contains(names, tool.Tool.Name))
+		}
+		help := map[string]string{}
 		tools := github.AllTools(t, github.WithHost(utils.HostTypeDotcom))
 		for i := range tools {
 			tool := &tools[i].Tool
@@ -134,6 +142,13 @@ func Handler(ctx context.Context, token string, reads http.RoundTripper, owns fu
 					tool.InputSchema = &copied
 				}
 			}
+			if compact && offered(&tools[i]) {
+				text, err := compactTool(tool)
+				if err != nil {
+					return nil, fmt.Errorf("compact %s: %w", tool.Name, err)
+				}
+				help[tool.Name] = text
+			}
 		}
 		inventory, err := inventory.NewBuilder().SetTools(tools).SetResources(github.AllResources(t)).SetPrompts(github.AllPrompts(t)).
 			WithDeprecatedAliases(github.DeprecatedToolAliases).
@@ -141,7 +156,7 @@ func Handler(ctx context.Context, token string, reads http.RoundTripper, owns fu
 			WithToolsets([]string{"all"}).
 			WithExcludeTools(excluded).
 			WithFilter(func(_ context.Context, tool *inventory.ServerTool) (bool, error) {
-				return tool.IsReadOnly() || slices.Contains(names, tool.Tool.Name), nil
+				return offered(tool), nil
 			}).
 			WithServerInstructions().
 			WithFeatureChecker(enabled).
@@ -153,15 +168,20 @@ func Handler(ctx context.Context, token string, reads http.RoundTripper, owns fu
 		if err != nil {
 			return nil, fmt.Errorf("github-mcp-server: %w", err)
 		}
+		if compact {
+			tool, handler := helpTool(help)
+			server.AddTool(tool, handler)
+			server.AddReceivingMiddleware(withHelp(help))
+		}
 		servers[key] = server
 		return server, nil
 	}
 	// Building the read-only server now reports a broken build at start-up, not at a box's first call.
-	if _, err := serverFor(contract.GitHubWrites{}); err != nil {
+	if _, err := serverFor(contract.GitHubWrites{}, false); err != nil {
 		return nil, err
 	}
 	return mcp.NewStreamableHTTPHandler(func(r *http.Request) *mcp.Server {
-		server, err := serverFor(githubwrites.AllowedFrom(r.Context()))
+		server, err := serverFor(githubwrites.AllowedFrom(r.Context()), strings.HasPrefix(r.URL.Path, contract.GitHubAgyPath))
 		if err != nil {
 			log.Printf("GitHub tools for a room: %v", err)
 			return nil
