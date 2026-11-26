@@ -1,6 +1,6 @@
 module github.com/resident-labs/dyna
 
-go 1.26.10
+go 1.27.4
 
 require (
 	github.com/MichaelKinsy/PiG v0.5.3
