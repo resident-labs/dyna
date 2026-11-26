@@ -900,6 +900,9 @@ type TurnOutputRequest struct {
 	// LeftAgy is set by the engine when an agy turn ends after its session moved to pig: the turn is still held to agy's one wake at
 	// its reset, but the streak and the account are left alone, as the session no longer runs there.
 	LeftAgy bool `json:"-"`
+	// Accounts is set by the engine, not the box, with a usage limit that has a reset: the agy account folders listed on the host now,
+	// the only ones the session may wait on or move to. Empty when the engine could not list them.
+	Accounts []string `json:"-"`
 }
 type TurnOutputResponse struct{}
 

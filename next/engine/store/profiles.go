@@ -141,13 +141,13 @@ func (s *Store) AgyStreak(ctx context.Context, session contract.SessionID, now t
 	return limited, rows.Err()
 }
 
-// TurnPredatesHandoff says a turn started before the session's handoff became due, so the harness that serves it is the one the
-// session left: the turn was running when the session changed harness.
-func (s *Store) TurnPredatesHandoff(ctx context.Context, session contract.SessionID, turn contract.TurnID) (bool, error) {
-	var predates bool
-	err := s.Read().QueryRowContext(ctx, "SELECT s.handoff>0 AND s.handoff>=COALESCE(t.started_seq,0) FROM sessions s JOIN turns t ON t.session=s.id WHERE s.id=? AND t.id=?", session, turn).Scan(&predates)
+// TurnServing is the profile a turn was dispatched under, which names the harness that served it (dispatch waits for a box that
+// serves the session's current harness and account), and whether the session changed harness or account after the turn started.
+// The profile is empty for a turn from before the column existed.
+func (s *Store) TurnServing(ctx context.Context, session contract.SessionID, turn contract.TurnID) (profile contract.ProfileName, changed bool, err error) {
+	err = s.Read().QueryRowContext(ctx, "SELECT t.profile,s.handoff>=COALESCE(t.started_seq,0) AND s.handoff>0 FROM turns t JOIN sessions s ON s.id=t.session WHERE t.session=? AND t.id=?", session, turn).Scan(&profile, &changed)
 	if errors.Is(err, sql.ErrNoRows) {
-		return false, nil
+		return "", false, nil
 	}
-	return predates, err
+	return profile, changed, err
 }

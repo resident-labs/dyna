@@ -645,15 +645,16 @@ func (s *Service) markRefresh(ctx context.Context, target contract.SessionID, wa
 	return nil
 }
 
-// refreshBox restarts a session's box on the container its profile and account now call for: at once if a box is up, which waits
-// for its turn to end and comes back to the input that follows; a box asleep starts that way on its next input.
-func (s *Service) refreshBox(ctx context.Context, target store.Session) {
+// refreshBox restarts a session's box on the container its profile and account now call for, once its turn ends. With wake a box
+// that is up comes straight back to the input that follows; without it the box stays down until an input or a scheduled wake
+// starts it, on the new container.
+func (s *Service) refreshBox(ctx context.Context, target store.Session, wake bool) {
 	running, err := s.store.RunningSessions(ctx, target.Room)
 	if err != nil {
 		log.Printf("session %s: box restart: %v", target.ID, err)
 		return
 	}
-	if problem := s.markRefresh(ctx, target.ID, slices.Contains(running, target.ID)); problem != nil && problem.Code != contract.ErrNotFound {
+	if problem := s.markRefresh(ctx, target.ID, wake && slices.Contains(running, target.ID)); problem != nil && problem.Code != contract.ErrNotFound {
 		log.Printf("session %s: box restart: %v", target.ID, problem)
 	}
 	s.reconciler.Kick()
@@ -802,7 +803,7 @@ func (s *Service) SessionSetProfile(ctx context.Context, caller contract.Princip
 	if problem == nil {
 		s.sessionsMoved(ctx, []store.Session{target}, req.Profile)
 		if switching {
-			s.refreshBox(ctx, target)
+			s.refreshBox(ctx, target, true)
 		}
 	}
 	return response, problem

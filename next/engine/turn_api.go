@@ -209,21 +209,22 @@ func (s *Service) TurnOutput(ctx context.Context, caller contract.Principal, req
 		req.Outcome, req.Cause, req.Error = contract.TurnStopped, contract.CauseClosed, ""
 	}
 	req.Usage.Model = req.Model
-	// The harness that served the turn is the session's now, unless the session changed harness while the turn ran.
-	served := s.profiles.Harness(session.Profile)
-	if predates, err := s.store.TurnPredatesHandoff(ctx, session.ID, req.Turn); err != nil {
+	// The harness that served the turn is the one its profile named when it was dispatched, not the session's now: the session may
+	// have changed harness or account while it ran.
+	servedProfile, changed, err := s.store.TurnServing(ctx, session.ID, req.Turn)
+	if err != nil {
 		return contract.TurnOutputResponse{}, failure(err)
-	} else if predates {
-		if served == contract.HarnessAgy {
-			served = contract.HarnessPig
-		} else {
-			served = contract.HarnessAgy
-		}
 	}
-	req.OneWake = served == contract.HarnessAgy
-	req.LeftAgy = req.OneWake && s.profiles.Harness(session.Profile) != contract.HarnessAgy
+	if servedProfile == "" {
+		servedProfile = session.Profile
+	}
+	req.OneWake = s.profiles.Harness(servedProfile) == contract.HarnessAgy
+	// A turn that ended after its session changed harness or account is held to agy's one wake, but its limit says nothing about
+	// the account the session is on now.
+	req.LeftAgy = req.OneWake && (changed || s.profiles.Harness(session.Profile) != contract.HarnessAgy)
 	if req.OneWake && !req.LeftAgy && req.Outcome == contract.TurnFailed && req.Cause == contract.CauseModelFailed && req.ModelRetryAfterSeconds > 0 {
-		req.MoveTo = s.agyMoveTarget(ctx, session)
+		req.Accounts = s.agyAccountList(ctx, session)
+		req.MoveTo = s.agyMoveTarget(ctx, session, req.Accounts)
 	}
 	run, err := s.store.SessionWorkflow(ctx, session.ID)
 	if err != nil && !errors.Is(err, store.ErrNotFound) {
@@ -263,9 +264,10 @@ func (s *Service) TurnOutput(ctx context.Context, caller contract.Principal, req
 	}
 	if req.OneWake && !req.LeftAgy {
 		// The store moves the session to another account on a limit, or to the one that resets first when all are limited. Its box
-		// restarts on that account, and the wake follows the restart.
+		// restarts on that account. A move wakes it at once, on the restart; waiting for the earliest reset wakes nothing, since the
+		// scheduled wake at that reset is the only one.
 		if moved, err := s.store.Session(ctx, session.ID); err == nil && agyAccountName(moved.AgyAccount) != agyAccountName(session.AgyAccount) {
-			s.refreshBox(ctx, moved)
+			s.refreshBox(ctx, moved, req.MoveTo != "")
 		}
 	}
 	if crew && run.Subscription != "" && run.Key == "" && summary.State == contract.WorkflowFailed {

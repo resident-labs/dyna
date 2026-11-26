@@ -550,33 +550,38 @@ func (s *Service) checkHarnessSwitch(ctx context.Context, target store.Session, 
 	return nil
 }
 
-// agyMoveTarget is the signed-in agy account a session moves to after a usage limit with a stated reset: the first one on its host
-// that is not the session's own and has not returned a limit in this streak, or empty when there is none, the service cannot
-// list accounts, or anything fails, in which case the session waits for its reset. Names come only from the host's folder
-// listing and must be one plain path element.
-func (s *Service) agyMoveTarget(ctx context.Context, session store.Session) string {
+// agyAccountList is the agy account folders listed on the session's host now, whole names that are one plain path element, or
+// nil when its box cannot hand a conversation over, the service cannot list accounts, or the listing fails: the session then waits
+// out its limit on its own account.
+func (s *Service) agyAccountList(ctx context.Context, session store.Session) []string {
 	if s.agyAccounts == nil {
-		return ""
+		return nil
 	}
 	current, err := s.store.Box(ctx, session.Box)
 	if err != nil {
-		return ""
+		return nil
 	}
 	if can, err := s.store.BoxCanHandoff(ctx, session.Box); err != nil || !can {
-		return ""
+		return nil
 	}
 	names, err := s.agyAccounts(ctx, current.Host)
 	if err != nil {
 		log.Printf("session %s: listing agy accounts: %v", session.ID, err)
-		return ""
+		return nil
 	}
+	return slices.DeleteFunc(names, func(name string) bool { return !box.ValidAgyAccount(name) })
+}
+
+// agyMoveTarget is the account a session moves to after a usage limit with a stated reset: the first listed one that is not its own
+// and has not returned a limit in this streak, or empty when there is none, in which case the session waits for a reset.
+func (s *Service) agyMoveTarget(ctx context.Context, session store.Session, listed []string) string {
 	limited, err := s.store.AgyStreak(ctx, session.ID, s.now())
 	if err != nil {
 		return ""
 	}
 	limited[agyAccountName(session.AgyAccount)] = true
-	for _, name := range names {
-		if box.ValidAgyAccount(name) && !limited[name] {
+	for _, name := range listed {
+		if !limited[name] {
 			return name
 		}
 	}

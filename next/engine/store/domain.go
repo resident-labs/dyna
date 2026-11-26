@@ -418,9 +418,9 @@ func (s *Store) EndTurn(ctx context.Context, session contract.SessionID, output 
 							return err
 						}
 					} else {
-						// Every account is limited: the session waits for the earliest reset, on the account whose reset it is.
+						// Every listed account is limited: the session waits for the earliest reset, on the account whose reset it is.
 						var account string
-						if err := tx.QueryRowContext(ctx, "SELECT account,reset_at FROM agy_streak WHERE session=? AND reset_at>? ORDER BY reset_at,account LIMIT 1", session, event.Time.UnixMilli()).Scan(&account, &retryAt); err != nil {
+						if err := tx.QueryRowContext(ctx, "SELECT account,reset_at FROM agy_streak WHERE session=? AND reset_at>? AND (account IN (SELECT value FROM json_each(?)) OR account=(SELECT COALESCE(NULLIF(agy_account,''),?) FROM sessions WHERE id=?)) ORDER BY reset_at,account LIMIT 1", session, event.Time.UnixMilli(), mustJSON(output.Accounts), box.DefaultAgyAccount, session).Scan(&account, &retryAt); err != nil {
 							return err
 						}
 						if _, err := tx.ExecContext(ctx, "UPDATE sessions SET agy_account=?,handoff=MAX(1,(SELECT COALESCE(MAX(seq),0) FROM events)) WHERE id=? AND COALESCE(NULLIF(agy_account,''),?)!=?", account, session, box.DefaultAgyAccount, account); err != nil {
@@ -1120,7 +1120,7 @@ func (s *Store) dispatch(ctx context.Context, session contract.SessionID, turn c
 	var paused bool
 	err = s.Write(ctx, func(tx *sql.Tx) error {
 		var boxID contract.BoxID
-		err := tx.QueryRowContext(ctx, `SELECT b.id,s.profile,r.paused_at IS NOT NULL FROM sessions s JOIN boxes b ON b.session=s.id JOIN rooms r ON r.id=s.room WHERE s.id=? AND s.state='open' AND s.closed_at IS NULL AND b.want='run' AND b.state='ready'`, session).Scan(&boxID, &profile, &paused)
+		err := tx.QueryRowContext(ctx, `SELECT b.id,s.profile,r.paused_at IS NOT NULL FROM sessions s JOIN boxes b ON b.session=s.id JOIN rooms r ON r.id=s.room WHERE s.id=? AND s.state='open' AND s.closed_at IS NULL AND b.want='run' AND b.state='ready' AND NOT (s.handoff>0 AND b.hello_seq<=s.handoff)`, session).Scan(&boxID, &profile, &paused)
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil
 		}
@@ -1267,7 +1267,7 @@ func (s *Store) dispatch(ctx context.Context, session contract.SessionID, turn c
 			if err != nil {
 				return err
 			}
-			_, err = tx.ExecContext(ctx, "INSERT INTO turns(id,session,started_at,started_seq,outcome,model,input_tokens,output_tokens,cache_read_tokens,cache_write_tokens,cleared_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)", active, session, started.Time.UnixMilli(), seq, "", "", 0, 0, 0, 0, clearedAt)
+			_, err = tx.ExecContext(ctx, "INSERT INTO turns(id,session,started_at,started_seq,outcome,model,input_tokens,output_tokens,cache_read_tokens,cache_write_tokens,cleared_at,profile) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)", active, session, started.Time.UnixMilli(), seq, "", "", 0, 0, 0, 0, clearedAt, profile)
 			if err != nil {
 				return err
 			}
