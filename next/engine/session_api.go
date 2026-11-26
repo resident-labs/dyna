@@ -194,7 +194,7 @@ func (s *Service) startSession(ctx context.Context, caller contract.Principal, r
 		return contract.SessionStartResponse{}, failure(err)
 	}
 	var response contract.SessionStartResponse
-	problem = s.withProfile(req.Profile, func() *contract.Error {
+	problem = s.withProfile(req.Profile, func(_ func(contract.ProfileName) contract.Harness) *contract.Error {
 		var err error
 		session.AccountProfiles, session.AccountLimit = s.agyAccount(req.Profile)
 		response, err = s.store.StartSession(ctx, session, parent, sizeName, req.Goal, event, initial, "", req.SameHost, req.Host, req.ClientID, s.maxDepth)
@@ -775,10 +775,10 @@ func (s *Service) SessionSetProfile(ctx context.Context, caller contract.Princip
 	switching := false
 	// The harnesses are compared, the target checked and the write committed under one hold of the profile registry, so an edit of
 	// either profile cannot land between the decision and the write.
-	problem = s.withProfile(req.Profile, func() *contract.Error {
+	problem = s.withProfile(req.Profile, func(harnessOf func(contract.ProfileName) contract.Harness) *contract.Error {
 		var harness *store.HarnessSwitch
-		if switching = s.profiles.Harness(target.Profile) != s.profiles.Harness(req.Profile); switching {
-			if problem := s.checkHarnessSwitch(ctx, target, req.Profile); problem != nil {
+		if switching = harnessOf(target.Profile) != harnessOf(req.Profile); switching {
+			if problem := s.checkHarnessSwitch(ctx, target, req.Profile, harnessOf(req.Profile)); problem != nil {
 				return problem
 			}
 			harness = &store.HarnessSwitch{RequireHandoff: true}

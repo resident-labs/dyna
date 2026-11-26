@@ -361,12 +361,25 @@ func (s *Store) FinishCreate(ctx context.Context, b box.Box, image, failure stri
 
 // BeginSessionStartup records that the agent answered, but its harness is not ready.
 // Preserve retry counters and desired state; a concurrent stop or expired admission wins.
-func (s *Store) BeginSessionStartup(ctx context.Context, b box.Box, event contract.Event) error {
-	return s.Write(ctx, func(tx *sql.Tx) error {
+// A container made before the session's handoff became due (launchGen is the one it was made for) has the old harness's layout and
+// cannot run the new one: it gets no startup time and its stop is requested instead, which the returned bool says. The comparison
+// and that choice are in the write that would extend the startup, so a switch cannot land between them.
+func (s *Store) BeginSessionStartup(ctx context.Context, b box.Box, launchGen int64, event contract.Event) (bool, error) {
+	var obsolete bool
+	err := s.Write(ctx, func(tx *sql.Tx) error {
 		// The state is read here and not taken from the caller: the agent answers within a tenth of a second of its
 		// container starting, so the engine's own step from creating to starting can land between the caller's read and
 		// this write. Refusing that hello made the agent exit, and the box then failed with "no hello within 60 s".
 		if err := tx.QueryRowContext(ctx, "SELECT state FROM boxes WHERE id=? AND state IN ('creating','starting')", b.ID).Scan(&b.State); err != nil {
+			return err
+		}
+		var handoff int64
+		if err := tx.QueryRowContext(ctx, "SELECT handoff FROM sessions WHERE id=?", b.Session).Scan(&handoff); err != nil {
+			return err
+		}
+		if handoff > 0 && launchGen != handoff {
+			obsolete = true
+			_, err := tx.ExecContext(ctx, "UPDATE boxes SET want='stop' WHERE id=? AND want='run'", b.ID)
 			return err
 		}
 		event.Body = contract.BoxChanged{Box: b.ID, Session: b.Session, Host: b.Host, From: b.State, To: contract.BoxStarting, Reason: box.SessionStartupReason}
@@ -377,4 +390,5 @@ func (s *Store) BeginSessionStartup(ctx context.Context, b box.Box, event contra
 		_, err = s.AppendEvent(tx, event)
 		return err
 	})
+	return obsolete, err
 }

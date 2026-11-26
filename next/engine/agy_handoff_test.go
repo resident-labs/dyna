@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/resident-labs/dyna/box"
 	"github.com/resident-labs/dyna/contract"
 )
 
@@ -334,7 +335,7 @@ func TestProfileEditWaitsForAnAssignmentInFlight(t *testing.T) {
 		t.Fatal(err)
 	}
 	inside, release, done := make(chan struct{}), make(chan struct{}), make(chan *contract.Error)
-	go config.WithProfile("test", func() *contract.Error {
+	go config.WithProfile("test", func(func(contract.ProfileName) contract.Harness) *contract.Error {
 		close(inside)
 		<-release
 		return nil
@@ -354,5 +355,79 @@ func TestProfileEditWaitsForAnAssignmentInFlight(t *testing.T) {
 	}
 	if config.Harness("test") != contract.HarnessAgy {
 		t.Fatal("the edit did not apply")
+	}
+}
+
+// A profile edit queued behind an assignment must not hang it: the assignment reads harnesses through the lock it holds, and a second
+// read lock would block behind the queued writer, which waits for the assignment.
+func TestHarnessReadUnderTheHeldLockCompletesWithAnEditQueued(t *testing.T) {
+	config, err := loadAgyProfiles(t, agyProfilesJSON)
+	if err != nil {
+		t.Fatal(err)
+	}
+	finished := make(chan contract.Harness, 1)
+	go func() {
+		config.WithProfile("gem", func(harnessOf func(contract.ProfileName) contract.Harness) *contract.Error {
+			queued := make(chan struct{})
+			go func() {
+				close(queued)
+				config.Set("other", &profile{Provider: "openai", Model: "m", AllowedModels: []string{"m"}, Thinking: "low", Harness: contract.HarnessPig}, false, func(profile) *contract.Error { return nil })
+			}()
+			<-queued
+			time.Sleep(100 * time.Millisecond)
+			finished <- harnessOf("other")
+			return nil
+		})
+	}()
+	select {
+	case h := <-finished:
+		if h != contract.HarnessPig {
+			t.Fatalf("harness %q", h)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("deadlock: a harness read under the held lock blocked behind a queued edit")
+	}
+}
+
+// The launch generation is compared in the write that would extend the startup, so a switch that commits after the hello read the
+// session still stops the old container instead of giving it startup time.
+func TestStartupWriteComparesTheLaunchGeneration(t *testing.T) {
+	s, room, _, owner := agySetup(t)
+	ctx := t.Context()
+	sid := startOn(t, s, room, "race", "other", "hermeslab")
+	readySession(t, s, sid)
+	if err := s.store.Write(ctx, func(tx *sql.Tx) error {
+		_, err := tx.Exec("UPDATE boxes SET state='starting' WHERE session=?", sid)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	before, err := s.store.Session(ctx, sid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The hello read the session above; the switch commits now.
+	if _, e := s.SessionSetProfile(ctx, owner, contract.SessionSetProfileRequest{Session: sid, Profile: "gem"}); e != nil {
+		t.Fatal(e)
+	}
+	current, err := s.store.Box(ctx, before.Box)
+	if err != nil {
+		t.Fatal(err)
+	}
+	event, err := s.engineEvent(before.Room, contract.BoxChanged{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	obsolete, err := s.store.BeginSessionStartup(ctx, current, before.HandoffGen, event)
+	if err != nil || !obsolete {
+		t.Fatalf("obsolete=%v err=%v", obsolete, err)
+	}
+	var want string
+	var due int64
+	if err := s.store.Read().QueryRowContext(ctx, "SELECT want,due_at FROM boxes WHERE id=?", current.ID).Scan(&want, &due); err != nil {
+		t.Fatal(err)
+	}
+	if want != "stop" || due >= event.Time.Add(box.SessionStartupBudget).UnixMilli() {
+		t.Fatalf("want %q due %d: the obsolete launch was given startup time", want, due)
 	}
 }

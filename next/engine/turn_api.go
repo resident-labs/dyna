@@ -14,6 +14,8 @@ import (
 	"github.com/resident-labs/dyna/engine/store"
 )
 
+var errStaleLaunch = &contract.Error{Code: contract.ErrConflict, Message: "this box was made before its session changed harness and is being replaced"}
+
 func (s *Service) BoxHello(ctx context.Context, caller contract.Principal, req contract.BoxHelloRequest) (contract.BoxHelloResponse, *contract.Error) {
 	if caller.Kind != contract.PrincipalSession {
 		return contract.BoxHelloResponse{}, forbidden()
@@ -32,7 +34,7 @@ func (s *Service) BoxHello(ctx context.Context, caller contract.Principal, req c
 		}
 		if stopped {
 			s.reconciler.Kick()
-			return contract.BoxHelloResponse{}, &contract.Error{Code: contract.ErrConflict, Message: "this box was made before its session changed harness and is being replaced"}
+			return contract.BoxHelloResponse{}, errStaleLaunch
 		}
 	}
 	// This goes before the box is ready, or a mark from its last run could stop it again.
@@ -49,8 +51,13 @@ func (s *Service) BoxHello(ctx context.Context, caller contract.Principal, req c
 		if eventErr != nil {
 			return contract.BoxHelloResponse{}, failure(eventErr)
 		}
-		if err := s.store.BeginSessionStartup(ctx, current, event); err != nil {
+		obsolete, err := s.store.BeginSessionStartup(ctx, current, req.LaunchGen, event)
+		if err != nil {
 			return contract.BoxHelloResponse{}, failure(err)
+		}
+		if obsolete {
+			s.reconciler.Kick()
+			return contract.BoxHelloResponse{}, errStaleLaunch
 		}
 	} else if current.State == contract.BoxCreating || current.State == contract.BoxStarting || current.State == contract.BoxLost {
 		_, err = s.transition(ctx, session.Room, current, contract.BoxReady, "", "")
