@@ -1168,6 +1168,18 @@ func TestConvertCodexResponseToOpenAIMessageTextFallback(t *testing.T) {
 			want: "Alpha",
 		},
 		{
+			name: "anonymous done without deltas supplies text once",
+			events: []string{
+				`{"type":"response.created","response":{"id":"resp_1"}}`,
+				`{"type":"response.output_item.added","item":{"type":"message"}}`,
+				`{"type":"response.output_item.done","item":{"type":"message","content":[]}}`,
+				`{"type":"response.output_item.done","item":{"type":"message","content":[{"type":"output_text","text":"Beta"}]}}`,
+				`{"type":"response.output_item.done","item":{"type":"message","content":[{"type":"output_text","text":"Beta"}]}}`,
+				`{"type":"response.completed","response":{"id":"resp_1","status":"completed","usage":{"input_tokens":3,"output_tokens":2,"total_tokens":5}}}`,
+			},
+			want: "Beta",
+		},
+		{
 			name: "anonymous announcement is another candidate for a keyless delta",
 			events: []string{
 				`{"type":"response.output_item.added","output_index":0,"item":{"type":"message","id":"a"}}`,

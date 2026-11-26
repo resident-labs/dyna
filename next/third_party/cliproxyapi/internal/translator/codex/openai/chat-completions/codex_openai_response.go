@@ -406,6 +406,10 @@ func ConvertCodexResponseToOpenAI(_ context.Context, modelName string, originalR
 				text := fallback.String()
 				template, _ = sjson.SetBytes(template, "choices.0.delta.content", text)
 				p.emittedTextRunes += int64(utf8.RuneCountInString(text))
+				if len(p.messageStates) == 0 {
+					// A keyless snapshot cannot be distinguished from later replays.
+					p.unattributedText = true
+				}
 			}
 			if len(citations) > 0 {
 				template, _ = sjson.SetRawBytes(template, "choices.0.delta.annotations", translatorcommon.JoinRawArray(citations))
@@ -858,9 +862,16 @@ func (p *ConvertCliToOpenAIParams) observeMessage(event, item gjson.Result, kind
 	}
 	index := event.Get("output_index")
 	hasIndex := index.Type == gjson.Number
-	if kind == messageAdded && itemID == "" && !hasIndex {
-		p.hasAnonymousMessage = true
-		return false
+	if itemID == "" && !hasIndex {
+		if kind == messageAdded {
+			p.hasAnonymousMessage = true
+			return false
+		}
+		if kind == messageDone && len(p.messageStates) == 0 {
+			// No keyed item or unattributed text has been seen, so the first
+			// nonempty snapshot can supply text without replaying a delta.
+			return true
+		}
 	}
 
 	var state *messageStreamState
@@ -917,7 +928,7 @@ func (p *ConvertCliToOpenAIParams) observeMessage(event, item gjson.Result, kind
 			// No open item explains the delta; a later announcement may describe it.
 			p.unattributedText = true
 		}
-		return kind == messageDone && !ambiguous && len(p.messageStates) == 0
+		return false
 	}
 	if state == nil {
 		state = &messageStreamState{suppressFallback: ambiguous}
