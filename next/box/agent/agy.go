@@ -37,6 +37,14 @@ func openAgy(ctx context.Context, hello contract.BoxHelloResponse, workdir, sess
 	if hello.Agy == nil {
 		return nil, errors.New("the hello names the agy harness without its files")
 	}
+	// Read before agy opens, which adds its own mirror file to the folder.
+	var history string
+	if hello.Handoff {
+		var err error
+		if history, err = handoffHistory(sessions); err != nil {
+			return nil, err
+		}
+	}
 	servers := []agy.MCPServer{{Name: "dyna", URL: "http://127.0.0.1:7781" + agyDynaPath}}
 	if hello.GitHub {
 		servers = append(servers, agy.MCPServer{Name: "github", URL: pig.GitHubMCPURL})
@@ -51,7 +59,9 @@ func openAgy(ctx context.Context, hello contract.BoxHelloResponse, workdir, sess
 		ProjectInstructions: agyProjectInstructions(contextFiles),
 		ModelInstructions:   hello.ModelInstructions,
 		MCPServers:          servers,
-		New:                 hello.Fresh,
+		New:                 hello.Fresh || hello.Handoff,
+		Handoff:             history,
+		HandoffGen:          hello.HandoffGen,
 		Notice:              notice,
 	})
 	if err != nil {

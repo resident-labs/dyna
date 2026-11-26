@@ -250,6 +250,14 @@ func Run(ctx context.Context) error {
 			}
 			h, files = session, func() []string { return []string{session.SessionFile()} }
 		} else {
+			pigNew := hello.Fresh
+			var history string
+			if piHandoffDue(hello, handoffMarker) {
+				if history, err = handoffHistory(sessions); err != nil {
+					return err
+				}
+				pigNew = true
+			}
 			interrupts := dynaext.NewInterrupts()
 			session, err := pig.Open(ctx, pig.Config{
 				Dir:               workdir,
@@ -259,7 +267,7 @@ func Run(ctx context.Context) error {
 				CompactTokens:     hello.CompactTokens,
 				Instructions:      hello.Instructions,
 				ModelInstructions: hello.ModelInstructions,
-				New:               hello.Fresh,
+				New:               pigNew,
 				Extensions:        []extension.InlineExtension{dynaext.Extension(dynaext.Config{Dir: workdir, Shell: jobs, Dyna: dynaTools, Interrupts: interrupts})},
 				Notice:            func(text string) { go notice(text) },
 			})
@@ -268,7 +276,11 @@ func Run(ctx context.Context) error {
 			}
 			session.Activity = activity.set
 			session.Finished = activity.finish
-			h, files, steered = session, func() []string { return []string{session.SessionFile()} }, func(sender contract.Interrupt) { jobs.StepAside(sender); interrupts.Send(sender) }
+			var piHarness boxHarness = session
+			if history != "" || pigNew && hello.Handoff {
+				piHarness = &handoffStart{boxHarness: session, history: history, gen: hello.HandoffGen, marker: handoffMarker}
+			}
+			h, files, steered = piHarness, func() []string { return []string{session.SessionFile()} }, func(sender contract.Interrupt) { jobs.StepAside(sender); interrupts.Send(sender) }
 		}
 	}
 	defer h.Close()
