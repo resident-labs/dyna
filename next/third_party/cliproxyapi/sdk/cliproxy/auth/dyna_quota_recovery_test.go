@@ -80,3 +80,30 @@ func TestDynaCodexReportingModelRecovers(t *testing.T) {
 		})
 	}
 }
+
+// Model 2026-11-26: figueredoaria was reset early. The credential layer was released, and claude-opus-5-5, which had
+// reported the weekly rejection on 23 Nov, kept its own layer until the old deadline while sonnet and fable ran.
+// A layer whose signals name the shared weekly window is released; one without them (a model's own limit) stays.
+func TestDynaClaudeSharedWeeklyReportingModelRecovers(t *testing.T) {
+	for _, shared := range []bool{true, false} {
+		manager := NewManager(nil, nil, nil)
+		now := time.Now()
+		deadline := now.Add(60 * time.Hour)
+		signals := map[string]string{"Anthropic-Ratelimit-Unified-7d_oi-Status": "rejected"}
+		if shared {
+			signals = map[string]string{"Anthropic-Ratelimit-Unified-7d-Status": "rejected"}
+		}
+		a := &Auth{ID: "reporting", Provider: "claude", RegistrationEpoch: 1, Status: StatusActive, UpdatedAt: now.Add(-time.Minute), Quota: QuotaState{Exceeded: true, Reason: "quota", NextRecoverAt: deadline}}
+		a.ModelStates = map[string]*ModelState{
+			"claude-opus-5-5":   {Status: StatusError, Unavailable: true, UpdatedAt: now.Add(-72 * time.Hour), NextRetryAfter: deadline, Quota: QuotaState{Exceeded: true, Reason: "quota", NextRecoverAt: deadline, Signals: signals}},
+			"claude-sonnet-5-5": {Status: StatusActive},
+		}
+		reader := a.Clone()
+		manager.auths[a.ID] = a
+		manager.PublishQuotaReadingForAuth(reader, QuotaResetHint{ObservedAt: now, Windows: []QuotaResetWindow{{Seconds: 604800, UsedPercent: 2, ResetAt: deadline}}})
+		opus := a.ModelStates["claude-opus-5-5"]
+		if released := !opus.Quota.Exceeded && !opus.Unavailable && !a.Quota.Exceeded; released != shared {
+			t.Fatalf("released=%v with shared=%v", released, shared)
+		}
+	}
+}

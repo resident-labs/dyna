@@ -37,8 +37,23 @@ func (m *Manager) reconcileQuotaReading(id string, hint QuotaResetHint) {
 	// quota layer is the same rejection, and an unscoped window with headroom releases it. That layer can also
 	// be all that is left after an earlier release, when the credential reads "quota" aggregated from it.
 	codex := a != nil && a.Provider == "codex"
+	// A Claude model that recorded the shared weekly window as rejected holds that same rejection, not a limit
+	// of its own, so the unscoped weekly window releases it too. Model 2026-11-26: an early weekly reset freed
+	// the account, and claude-opus-5-5, which had reported the rejection, stayed cooled down for three more days.
+	sharedWeekly := func(state *ModelState) bool {
+		return codex || state.Quota.Signals["Anthropic-Ratelimit-Unified-7d-Status"] == "rejected"
+	}
+	aggregated := codex && a.Quota.Reason == "quota"
+	if a != nil && !aggregated && a.Quota.Reason == "quota" {
+		for _, state := range a.ModelStates {
+			if state != nil && state.Quota.Exceeded && state.Quota.Reason == "quota" && state.Quota.NextRecoverAt.Equal(a.Quota.NextRecoverAt) && sharedWeekly(state) {
+				aggregated = true
+				break
+			}
+		}
+	}
 	if a == nil || (a.Provider != "claude" && !codex) || a.RegistrationEpoch != hint.registrationEpoch ||
-		!(a.Quota.Reason == "credential_quota" || codex && a.Quota.Reason == "quota") || !a.Quota.Exceeded || !hint.ObservedAt.After(a.UpdatedAt) || hasUnauthorizedAuthFailure(a) {
+		!(a.Quota.Reason == "credential_quota" || aggregated) || !a.Quota.Exceeded || !hint.ObservedAt.After(a.UpdatedAt) || hasUnauthorizedAuthFailure(a) {
 		m.mu.Unlock()
 		return
 	}
@@ -63,7 +78,7 @@ func (m *Manager) reconcileQuotaReading(id string, hint QuotaResetHint) {
 			// Legacy persisted reporting models lack the runtime propagation marker.
 			// Require explicit model headroom before releasing that original quota layer.
 			for _, window := range hint.Windows {
-				if (window.Model != "" || codex) && quotaWindowApplies(&window, model) {
+				if (window.Model != "" || sharedWeekly(state)) && quotaWindowApplies(&window, model) {
 					resetModelState(state, now)
 					break
 				}
