@@ -40,6 +40,7 @@ type block struct {
 type call struct {
 	name     string
 	closed   bool
+	failed   bool
 	outlives bool // a command or schedule agy goes on running after its prompt ends (T3 AntigravityProtocol.ts:60-76)
 }
 
@@ -51,6 +52,9 @@ type turn struct {
 	aborted    bool
 	lastUpdate time.Time
 	calls      map[string]*call
+	idled      map[string]bool // launches the session's records no longer show at work; a finished call is not one of them (T3 idleReportedSubagents, adapter.ts:5277-5308)
+	resumed    bool            // T3's outcomeResumed: "continue" was sent once after a late 404 (adapter.ts:10244-10275)
+	offered    *told           // what the turn's prompts have offered so far, so an overlapping steer does not repeat it (T3 appContextOffered, adapter.ts:10875-10899)
 	openCalls  int
 	outlive    int  // open calls that outlive the prompt
 	answered   bool // agy has gone on from the prompt: a tool call or a thought came (a 404 after that is transient)
@@ -105,19 +109,20 @@ func (h *Harness) Start(ctx context.Context, id contract.TurnID, inputs []contra
 		}
 	}
 	t := &turn{
-		id: id, lastUpdate: time.Now(), calls: map[string]*call{}, queued: make(chan struct{}), finished: make(chan struct{}), idle: make(chan struct{}),
+		id: id, lastUpdate: time.Now(), calls: map[string]*call{}, idled: map[string]bool{}, queued: make(chan struct{}), finished: make(chan struct{}), idle: make(chan struct{}),
 		wake: make(chan struct{}, 1), activity: func(contract.TurnID, contract.ActivityKind, string) {}, toolFinish: h.Finished,
 	}
 	if h.Activity != nil {
 		t.activity = h.Activity
 	}
 	h.mu.Lock()
+	h.flushIdle()
 	h.turn = t
 	h.detached = false
 	t.open = 1
 	h.mu.Unlock()
 	defer close(t.finished)
-	if err := h.begin(t, inputs, started); err != nil {
+	if err := h.begin(t, inputs, started, false); err != nil {
 		return h.endTurn(t, err)
 	}
 	stopWatch := make(chan struct{})
@@ -136,6 +141,20 @@ func (h *Harness) Start(ctx context.Context, id contract.TurnID, inputs []contra
 		h.mu.Lock()
 		if t.open > 0 {
 			h.mu.Unlock()
+			continue
+		}
+		if f := t.fail; f != nil && f.resume && !t.resumed && !t.stopped && t.err == nil && !t.aborted {
+			// A 404 after the model answered is a transient edge error: T3 reports a retry and sends "continue" once, in the same
+			// turn, and a second failure ends it (adapter.ts:10242-10275).
+			t.resumed, t.fail = true, nil
+			t.kept, t.cur = joinReply(t.kept, t.cur), ""
+			t.open++
+			t.settledAt = time.Time{}
+			h.mu.Unlock()
+			h.notice("agy hit a transient error (" + f.message + "); sending \"continue\" once")
+			if err := h.begin(t, []contract.TurnInput{{Text: "continue"}}, nil, false); err != nil {
+				return h.endTurn(t, err)
+			}
 			continue
 		}
 		ended := t.fail != nil || t.stopped || t.err != nil || t.aborted
@@ -162,7 +181,7 @@ func (h *Harness) Start(ctx context.Context, id contract.TurnID, inputs []contra
 		t.open++
 		t.settledAt = time.Time{}
 		h.mu.Unlock()
-		if err := h.begin(t, []contract.TurnInput{next}, nil); err != nil {
+		if err := h.begin(t, []contract.TurnInput{next}, nil, false); err != nil {
 			return h.endTurn(t, err)
 		}
 	}
@@ -183,6 +202,17 @@ func (h *Harness) endTurn(t *turn, err error) (contract.TurnEnded, error) {
 		err = t.err
 	}
 	t.flush(h)
+	h.blocked = err == nil && t.fail != nil && t.fail.blocks
+	// A turn that did not finish leaves its ending in the mirror, so Recover never takes the text before it for a finished answer
+	// (a retry wake reuses the delivery ids, and the engine's failed turn must be continued with a new prompt, not reported done).
+	switch {
+	case t.aborted || (err == nil && t.fail == nil && t.stopped):
+		h.recordEnding("aborted", "")
+	case err != nil:
+		h.recordEnding("error", err.Error())
+	case t.fail != nil:
+		h.recordEnding("error", t.fail.message)
+	}
 	res := contract.TurnEnded{Turn: t.id, Outcome: contract.TurnCompleted, Final: joinReply(t.kept, t.cur), LastText: t.last, Usage: t.usage}
 	res.Usage.Model = h.cfg.Model.ID
 	switch {
@@ -203,17 +233,26 @@ func (h *Harness) endTurn(t *turn, err error) (contract.TurnEnded, error) {
 // checkNative asks agy's records whether a wake is queued or native children still work (T3 hasPendingReply and
 // subagentsOutlivingPrompt, AntigravityAdapterV2.ts:321-348). It runs unlocked: it reads files.
 func (h *Harness) checkNative(t *turn) {
+	// A launch that completed may still have children at work: every call that did not fail counts until the records show its
+	// children idle (T3 reads the running subagents, not the open tool calls, adapter.ts:5277-5308).
 	h.mu.Lock()
 	sid := h.sessionID
-	var open []string
+	var launches []string
 	for id, c := range t.calls {
-		if !c.closed {
-			open = append(open, id)
+		if !c.failed && !t.idled[id] {
+			launches = append(launches, id)
 		}
 	}
 	h.mu.Unlock()
-	native := sessiondb.PendingReply(h.cfg.GeminiDir, sid) || len(sessiondb.ChildrenAtWork(h.cfg.GeminiDir, sid, open)) > 0
+	atWork := sessiondb.ChildrenAtWork(h.cfg.GeminiDir, sid, launches)
+	pending := sessiondb.PendingReply(h.cfg.GeminiDir, sid)
+	native := pending || len(atWork) > 0
 	h.mu.Lock()
+	for _, id := range launches {
+		if !slices.Contains(atWork, id) {
+			t.idled[id] = true
+		}
+	}
 	changed := t.native != native
 	t.native = native
 	h.mu.Unlock()
@@ -235,10 +274,16 @@ type told struct {
 // promptBlocks builds the blocks of a prompt as T3's resolvePromptParts does (adapter.ts:9980-10075): context entries that
 // changed as <external_KEY> blocks before the prompt; the user text, wrapped with the instructions the first time; the
 // attachments; and the runtime info after, when its text changed. A native slash command is sent as it is, with nothing
-// around it. It returns what to mark as told once the prompt has been answered (adapter.ts:10185-10225).
-func (h *Harness) promptBlocks(inputs []contract.TurnInput, p *process) ([]map[string]any, func(bool), error) {
+// around it. A steer carries only the changed context entries, its text and attachments, with no instructions and no runtime
+// info (adapter.ts:10875-10899), and counts what the turn's earlier prompts offered as seen, so overlapping prompts do not
+// repeat it. It returns what to mark as told once the prompt has been answered (adapter.ts:10185-10225).
+func (h *Harness) promptBlocks(t *turn, inputs []contract.TurnInput, p *process, steer bool) ([]map[string]any, func(bool), error) {
 	h.mu.Lock()
 	state := h.told
+	offeredBefore := t.offered
+	if offeredBefore != nil && offeredBefore.gen == state.gen {
+		state = *offeredBefore
+	}
 	current := h.current()
 	model := h.cfg.Model
 	h.mu.Unlock()
@@ -248,16 +293,18 @@ func (h *Harness) promptBlocks(inputs []contract.TurnInput, p *process) ([]map[s
 	for k, v := range state.context {
 		next.context[k] = v
 	}
+	sent := map[string]string{}
 	if !slash {
 		for _, s := range current {
 			if state.context[string(s.Key)] != s.Text {
 				blocks = append(blocks, map[string]any{"type": "text", "text": "<external_" + string(s.Key) + ">" + s.Text + "</external_" + string(s.Key) + ">"})
 				next.context[string(s.Key)] = s.Text
+				sent[string(s.Key)] = s.Text
 			}
 		}
 	}
 	instructions := ""
-	if !slash && !state.instructions {
+	if !slash && !steer && !state.instructions {
 		parts := slices.DeleteFunc(append([]string{h.cfg.Instructions}, h.cfg.ProjectInstructions...), func(s string) bool { return s == "" })
 		if len(parts) > 0 {
 			instructions = "<dyna_instructions>\n" + strings.Join(parts, "\n\n") + "\n</dyna_instructions>"
@@ -279,7 +326,7 @@ func (h *Harness) promptBlocks(inputs []contract.TurnInput, p *process) ([]map[s
 		}
 		blocks = append(blocks, attached...)
 	}
-	if !slash {
+	if !slash && !steer {
 		info := "<runtime_info>In case you're asked: you are running in Dyna through the agy harness, as " + model.ID
 		if model.Thinking != "" {
 			info += " with " + string(model.Thinking) + " reasoning effort"
@@ -290,6 +337,9 @@ func (h *Harness) promptBlocks(inputs []contract.TurnInput, p *process) ([]map[s
 			next.runtime = info
 		}
 	}
+	h.mu.Lock()
+	t.offered = &next
+	h.mu.Unlock()
 	commit := func(failed bool) {
 		h.mu.Lock()
 		defer h.mu.Unlock()
@@ -297,11 +347,21 @@ func (h *Harness) promptBlocks(inputs []contract.TurnInput, p *process) ([]map[s
 			return
 		}
 		// A prompt that ended in an error leaves the context entries unsent, so the next prompt carries them; the instructions
-		// are kept told (T3 adapter.ts:10185-10225, rollbackOfferedAppContext).
+		// are kept told (T3 adapter.ts:10185-10225, rollbackOfferedAppContext, which only undoes the turn's latest offer).
 		if failed {
-			next.context = state.context
+			if t.offered == &next {
+				t.offered = offeredBefore
+			}
+		} else {
+			if h.told.context == nil {
+				h.told.context = map[string]string{}
+			}
+			for k, v := range sent {
+				h.told.context[k] = v
+			}
 		}
-		h.told = next
+		h.told.instructions = h.told.instructions || next.instructions
+		h.told.runtime = next.runtime
 	}
 	return blocks, commit, nil
 }
@@ -312,12 +372,20 @@ func (h *Harness) resetTold() {
 	h.told = told{gen: h.told.gen + 1}
 }
 
+// flushIdle writes what agy did with no turn running to the mirror and forgets it. Harness.mu is held.
+func (h *Harness) flushIdle() {
+	if h.idle != nil {
+		h.idle.flush(h)
+		h.idle = nil
+	}
+}
+
 // begin sends one prompt and, once agy has it, writes the inputs to the mirror and tells the caller. t.open already counts it.
-func (h *Harness) begin(t *turn, inputs []contract.TurnInput, started func()) error {
+func (h *Harness) begin(t *turn, inputs []contract.TurnInput, started func(), steer bool) error {
 	h.mu.Lock()
 	p, sid := h.p, h.sessionID
 	h.mu.Unlock()
-	blocks, commit, err := h.promptBlocks(inputs, p)
+	blocks, commit, err := h.promptBlocks(t, inputs, p, steer)
 	if err != nil {
 		h.mu.Lock()
 		t.open--
@@ -391,12 +459,7 @@ func (t *turn) finishPrompt(h *Harness, p *process, reason string, step *session
 		if t.aborted || t.err != nil {
 			return
 		}
-		var rpc *acp.Error
-		if errors.As(err, &rpc) {
-			// T3 reads no failure out of an RPC error's text; it is an error, shown as it is.
-			t.err = fmt.Errorf("agy session/prompt: %w", err)
-			return
-		}
+		// T3 reads no failure out of an RPC error's text and shows none of agy's own (provider-core failure.ts).
 		t.err = h.exitError("session/prompt", err, p)
 		return
 	}
@@ -410,7 +473,12 @@ func (t *turn) finishPrompt(h *Harness, p *process, reason string, step *session
 		return
 	}
 	if t.fail == nil {
-		if t.fail = outcome(reason, step, time.Now()); t.fail == nil {
+		if t.fail = outcome(reason, step, time.Now()); t.fail != nil {
+			// A second late 404 is an ordinary failure. Any failure read from the session log, but the one answered with "continue",
+			// has the process restarted before the next turn (adapter.ts:10244, 10280).
+			t.fail.resume = t.fail.resume && !t.resumed
+			h.restart = h.restart || !t.fail.resume
+		} else {
 			t.fail = stopFailure(reason)
 		}
 		h.noteBroken(t.fail)
@@ -456,10 +524,17 @@ func (h *Harness) watch(t *turn, stop <-chan struct{}) {
 	}
 }
 
-// request answers what agy asks. Permissions are answered here as T3 does (adapter.ts:8222-8290: a request with no turn, or a
-// question nobody answers, is cancelled) (adapter.ts:1742 selectPermissionOptionId, selectAutoApprovedPermissionOption):
-// allow once, else allow always; nothing is rejected. An approval nobody is waiting for, or a question agy puts as a
-// permission, is cancelled so agy is not left hanging.
+// request answers what agy asks, as T3 does in full-access mode (the reference, root ruling 1). T3 sets agy's mode to default
+// for yolo (antigravitySessionMode, AntigravityAcpSupport.ts:171-182) and answers each permission from the runtime policy. Its
+// policy carries only the runtime mode (RuntimePolicy.ts:196-201), so in full-access acpOperationDisposition is allow for every
+// kind (clientPolicy.ts:257-305), and antigravityPermissionDisposition adds nothing (AntigravityAcpSupport.ts:207-223: its scoped
+// MCP rule only applies in T3's auto modes, and "ask" only in auto). T3 rejects nothing in full-access mode, so neither does
+// this. The answer is the first allow_once option, else allow_always (adapter.ts:1749 selectAutoApprovedPermissionOption,
+// 8308). A request of another session is cancelled (adapter.ts:8224-8230). A request with no turn running is allowed too: T3
+// waits for a continuation run to exist and then answers the same way (awaitRequestTurn, adapter.ts:6537-6557, 8288), which
+// only attaches it to a turn. A question agy puts as a permission (an interaction_ id) goes to the user in T3
+// (extractPermissionQuestion, adapter.ts:8236-8258); Dyna has nobody to ask, so it is cancelled, which agy reads as no answer.
+
 func (h *Harness) request(method string, raw json.RawMessage) (any, error) {
 	if method != "session/request_permission" {
 		return nil, &acp.Error{Code: acp.MethodNotFound, Message: "method not found: " + method}
@@ -480,14 +555,9 @@ func (h *Harness) request(method string, raw json.RawMessage) (any, error) {
 	}
 	cancelled := map[string]any{"outcome": map[string]any{"outcome": "cancelled"}}
 	h.mu.Lock()
-	running, foreign := h.turn != nil, h.sessionID != "" && req.SessionID != h.sessionID
+	foreign := h.sessionID != "" && req.SessionID != h.sessionID
 	h.mu.Unlock()
-	// A request of a session that is not ours is answered cancelled too (adapter.ts:8222).
 	if foreign {
-		return cancelled, nil
-	}
-	if !running {
-		h.notice("agy asked permission with no turn running: " + harness.Mask(req.ToolCall.Title))
 		return cancelled, nil
 	}
 	// Choices of a question are not approvals (AntigravityProtocol.ts:78-83).
@@ -512,17 +582,18 @@ func (h *Harness) notify(method string, raw json.RawMessage) {
 	var msg struct {
 		SessionID string `json:"sessionId"`
 		Update    struct {
-			Kind     string          `json:"sessionUpdate"`
-			Content  json.RawMessage `json:"content"`
-			ID       string          `json:"toolCallId"`
-			Name     string          `json:"name"`
-			Title    string          `json:"title"`
-			ToolKind string          `json:"kind"`
-			Status   string          `json:"status"`
-			Input    json.RawMessage `json:"rawInput"`
-			Output   json.RawMessage `json:"rawOutput"`
-			Used     int64           `json:"used"`
-			Commands []struct {
+			Kind         string          `json:"sessionUpdate"`
+			Content      json.RawMessage `json:"content"`
+			ID           string          `json:"toolCallId"`
+			Name         string          `json:"name"`
+			Title        string          `json:"title"`
+			ToolKind     string          `json:"kind"`
+			Status       string          `json:"status"`
+			Input        json.RawMessage `json:"rawInput"`
+			Output       json.RawMessage `json:"rawOutput"`
+			Used         int64           `json:"used"`
+			CompactionID string          `json:"compactionId"`
+			Commands     []struct {
 				Name string `json:"name"`
 			} `json:"availableCommands"`
 		} `json:"update"`
@@ -545,10 +616,28 @@ func (h *Harness) notify(method string, raw json.RawMessage) {
 		for _, c := range u.Commands {
 			h.commands[c.Name] = true
 		}
+	case "compaction_update":
+		// agy compacted by itself, or on /compact: what it was told is gone, so the next prompt carries it again. A compaction
+		// reported twice counts once (T3 markSessionCompacted, adapter.ts:2755-2782, 8018-8021).
+		if u.Status == "completed" && !(u.CompactionID != "" && h.compacted[u.CompactionID]) {
+			if u.CompactionID != "" {
+				if h.compacted == nil {
+					h.compacted = map[string]bool{}
+				}
+				h.compacted[u.CompactionID] = true
+			}
+			h.resetTold()
+		}
 	}
+	// Updates with no turn running are what agy does on its own: a reply to a finished command or a wake. T3 starts a
+	// continuation run for them (offerContinuationRun, adapter.ts:6132); Dyna has no turn to attach them to, so they go to the
+	// mirror as they come, where the transcript shows them.
 	t := h.turn
 	if t == nil {
-		return
+		if h.idle == nil {
+			h.idle = &turn{calls: map[string]*call{}, idled: map[string]bool{}, wake: make(chan struct{}, 1), activity: func(contract.TurnID, contract.ActivityKind, string) {}}
+		}
+		t = h.idle
 	}
 	t.lastUpdate = time.Now()
 	defer t.signal()
@@ -557,6 +646,9 @@ func (h *Harness) notify(method string, raw json.RawMessage) {
 		// A reply that came with no prompt open ends with a usage update (T3 replyEndsWithUsageUpdate).
 		if t.open == 0 {
 			t.reply = false
+		}
+		if t == h.idle {
+			t.flush(h)
 		}
 	case "agent_message_chunk", "agent_thought_chunk":
 		var c struct{ Text string }
@@ -628,7 +720,7 @@ func (h *Harness) toolUpdate(t *turn, id, name, title, kind, status string, inpu
 	if c.closed || (status != "completed" && status != "failed") {
 		return
 	}
-	c.closed = true
+	c.closed, c.failed = true, status == "failed"
 	t.openCalls--
 	if c.outlives {
 		t.outlive--
@@ -713,7 +805,7 @@ func (h *Harness) Recover(id contract.TurnID, inputs []contract.TurnInput) (cont
 	}
 	defer file.Close()
 	want := strconv.FormatInt(int64(inputs[0].Delivery), 10)
-	found, final := false, ""
+	found, final, stopped := false, "", false
 	reader := bufio.NewReaderSize(file, 1<<20)
 	for {
 		line, err := reader.ReadBytes('\n')
@@ -725,6 +817,7 @@ func (h *Harness) Recover(id contract.TurnID, inputs []contract.TurnInput) (cont
 			Message struct {
 				Role       string
 				DeliveryID string
+				StopReason string
 				Content    []struct{ Type, Text string }
 			}
 		}
@@ -733,14 +826,18 @@ func (h *Harness) Recover(id contract.TurnID, inputs []contract.TurnInput) (cont
 		}
 		m := entry.Message
 		if m.Role == "user" && m.DeliveryID == want {
-			found, final = true, ""
+			found, final, stopped = true, "", false
 			continue
 		}
 		if !found {
 			continue
 		}
-		final = ""
-		if m.Role == "assistant" {
+		final, stopped = "", false
+		if m.Role == "assistant" && m.StopReason == "aborted" {
+			stopped = true // the turn was stopped; nothing is left to continue
+		} else if m.Role == "assistant" && m.StopReason == "error" {
+			// A failed turn is never a finished one, whatever text came before it: the retry wake reuses the delivery ids.
+		} else if m.Role == "assistant" {
 			text, tool := "", false
 			for _, b := range m.Content {
 				tool = tool || b.Type == "toolCall"
@@ -752,6 +849,9 @@ func (h *Harness) Recover(id contract.TurnID, inputs []contract.TurnInput) (cont
 				final = text
 			}
 		}
+	}
+	if found && stopped {
+		return contract.TurnEnded{Turn: id, Outcome: contract.TurnStopped}, true, nil
 	}
 	if !found || final == "" {
 		return contract.TurnEnded{Turn: id}, false, nil
@@ -770,7 +870,7 @@ func (h *Harness) Steer(_ context.Context, input contract.TurnInput) error {
 	t.open++
 	t.kept, t.cur = joinReply(t.kept, t.cur), ""
 	h.mu.Unlock()
-	return h.begin(t, []contract.TurnInput{input}, nil)
+	return h.begin(t, []contract.TurnInput{input}, nil, true)
 }
 
 // FollowUp is held until the prompt answers, then sent as a prompt of its own: agy only steers.
@@ -800,16 +900,17 @@ func (h *Harness) Abort(ctx context.Context) error {
 	if t != nil {
 		return h.cancel(ctx, t)
 	}
-	// A turn that ended with agy still running a command or a reply: Stop cancels it, which a new message never does
-	// (T3 Adapter:252-269, ARUN:2653-2657, quirk 3).
+	// No turn is running: Stop still cancels whatever agy runs on its own, a command or a reply, which a new message never does.
+	// T3 sends session/cancel whether or not a prompt is active, and returns when none is (Adapter:252-269, ARUN:2653-2657, quirk 3).
+	// It is idempotent, and a no-op with no process.
 	h.mu.Lock()
-	p, sid, detached := h.p, h.sessionID, h.detached
+	p, sid := h.p, h.sessionID
 	h.detached = false
 	h.mu.Unlock()
-	if detached && p != nil {
-		return p.client.Notify("session/cancel", map[string]any{"sessionId": sid})
+	if p == nil {
+		return nil
 	}
-	return nil
+	return p.client.Notify("session/cancel", map[string]any{"sessionId": sid})
 }
 
 // cancel is T3's cancel (ARUN:2625-2688, cancelBehavior "wait-for-prompt"): agy drops a cancel that reaches it before its
@@ -910,9 +1011,11 @@ func (h *Harness) TransferModel(ctx context.Context, id contract.TurnID, model c
 // Compact sends /compact as a prompt, only if agy lists the command and the last prompt's context was over the size.
 func (h *Harness) Compact(ctx context.Context, over int64) (harness.Compaction, error) {
 	h.mu.Lock()
-	before, listed := h.context, h.commands["compact"]
+	before, listed, blocked := h.context, h.commands["compact"], h.blocked
 	h.mu.Unlock()
-	if !listed || before <= over {
+	// A /compact prompt is a request to Google, which a session whose last turn ended in a limit, a verification or a refusal of the
+	// account would only meet again (root ruling 5).
+	if !listed || blocked || before <= over {
 		return harness.Compaction{}, nil
 	}
 	if err := h.ensure(ctx); err != nil {

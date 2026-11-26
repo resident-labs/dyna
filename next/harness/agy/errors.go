@@ -4,9 +4,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/url"
 	"regexp"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/resident-labs/dyna/contract"
 	"github.com/resident-labs/dyna/harness"
@@ -41,30 +43,76 @@ var (
 )
 
 // failure is how a turn ended badly: the TurnEnded fields. Start returns no error for it, as the runner would replace the
-// result with harness_failed. A retryable failure is CauseModelFailed, which the engine retries; one that is not is
-// CauseHarnessFailed, which it does not, so the session waits for a new input.
+// result with harness_failed. A usage limit with a stated reset is CauseModelFailed, which the engine retries once at the reset
+// (T3's UsageLimitRecoveryWorker sends one "Continue where you left off." when the window opens, UsageLimitRecoveryWorker.ts:
+// 18-76). Every other failure is CauseHarnessFailed, which the engine does not retry, so the session waits for a new input.
 type failure struct {
 	cause      contract.FailureCause
 	message    string
 	retryAfter int64 // seconds, for CauseModelFailed
 	broken     bool  // agy's saved conversation can no longer be sent
+	resume     bool  // a 404 after the model answered: T3 sends "continue" once within the turn (adapter.ts:10242-10275)
+	blocks     bool  // a limit or an account refusal, which a /compact prompt would meet again (root ruling 5)
 }
 
-// retryable is a failure the engine's model retry may act on. A usage limit is retried at its reset when Google states one, up to
-// the contract's quota bound; with no reset, or one beyond it, the 5-minute ladder would knock on a spent account up to eight
-// times, so the turn fails with Google's message instead and the session waits for new input. A transient failure (5xx,
-// 404 after the model answered) uses the ladder, with the delay Google gives if any.
-func retryable(message string, reset time.Duration, limit bool) *failure {
-	message = harness.Mask(clip(message))
+// usageLimit is a failure T3 classes usage_limit. With a reset Google states, up to the contract's quota bound, the engine wakes
+// once at the reset; with none, or one beyond the bound, there is no retry and the turn fails with Google's message.
+func usageLimit(message string, reset time.Duration) *failure {
+	message = safeMessage(message)
 	seconds := int64(reset.Seconds() + 0.5)
-	if limit {
-		if seconds <= 0 || seconds > contract.MaxModelQuotaResetSeconds {
-			return &failure{cause: contract.CauseHarnessFailed, message: message}
-		}
-		return &failure{cause: contract.CauseModelFailed, message: message, retryAfter: seconds}
+	if seconds <= 0 || seconds > contract.MaxModelQuotaResetSeconds {
+		return &failure{cause: contract.CauseHarnessFailed, message: message, blocks: true}
 	}
-	return &failure{cause: contract.CauseModelFailed, message: message, retryAfter: min(seconds, contract.MaxModelRetryAfterSeconds)}
+	return &failure{cause: contract.CauseModelFailed, message: message, retryAfter: seconds, blocks: true}
 }
+
+// The text of a failure goes through T3's redaction (provider-core failure.ts redactProviderFailureText and boundedText):
+// control characters become spaces, URLs lose their credentials, query and fragment, bearer and basic credentials and
+// secret-looking assignments are hidden, and the text is cut at 4096 characters.
+var (
+	urlText      = regexp.MustCompile(`(?i)\bhttps?://[^\s<>"']+`)
+	bearerText   = regexp.MustCompile(`(?i)\b(Bearer|Basic)\s+[^\s,;]+`)
+	jsonSecret   = regexp.MustCompile(`(?i)(["'][\w-]*(?:access[_-]?token|api[_-]?key|authorization|credential|password|secret|token)["']\s*:\s*["'])[^"']*(["'])`)
+	assignSecret = regexp.MustCompile(`(?i)(^|[^\w-])([\w-]*(?:access[_-]?token|api[_-]?key|authorization|credential|password|secret|token)\b\s*[:=]\s*)(?:"[^"]*"|'[^']*'|[^\s,;]+)`)
+	skKey        = regexp.MustCompile(`\bsk-[A-Za-z0-9_-]{16,}\b`)
+	trailingPunc = regexp.MustCompile(`[),.;!?]+$`)
+)
+
+const maxMessage = 4096
+
+func redactURL(match string) string {
+	trailing := trailingPunc.FindString(match)
+	u, err := url.Parse(strings.TrimSuffix(match, trailing))
+	if err != nil || u.Host == "" {
+		return "[REDACTED_URL]"
+	}
+	u.User, u.RawQuery, u.Fragment = nil, "", ""
+	return u.String() + trailing
+}
+
+// safeMessage is T3's redaction and bound, then Dyna's masking of credential shapes.
+func safeMessage(text string) string {
+	text = strings.Map(func(r rune) rune {
+		if r <= 0x08 || r == 0x0b || r == 0x0c || (r >= 0x0e && r <= 0x1f) || r == 0x7f {
+			return ' '
+		}
+		return r
+	}, strings.ToValidUTF8(text, ""))
+	text = urlText.ReplaceAllStringFunc(text, redactURL)
+	text = bearerText.ReplaceAllString(text, "$1 [REDACTED]")
+	text = jsonSecret.ReplaceAllString(text, "${1}[REDACTED]$2")
+	text = assignSecret.ReplaceAllString(text, "$1$2[REDACTED]")
+	text = skKey.ReplaceAllString(text, "[REDACTED]")
+	text = harness.Mask(strings.TrimSpace(text))
+	if utf8.RuneCountInString(text) > maxMessage {
+		text = string([]rune(text)[:maxMessage-1]) + "…"
+	}
+	return text
+}
+
+// googleVerificationURL is T3's GoogleAccountVerificationUrl (contracts orchestrationV2.ts:1741-1746): Google's sign-in
+// continuation and nothing else. makeProviderFailure drops a URL that does not match (failure.ts:349), and so does this.
+var googleVerificationURL = regexp.MustCompile(`^https://accounts\.google\.com/(?:v3/)?signin/continue\?[^\s\p{Cc}\\#]+$`)
 
 // validationRequired is T3's verificationErrorInfo: a 403 PERMISSION_DENIED JSON body whose details carry the
 // VALIDATION_REQUIRED ErrorInfo of cloudcode-pa. It returns the verification URL, which may be empty.
@@ -139,7 +187,7 @@ func balancedJSON(text string, start int) string {
 // (reachedModel: a planner response came in the prompt), or the message of a JSON-RPC error. It is nil when text is not an error.
 func classify(text string, now time.Time, reachedModel bool) *failure {
 	if quotaExhausted.MatchString(text) {
-		return retryable("You have reached your Antigravity quota for this period.", resetDelay(text, now), true)
+		return usageLimit("You have reached your Antigravity quota for this period.", resetDelay(text, now))
 	}
 	if invalidSignature.MatchString(text) {
 		return &failure{cause: contract.CauseHarnessFailed, broken: true,
@@ -147,10 +195,10 @@ func classify(text string, now time.Time, reachedModel bool) *failure {
 	}
 	if url, ok := validationRequired(text); ok {
 		message := "Verify your Google account, then retry this turn."
-		if url != "" {
-			message += " " + harness.Mask(clip(url))
+		if len(url) <= maxMessage && googleVerificationURL.MatchString(url) {
+			message += " " + url
 		}
-		return &failure{cause: contract.CauseHarnessFailed, message: message}
+		return &failure{cause: contract.CauseHarnessFailed, message: message, blocks: true}
 	}
 	status, code, message := "", "", ""
 	if m := apiError.FindStringSubmatch(text); m != nil {
@@ -161,13 +209,16 @@ func classify(text string, now time.Time, reachedModel bool) *failure {
 		return nil
 	}
 	if code == "429" || status == "RESOURCE_EXHAUSTED" {
-		return retryable(message, resetDelay(text, now), true)
+		return usageLimit(message, resetDelay(text, now))
 	}
-	// A 404 before the model answered is an unknown or unentitled model; after, a transient edge error (Outcome:263-276).
-	if code >= "500" || (code == "404" && reachedModel) {
-		return retryable(message, resetDelay(text, now), false)
+	// A 404 before the model answered is an unknown or unentitled model; after, a transient edge error that T3 answers by
+	// sending "continue" once (Outcome:263-276, adapter.ts:10242-10275). A 5xx is a provider_error that T3 marks retryable for
+	// the user and never retries itself, so the turn fails and the engine does not ladder it.
+	if code == "404" && reachedModel {
+		return &failure{cause: contract.CauseHarnessFailed, message: safeMessage(message), resume: true}
 	}
-	return &failure{cause: contract.CauseHarnessFailed, message: harness.Mask(clip(message))}
+	// A refusal of the account (another 4xx) is one a /compact prompt would meet again.
+	return &failure{cause: contract.CauseHarnessFailed, message: safeMessage(message), blocks: code >= "400" && code < "500"}
 }
 
 // outcome is what the session log says about a prompt that ended (T3 turnFailure): a typed refusal is a usage limit, an
@@ -178,7 +229,7 @@ func outcome(reason string, step *sessiondb.Step, now time.Time) *failure {
 		if step != nil {
 			text = step.Error
 		}
-		return retryable("You have reached your Antigravity quota for this period.", resetDelay(text, now), true)
+		return usageLimit("You have reached your Antigravity quota for this period.", resetDelay(text, now))
 	}
 	if step == nil || !step.IsError {
 		return nil
@@ -187,13 +238,6 @@ func outcome(reason string, step *sessiondb.Step, now time.Time) *failure {
 		return f
 	}
 	return &failure{cause: contract.CauseHarnessFailed, message: "Antigravity stopped this turn because of an error."}
-}
-
-func clip(s string) string {
-	if len(s) > 500 {
-		return strings.ToValidUTF8(s[:500], "")
-	}
-	return s
 }
 
 func resetDelay(text string, now time.Time) time.Duration {

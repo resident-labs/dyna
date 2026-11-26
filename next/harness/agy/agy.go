@@ -80,9 +80,13 @@ type Harness struct {
 	turn      *turn
 	held      []contract.TurnInput // follow-ups waiting for the prompt response
 	sections  []contract.ContextSection
-	told      told // what the process was told; it starts empty with each process (T3 adapter.ts promptInstructionStates)
-	broken    bool // agy's saved conversation fails every prompt (INVALID_THINKING_SIGNATURE); the next Start opens a new one
-	detached  bool // a turn ended with agy still running a tool call or a reply: Abort then cancels it (quirk 3)
+	told      told            // what the process was told; it starts empty with each process (T3 adapter.ts promptInstructionStates)
+	broken    bool            // agy's saved conversation fails every prompt (INVALID_THINKING_SIGNATURE); the next Start opens a new one
+	detached  bool            // a turn ended with agy still running a tool call or a reply: Abort then cancels it (quirk 3)
+	restart   bool            // a prompt ended in a failure found in the session log: the next use starts a new process (T3 runtimeRestartRequired)
+	blocked   bool            // the last turn ended in a limit or an account refusal: Compact sends no prompt (root ruling 5)
+	idle      *turn           // what agy did with no turn running, until it is written to the mirror
+	compacted map[string]bool // compactions already seen, by id
 	modelText string
 	context   int64 // input and cached tokens of the last prompt
 	used      int64 // agy's usage_update
@@ -196,8 +200,13 @@ var dropped = []string{
 
 var caBundles = []string{"/etc/ssl/certs/ca-bundle.crt", "/etc/ssl/certs/ca-certificates.crt", "/etc/pki/tls/certs/ca-bundle.crt", "/etc/ssl/cert.pem"}
 
-// environment is T3's agent environment (ASUP:202-246). HOME and PATH come from base. T3's BROWSER helper and Electron
-// variable are left out: Dyna signs in outside the harness. SSH_CONNECTION is the host's, else a fake one (ASUP:230-234), so the
+// browserCommand is BROWSER: a command that opens nothing and exits 0, as T3's helper does (ASUP:56-60, 198-200, 239): agy must
+// never start a browser, and an exit of 0 keeps Python's webbrowser from trying another. T3's helper also prints the URL, which
+// Dyna has no sign-in screen for. The command has no colon, which Python would split on (ASUP:430-431).
+const browserCommand = `'/bin/sh' '-c' 'exit 0' '--' '%s'`
+
+// environment is T3's agent environment (ASUP:202-246). HOME and PATH come from base. T3's Electron-as-node variable is left
+// out, as there is no helper to run with it. SSH_CONNECTION is the host's, else a fake one (ASUP:230-234), so the
 // 1.5 CLI keeps the login in the profile and not in the OS keyring.
 func environment(base []string, geminiDir, tmp string) []string {
 	var env []string
@@ -216,7 +225,7 @@ func environment(base []string, geminiDir, tmp string) []string {
 		}
 	}
 	env = append(env, "GEMINI_HOME="+geminiDir, "AGY_ACP_FORCE_FILE_STORAGE=1", "AGY_CLI_DISABLE_AUTO_UPDATE=true",
-		"PYTHONUNBUFFERED=1", "TMPDIR="+tmp)
+		"BROWSER="+browserCommand, "PYTHONUNBUFFERED=1", "TMPDIR="+tmp)
 	if !hasSSH {
 		env = append(env, "SSH_CONNECTION=127.0.0.1 0 127.0.0.1 0")
 	}
@@ -263,12 +272,17 @@ func (h *Harness) ensure(ctx context.Context) error {
 	h.starting.Lock()
 	defer h.starting.Unlock()
 	h.mu.Lock()
-	p, closed := h.p, h.closed
+	p, closed, restart := h.p, h.closed, h.restart
+	h.restart = false
 	h.mu.Unlock()
 	if closed {
 		return errors.New("agy harness is closed")
 	}
-	if p != nil {
+	if p != nil && restart {
+		// T3 restarts the runtime before the turn that follows a failure it read from the session log (adapter.ts:10077-10094,
+		// 10280), so a prompt agy dropped is not assumed delivered.
+		p.kill()
+	} else if p != nil {
 		// A connection that has closed is a process that is going: start another, without waiting for it to be reaped.
 		select {
 		case <-p.exited:
@@ -392,8 +406,7 @@ func (h *Harness) setup(ctx context.Context, p *process) error {
 	}
 	err = h.openSession(ctx, p, h.sessionID)
 	// T3 authenticates again and retries the session setup once when it fails with auth-required, -32000 (ARUN:2411-2455, 2525-2531).
-	var rpc *acp.Error
-	if errors.As(err, &rpc) && rpc.Code == -32000 {
+	if errors.Is(err, ErrSignInRequired) {
 		if err = h.authenticate(ctx, p); err == nil {
 			err = h.openSession(ctx, p, h.sessionID)
 		}
@@ -417,12 +430,27 @@ func (h *Harness) authenticate(ctx context.Context, p *process) error {
 	return nil
 }
 
-// exitError adds what agy said on stderr when the process ended during a call.
+// exitError is what a failed call shows. T3 never shows agy's own text for a failed call or an exit: a process exit is "provider
+// process exited" with only its status, an auth-required error a fixed sign-in message, and any other error a category (provider-core
+// failure.ts:curatedCauseMessages, AntigravityAuth.ts:safeAuthFailure). What agy said goes to the box log instead.
 func (h *Harness) exitError(what string, err error, p *process) error {
 	if errors.Is(err, acp.ErrClosed) {
-		return fmt.Errorf("agy exited during %s: %s", what, p.tail.String())
+		log.Printf("agy exited during %s: %s", what, p.tail.String())
+		return fmt.Errorf("agy exited unexpectedly during %s; its output is in the box log", what)
 	}
-	return fmt.Errorf("agy %s: %w", what, err)
+	var rpc *acp.Error
+	if !errors.As(err, &rpc) {
+		log.Printf("agy %s: %v", what, err)
+		return fmt.Errorf("agy %s failed", what)
+	}
+	log.Printf("agy %s: %v", what, err)
+	switch {
+	case rpc.Code == -32000:
+		return ErrSignInRequired
+	case what == "session/new" && rpc.Code == -32603:
+		return errors.New("agy authenticated, but could not start a session or load models")
+	}
+	return fmt.Errorf("agy %s failed (code %d); its message is in the box log", what, rpc.Code)
 }
 
 // current is every context section the session should be told, the model's guidance first.

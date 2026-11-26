@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -87,6 +88,18 @@ func (h *Harness) record(message map[string]any) error {
 	}
 	_, err = file.Write(append(line, '\n'))
 	return errors.Join(err, file.Close())
+}
+
+// recordEnding writes how a turn that did not finish ended, as Pi writes an assistant message with stopReason "error" or "aborted".
+// Recover reads it: a turn ending in one is not settled.
+func (h *Harness) recordEnding(reason, message string) {
+	entry := map[string]any{"role": "assistant", "content": []map[string]any{}, "stopReason": reason}
+	if message != "" {
+		entry["errorMessage"] = safeMessage(message)
+	}
+	if err := h.record(entry); err != nil {
+		log.Printf("agy: record the turn's ending: %v", err)
+	}
 }
 
 func (h *Harness) recordInputs(inputs []contract.TurnInput) error {

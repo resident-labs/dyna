@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -242,7 +243,7 @@ func TestOpenNewAndResume(t *testing.T) {
 	h2.Close()
 	// T3 has no fallback: a session agy cannot resume fails the open.
 	t.Setenv("FAKE_AGY_MISSING", "fake-session-1")
-	if _, err := Open(context.Background(), c); err == nil || !strings.Contains(err.Error(), "session not found") {
+	if _, err := Open(context.Background(), c); err == nil || !strings.Contains(err.Error(), "session/resume failed") {
 		t.Fatalf("open = %v", err)
 	}
 }
@@ -423,12 +424,12 @@ func TestAbortKillsAnAgentThatIgnoresCancelAndTheNextTurnResumes(t *testing.T) {
 	}
 }
 
-func TestPermissionWithNoTurnIsCancelled(t *testing.T) {
+func TestPermissionWithNoTurnIsAllowedAsT3Does(t *testing.T) {
 	_, r, _ := open(t, map[string]string{"FAKE_AGY_STARTUP_PERMISSION": "1"}, nil)
-	eventually(t, "the cancelled answer", func() bool {
+	eventually(t, "the allowed answer", func() bool {
 		for _, m := range r.messages(t) {
 			if string(m.ID) == `"perm-startup"` {
-				return strings.Contains(string(m.Result), `"cancelled"`)
+				return strings.Contains(string(m.Result), `"selected"`)
 			}
 		}
 		return false
@@ -513,7 +514,7 @@ func TestRefusalAndOutputLimit(t *testing.T) {
 
 func TestGoogleErrorsFailTheTurnLikeT3(t *testing.T) {
 	// No ban-specific handling (T3 has none): Google's own message, and a cause the engine does not retry.
-	for text, want := range map[string]string{"forbidden": "The caller does not have permission", "tos": "TOS_VIOLATION", "validation": "Verify your Google account, then retry this turn. https://accounts.google.com/verify"} {
+	for text, want := range map[string]string{"forbidden": "The caller does not have permission", "tos": "TOS_VIOLATION", "validation": "Verify your Google account, then retry this turn. https://accounts.google.com/signin/continue?token=x"} {
 		h, r, _ := open(t, nil, nil)
 		res, err := h.Start(context.Background(), "t1", []contract.TurnInput{input(1, text)}, func() {})
 		if err != nil || res.Outcome != contract.TurnFailed || res.Cause != contract.CauseHarnessFailed || !strings.Contains(res.Error, want) || res.ModelRetryAfterSeconds != 0 {
@@ -523,17 +524,17 @@ func TestGoogleErrorsFailTheTurnLikeT3(t *testing.T) {
 			t.Fatal("retried")
 		}
 	}
-	// A 5xx is retryable: the engine's model retry applies.
+	// A 5xx fails the turn with no engine retry: T3 marks it retryable for the user and never retries itself.
 	h, _, _ := open(t, nil, nil)
 	res, err := h.Start(context.Background(), "t1", []contract.TurnInput{input(1, "fivexx")}, func() {})
-	if err != nil || res.Cause != contract.CauseModelFailed || res.Error != "backend unavailable" {
+	if err != nil || res.Cause != contract.CauseHarnessFailed || res.Error != "backend unavailable" {
 		t.Fatalf("5xx: %+v %v", res, err)
 	}
 }
 
 func TestPromptRPCErrorIsAnErrorAndNotRetried(t *testing.T) {
 	h, r, _ := open(t, nil, nil)
-	if _, err := h.Start(context.Background(), "t1", []contract.TurnInput{input(1, "rpcerror")}, func() {}); err == nil || !strings.Contains(err.Error(), "boom") {
+	if _, err := h.Start(context.Background(), "t1", []contract.TurnInput{input(1, "rpcerror")}, func() {}); err == nil || !strings.Contains(err.Error(), "failed (code") || strings.Contains(err.Error(), "boom") {
 		t.Fatalf("err = %v", err)
 	}
 	if len(r.prompts(t)) != 1 {
@@ -660,12 +661,17 @@ func TestErrorsComeFromTheSessionLogNotTheReply(t *testing.T) {
 }
 
 func TestNotFoundIsRetriedOnlyAfterTheModelAnswered(t *testing.T) {
-	h, _, _ := open(t, nil, nil)
+	h, r, _ := open(t, nil, nil)
 	if res := start(t, h, "t1", input(1, "notfound")); res.Cause != contract.CauseHarnessFailed {
 		t.Fatalf("before: %+v", res)
 	}
-	if res := start(t, h, "t2", input(2, "notfoundlate")); res.Cause != contract.CauseModelFailed {
+	// After the model answered, T3 sends "continue" once in the same turn (adapter.ts:10242-10275); the engine retries nothing.
+	res := start(t, h, "t2", input(2, "notfoundlate"))
+	if res.Outcome != contract.TurnCompleted {
 		t.Fatalf("after: %+v", res)
+	}
+	if p := r.prompts(t); len(p) != 3 || p[2][0] != "continue" {
+		t.Fatalf("prompts = %q", p)
 	}
 }
 
@@ -850,12 +856,12 @@ func TestEnvironmentFollowsT3(t *testing.T) {
 	env := environment([]string{"HOME=/h", "PATH=/p", "GEMINI_API_KEY=k", "GOOGLE_API_KEY=k", "BROWSER=b", "TMPDIR=/t", "KEEP=1"}, "/gd", "/tmp/x")
 	joined := "\n" + strings.Join(env, "\n") + "\n"
 	for _, want := range []string{"HOME=/h", "PATH=/p", "KEEP=1", "GEMINI_HOME=/gd", "AGY_ACP_FORCE_FILE_STORAGE=1", "AGY_CLI_DISABLE_AUTO_UPDATE=true",
-		"PYTHONUNBUFFERED=1", "TMPDIR=/tmp/x", "SSH_CONNECTION=127.0.0.1 0 127.0.0.1 0"} {
+		"PYTHONUNBUFFERED=1", "TMPDIR=/tmp/x", "SSH_CONNECTION=127.0.0.1 0 127.0.0.1 0", "BROWSER=" + browserCommand} {
 		if !strings.Contains(joined, "\n"+want+"\n") {
 			t.Errorf("missing %s in %v", want, env)
 		}
 	}
-	for _, bad := range []string{"GEMINI_API_KEY", "GOOGLE_API_KEY", "BROWSER", "TMPDIR=/t\n"} {
+	for _, bad := range []string{"GEMINI_API_KEY", "GOOGLE_API_KEY", "BROWSER=b", "TMPDIR=/t\n"} {
 		if strings.Contains(joined, bad) {
 			t.Errorf("%s was kept", bad)
 		}
@@ -868,7 +874,7 @@ func TestEnvironmentFollowsT3(t *testing.T) {
 
 func TestClassify(t *testing.T) {
 	now := time.Now()
-	body := "{\n  \"error\": {\"code\": 403, \"status\": \"PERMISSION_DENIED\", \"details\": [{\"reason\": \"VALIDATION_REQUIRED\", \"domain\": \"cloudcode-pa.googleapis.com\", \"metadata\": {\"validation_url\": \"https://v/x\"}}]}}"
+	body := "{\n  \"error\": {\"code\": 403, \"status\": \"PERMISSION_DENIED\", \"details\": [{\"reason\": \"VALIDATION_REQUIRED\", \"domain\": \"cloudcode-pa.googleapis.com\", \"metadata\": {\"validation_url\": \"https://accounts.google.com/signin/continue?a=b\"}}]}}"
 	cases := []struct {
 		text    string
 		cause   contract.FailureCause // empty: not an error
@@ -879,13 +885,13 @@ func TestClassify(t *testing.T) {
 		{"RESOURCE_EXHAUSTED (code 429): too many requests retryDelay:3.5s ]", contract.CauseModelFailed, "too many requests retryDelay:3.5s ]", 4 * time.Second},
 		{"Agent error:\nError 429, Message: out [reason:QUOTA_EXHAUSTED quotaResetDelay:1h2m3s ], Status: RESOURCE_EXHAUSTED", contract.CauseModelFailed, "", time.Hour + 3*time.Second + 2*time.Minute},
 		{"Error 429, Message: out [quotaResetTimeStamp:" + now.Add(90*time.Second).UTC().Format(time.RFC3339) + " ], Status: RESOURCE_EXHAUSTED", contract.CauseModelFailed, "", 90 * time.Second},
-		{"Error 500, Message: backend, Status: INTERNAL", contract.CauseModelFailed, "backend", 0},
+		{"Error 500, Message: backend, Status: INTERNAL", contract.CauseHarnessFailed, "backend", 0},
 		// Not retried: Google's own message, shown as it is (no ban-specific handling, as in T3).
 		{"Error 403, Message: denied, Status: PERMISSION_DENIED", contract.CauseHarnessFailed, "denied", 0},
 		{"Error 403, Message: restricted (TOS_VIOLATION), Status: PERMISSION_DENIED", contract.CauseHarnessFailed, "restricted (TOS_VIOLATION)", 0},
 		{"Error 403, Message: SUBSCRIPTION_REQUIRED, Status: PERMISSION_DENIED", contract.CauseHarnessFailed, "SUBSCRIPTION_REQUIRED", 0},
 		{"Error 404, Message: no such model, Status: NOT_FOUND", contract.CauseHarnessFailed, "no such model", 0},
-		{strings.Replace(body, `"reason"`, `"@type": "type.googleapis.com/google.rpc.ErrorInfo", "reason"`, 1), contract.CauseHarnessFailed, "Verify your Google account, then retry this turn. https://v/x", 0},
+		{strings.Replace(body, `"reason"`, `"@type": "type.googleapis.com/google.rpc.ErrorInfo", "reason"`, 1), contract.CauseHarnessFailed, "Verify your Google account, then retry this turn. https://accounts.google.com/signin/continue?a=b", 0},
 		{"nothing of the shapes", "", "", 0},
 		{"TOS_VIOLATION", "", "", 0},
 		// A 404 is retried only once the model had answered.
@@ -914,7 +920,7 @@ func TestUsageLimitResets(t *testing.T) {
 		"Error 429, Message: out [reason:QUOTA_EXHAUSTED quotaResetDelay:72h ], Status: RESOURCE_EXHAUSTED": {contract.CauseModelFailed, 72 * 3600},
 		"Error 429, Message: out, Status: RESOURCE_EXHAUSTED":                                               {contract.CauseHarnessFailed, 0}, // no reset: no ladder
 		"Error 429, Message: out [quotaResetDelay:1000h ], Status: RESOURCE_EXHAUSTED":                      {contract.CauseHarnessFailed, 0}, // beyond the bound
-		"Error 503, Message: down, Status: UNAVAILABLE":                                                     {contract.CauseModelFailed, 0},
+		"Error 503, Message: down, Status: UNAVAILABLE":                                                     {contract.CauseHarnessFailed, 0},
 	} {
 		f := classify(text, now, false)
 		if f == nil || f.cause != want.cause || f.retryAfter != want.seconds {
@@ -923,5 +929,96 @@ func TestUsageLimitResets(t *testing.T) {
 	}
 	if f := classify("Error 429, Message: x [quotaResetDelay:100h], Status: RESOURCE_EXHAUSTED", now, false); f != nil && f.retryAfter > contract.MaxModelQuotaResetSeconds {
 		t.Error("over the bound")
+	}
+}
+
+func TestAFailedTurnIsNeverRecoveredAsCompleted(t *testing.T) {
+	h, r, _ := open(t, nil, nil)
+	res := start(t, h, "t1", input(1, "quota"))
+	if res.Outcome != contract.TurnFailed {
+		t.Fatalf("quota = %+v", res)
+	}
+	// The retry wake reuses the delivery id: whatever text came before the failure, the turn is not finished.
+	if _, settled, err := h.Recover("t1", []contract.TurnInput{input(1, "quota")}); err != nil || settled {
+		t.Fatalf("recover settled a failed turn: %v %v", settled, err)
+	}
+	if res, err := h.Continue(context.Background(), "t1", func() {}); err != nil || res.Outcome != contract.TurnCompleted {
+		t.Fatalf("continue = %+v %v", res, err)
+	}
+	prompts := r.prompts(t)
+	if last := prompts[len(prompts)-1]; !strings.Contains(strings.Join(last, "\n"), "Continue where you left off.") {
+		t.Fatalf("prompts = %q", prompts)
+	}
+	data, _ := os.ReadFile(h.SessionFile())
+	if !strings.Contains(string(data), `"stopReason":"error"`) {
+		t.Fatal("the failure is not in the mirror")
+	}
+}
+
+func TestAStoppedTurnIsRecoveredAsStopped(t *testing.T) {
+	h, _, _ := open(t, nil, nil)
+	done := make(chan contract.TurnEnded, 1)
+	go func() {
+		res, _ := h.Start(context.Background(), "t1", []contract.TurnInput{input(1, "hold")}, func() {})
+		done <- res
+	}()
+	eventually(t, "the prompt", func() bool { d, _ := h.Delivered(context.Background(), 1); return d })
+	if err := h.Abort(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if res := <-done; res.Outcome != contract.TurnStopped {
+		t.Fatalf("res = %+v", res)
+	}
+	if res, settled, _ := h.Recover("t1", []contract.TurnInput{input(1, "hold")}); !settled || res.Outcome != contract.TurnStopped {
+		t.Fatalf("recover = %+v %v", res, settled)
+	}
+}
+
+func TestAbortWithNoTurnCancelsTheSession(t *testing.T) {
+	h, r, _ := open(t, nil, nil)
+	start(t, h, "t1", input(1, "say hi"))
+	for range 2 {
+		if err := h.Abort(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+	}
+	eventually(t, "session/cancel", func() bool { return len(r.calls(t, "session/cancel")) == 2 })
+}
+
+func TestCompactSendsNoPromptAfterALimit(t *testing.T) {
+	h, r, _ := open(t, nil, nil)
+	start(t, h, "t1", input(1, "quota"))
+	if got, err := h.Compact(context.Background(), -1); err != nil || got.Compacted {
+		t.Fatalf("compact = %+v %v", got, err)
+	}
+	for _, p := range r.prompts(t) {
+		if strings.Contains(strings.Join(p, ""), "/compact") {
+			t.Fatal("a /compact prompt went to Google after a limit")
+		}
+	}
+}
+
+func TestFailureTextIsRedactedAsT3Does(t *testing.T) {
+	got := safeMessage("bad \x01 call https://user:pw@example.com/p?token=abc#f, Bearer abc.def api_key=sk-12345678901234567890 done")
+	for _, bad := range []string{"pw", "token=abc", "abc.def", "12345678901234567890", "\x01"} {
+		if strings.Contains(got, bad) {
+			t.Errorf("%q kept in %q", bad, got)
+		}
+	}
+	if !strings.Contains(got, "https://example.com/p,") {
+		t.Errorf("url = %q", got)
+	}
+	if url, ok := validationRequired(`{"error": {"code": 403, "status": "PERMISSION_DENIED", "details": [{"@type": "type.googleapis.com/google.rpc.ErrorInfo", "reason": "VALIDATION_REQUIRED", "domain": "cloudcode-pa.googleapis.com", "metadata": {"validation_url": "https://evil.example/signin/continue?a=b"}}]}}`); !ok || googleVerificationURL.MatchString(url) {
+		t.Errorf("a URL that is not Google's was accepted: %q", url)
+	}
+	if f := classify(`{"error": {"code": 403, "status": "PERMISSION_DENIED", "details": [{"@type": "type.googleapis.com/google.rpc.ErrorInfo", "reason": "VALIDATION_REQUIRED", "domain": "cloudcode-pa.googleapis.com", "metadata": {"validation_url": "https://evil.example/signin/continue?a=b"}}]}}`, time.Now(), false); f == nil || strings.Contains(f.message, "evil") {
+		t.Errorf("failure = %+v", f)
+	}
+}
+
+func TestBrowserCommandOpensNothing(t *testing.T) {
+	out, err := exec.Command("sh", "-c", strings.Replace(browserCommand, "%s", "https://example.invalid/x", 1)).CombinedOutput()
+	if err != nil || len(out) != 0 {
+		t.Fatalf("browser command = %q %v", out, err)
 	}
 }

@@ -345,7 +345,7 @@ func (a *agent) prompt(id json.RawMessage, text string, steered, held chan strin
 	case "tos":
 		a.failStep(id, "Error 403, Message: Your account is restricted (TOS_VIOLATION), Status: PERMISSION_DENIED", false)
 	case "validation":
-		a.failStep(id, "{\"error\": {\"code\": 403, \"status\": \"PERMISSION_DENIED\", \"details\": [{\"@type\": \"type.googleapis.com/google.rpc.ErrorInfo\", \"reason\": \"VALIDATION_REQUIRED\", \"domain\": \"cloudcode-pa.googleapis.com\", \"metadata\": {\"validation_url\": \"https://accounts.google.com/verify\"}}]}}", false)
+		a.failStep(id, "{\"error\": {\"code\": 403, \"status\": \"PERMISSION_DENIED\", \"details\": [{\"@type\": \"type.googleapis.com/google.rpc.ErrorInfo\", \"reason\": \"VALIDATION_REQUIRED\", \"domain\": \"cloudcode-pa.googleapis.com\", \"metadata\": {\"validation_url\": \"https://accounts.google.com/signin/continue?token=x\"}}]}}", false)
 	case "fivexx":
 		a.failStep(id, "Error 503, Message: backend unavailable, Status: UNAVAILABLE", false)
 	case "notfound":
