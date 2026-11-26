@@ -252,7 +252,8 @@ func Run(ctx context.Context) error {
 		} else {
 			pigNew := hello.Fresh
 			var history string
-			if piHandoffDue(hello, handoffMarker) {
+			due := piHandoffDue(hello, handoffMarker)
+			if due {
 				if history, err = handoffHistory(sessions); err != nil {
 					return err
 				}
@@ -277,7 +278,7 @@ func Run(ctx context.Context) error {
 			session.Activity = activity.set
 			session.Finished = activity.finish
 			var piHarness boxHarness = session
-			if history != "" || pigNew && hello.Handoff {
+			if due {
 				piHarness = &handoffStart{boxHarness: session, history: history, gen: hello.HandoffGen, marker: handoffMarker}
 			}
 			h, files, steered = piHarness, func() []string { return []string{session.SessionFile()} }, func(sender contract.Interrupt) { jobs.StepAside(sender); interrupts.Send(sender) }

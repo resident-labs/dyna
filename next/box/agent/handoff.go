@@ -2,13 +2,16 @@ package agent
 
 import (
 	"context"
+	"log"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
 
 	"github.com/resident-labs/dyna/contract"
+	"github.com/resident-labs/dyna/harness/agy"
 	"github.com/resident-labs/dyna/harness/agy/handoff"
 )
 
@@ -37,6 +40,12 @@ func handoffHistory(sessions string) (string, error) {
 	for i, f := range files {
 		paths[i] = f.path
 	}
+	// A /clear began the mirror agy's state names, and nothing before it is history; the files stay for the transcript.
+	if cleared := agy.ClearedFrom(sessions); cleared != "" {
+		if i := slices.Index(paths, filepath.Join(sessions, cleared)); i > 0 {
+			paths = paths[i:]
+		}
+	}
 	return handoff.Build(paths, 0)
 }
 
@@ -49,28 +58,46 @@ func piHandoffDue(hello contract.BoxHelloResponse, marker string) bool {
 	return strings.TrimSpace(string(data)) != hello.HandoffGen
 }
 
-// handoffStart gives a harness's first prompt the history of the conversation it takes over, as agy does for itself. It writes the
-// generation to marker just before that first start, so a restart after it opens no second conversation.
+// handoffStart gives a harness's first prompt the history of the conversation it takes over, as agy does for itself. The generation goes
+// to marker only once the harness accepts that prompt, so a refused start or a restart before it delivers the history again; a /clear
+// drops the history and records the generation the same way, so it is never given after the clear.
 type handoffStart struct {
 	boxHarness
 	history, gen, marker string
+	settled              bool // the generation is recorded: delivered, or dropped by a /clear
 	mu                   sync.Mutex
-	done                 bool
 }
 
 func (h *handoffStart) Start(ctx context.Context, turn contract.TurnID, inputs []contract.TurnInput, accepted func()) (contract.TurnEnded, error) {
 	h.mu.Lock()
-	if !h.done {
-		if err := os.WriteFile(h.marker, []byte(h.gen), 0600); err != nil {
-			h.mu.Unlock()
-			return contract.TurnEnded{}, err
-		}
-		h.done = true
-		if len(inputs) > 0 {
-			inputs = append([]contract.TurnInput(nil), inputs...)
-			inputs[0].Text = handoff.Prompt(h.history, inputs[0].Text)
-		}
-	}
+	history, open := h.history, !h.settled
 	h.mu.Unlock()
-	return h.boxHarness.Start(ctx, turn, inputs, accepted)
+	if history != "" && len(inputs) > 0 {
+		inputs = append([]contract.TurnInput(nil), inputs...)
+		inputs[0].Text = handoff.Prompt(history, inputs[0].Text)
+	}
+	return h.boxHarness.Start(ctx, turn, inputs, func() {
+		if open {
+			h.settle()
+		}
+		accepted()
+	})
+}
+
+func (h *handoffStart) NewConversation(ctx context.Context) error {
+	if err := h.boxHarness.NewConversation(ctx); err != nil {
+		return err
+	}
+	h.settle()
+	return nil
+}
+
+// settle drops the history and records its generation as dealt with.
+func (h *handoffStart) settle() {
+	h.mu.Lock()
+	h.history, h.settled = "", true
+	h.mu.Unlock()
+	if err := os.WriteFile(h.marker, []byte(h.gen), 0600); err != nil {
+		log.Printf("record the handoff generation: %v", err)
+	}
 }

@@ -47,6 +47,13 @@ type sessionMeta struct {
 	FallbackStatus string `json:"fallbackStatus,omitempty"`
 }
 
+// ClearedFrom is the mirror file the last /clear began in the session directory, "" when there was none: a history of the conversation
+// starts there. It reads the file this harness keeps; the box never reads inside the profile folder.
+func ClearedFrom(dir string) string {
+	meta, _ := readMeta(dir)
+	return meta.ClearFrom
+}
+
 func readMeta(dir string) (sessionMeta, error) {
 	var meta sessionMeta
 	data, err := os.ReadFile(filepath.Join(dir, "agy-session.json"))
