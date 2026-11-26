@@ -62,7 +62,8 @@ func (s *proxyStore) List(context.Context) ([]*proxyauth.Auth, error) {
 			saved := strings.Split(auth.Attributes[cliproxy.DynaModelsAttribute], ",")
 			auth.Attributes[cliproxy.DynaModelsAttribute] = strings.Join(mergeModels(preset.Models, saved), ",")
 		}
-		applyProxyRetryPolicy(&auth)
+		stripProxyRuntimeState(&auth)
+		applyProxyRoutingPolicy(&auth)
 		// Only bound credentials may be enabled after proxy restart.
 		auth.Disabled = !record.Bound
 		if record.Bound && auth.Status == proxyauth.StatusDisabled {
@@ -74,12 +75,47 @@ func (s *proxyStore) List(context.Context) ([]*proxyauth.Auth, error) {
 }
 
 // Apply the provider policy to both existing records and newly adopted credentials.
-func applyProxyRetryPolicy(auth *proxyauth.Auth) {
-	if auth.Provider == "openai-compatible-zai" && auth.AuthKind() == proxyauth.AuthKindAPIKey {
-		if auth.Metadata == nil {
-			auth.Metadata = make(map[string]any)
+func applyProxyRoutingPolicy(auth *proxyauth.Auth) {
+	delete(auth.Metadata, proxyauth.DynaRequestQuotaOnly)
+	key, value := proxyauth.DynaRequestQuotaOnly, any(true)
+	switch auth.Provider {
+	case "openai-compatible-zai":
+		if auth.AuthKind() != proxyauth.AuthKindAPIKey {
+			return
 		}
-		auth.Metadata["request_retry"] = 3
+		key, value = "request_retry", 3
+	case "claude":
+		if auth.AuthKind() != proxyauth.AuthKindOAuth {
+			return
+		}
+	case "codex", "kimi", "xai", "meta", "antigravity", "openai-compatible-opencode-go", "openai-compatible-deepseek":
+	default:
+		return
+	}
+	if auth.Metadata == nil {
+		auth.Metadata = make(map[string]any)
+	}
+	auth.Metadata[key] = value
+}
+
+// Keep the provider's observations (Meta has no usage endpoint), but never
+// load or save runtime availability verdicts with a credential.
+func stripProxyRuntimeState(auth *proxyauth.Auth) {
+	auth.Quota = proxyauth.QuotaState{ObservedAt: auth.Quota.ObservedAt, Signals: auth.Quota.Signals}
+	auth.NextRetryAfter, auth.Unavailable = time.Time{}, false
+	auth.LastError, auth.StatusMessage = nil, ""
+	if auth.Status == proxyauth.StatusError {
+		auth.Status = proxyauth.StatusActive
+	}
+	for model, state := range auth.ModelStates {
+		if state == nil || (state.Quota.ObservedAt.IsZero() && len(state.Quota.Signals) == 0) {
+			delete(auth.ModelStates, model)
+			continue
+		}
+		auth.ModelStates[model] = &proxyauth.ModelState{
+			Status: proxyauth.StatusActive,
+			Quota:  proxyauth.QuotaState{ObservedAt: state.Quota.ObservedAt, Signals: state.Quota.Signals},
+		}
 	}
 }
 
@@ -89,6 +125,7 @@ func (s *proxyStore) Save(ctx context.Context, auth *proxyauth.Auth) (string, er
 	// OAuth storage structs carry tokens outside Auth.Metadata.
 	copy := auth.Clone()
 	copy.Storage = nil
+	stripProxyRuntimeState(copy)
 	if auth.Storage != nil {
 		raw, err := json.Marshal(auth.Storage)
 		if err != nil {
@@ -128,7 +165,7 @@ func (s *proxyStore) Save(ctx context.Context, auth *proxyauth.Auth) (string, er
 			return "", errors.New("proxy credential missing")
 		}
 	}
-	applyProxyRetryPolicy(copy)
+	applyProxyRoutingPolicy(copy)
 	raw, err := json.Marshal(copy)
 	if err != nil {
 		return "", errors.New("proxy credential invalid")

@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/rpc"
 	"testing"
+	"time"
 
 	"github.com/resident-labs/dyna/contract"
 	"github.com/resident-labs/dyna/engine/model"
@@ -89,6 +90,9 @@ func TestProxyStoreLoadsKeyEndpointFromCatalog(t *testing.T) {
 	if retries, ok := loaded[0].RequestRetryOverride(); !ok || retries != 3 {
 		t.Fatalf("existing z.ai key retry override = %d, %v; want 3, true", retries, ok)
 	}
+	if _, ok := loaded[0].Metadata[proxyauth.DynaRequestQuotaOnly]; ok {
+		t.Fatal("existing z.ai key lost its pacing policy")
+	}
 
 	created, err := mgr.Register(proxyauth.WithAuthCreationIntent(ctx), &proxyauth.Auth{
 		ID:         "dyna-key-fedcba9876543210fedcba9876543210",
@@ -101,6 +105,84 @@ func TestProxyStoreLoadsKeyEndpointFromCatalog(t *testing.T) {
 	}
 	if retries, ok := created.RequestRetryOverride(); !ok || retries != 3 {
 		t.Fatalf("new z.ai key retry override = %d, %v; want 3, true", retries, ok)
+	}
+}
+
+func TestProxyStoreDoesNotRetainRuntimeAvailability(t *testing.T) {
+	db, err := store.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	server, client := net.Pipe()
+	r := rpc.NewServer()
+	if err := r.RegisterName("Auth", &model.AuthRPC{Store: db}); err != nil {
+		t.Fatal(err)
+	}
+	go r.ServeConn(server)
+	p := &proxyStore{client: rpc.NewClient(client)}
+	defer p.client.Close()
+
+	ctx := t.Context()
+	now := time.Now().UTC().Truncate(time.Second)
+	reset := now.Add(5 * time.Hour)
+	quota := proxyauth.QuotaState{Exceeded: true, Reason: "credential_quota", NextRecoverAt: reset, BackoffLevel: 3, ObservedAt: now, Signals: map[string]string{"X-Meta-Test": "42"}}
+	denial := &proxyauth.Error{HTTPStatus: 429, Message: "quota exhausted"}
+	old := &proxyauth.Auth{
+		ID: "legacy-credential", Provider: "meta", Metadata: map[string]any{"access_token": "invented-token"},
+		Status: proxyauth.StatusError, StatusMessage: denial.Message, LastError: denial, Unavailable: true, NextRetryAfter: reset, Quota: quota,
+		ModelStates: map[string]*proxyauth.ModelState{
+			"muse":      {Status: proxyauth.StatusError, StatusMessage: denial.Message, LastError: denial, Unavailable: true, NextRetryAfter: reset, Quota: quota},
+			"old-model": {Quota: proxyauth.QuotaState{Exceeded: true, NextRecoverAt: reset}},
+		},
+	}
+	blob, err := json.Marshal(old)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.SaveProxyAuth(ctx, store.ProxyAuth{ID: old.ID, Provider: old.Provider, Record: blob}, true); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.BindAccount(ctx, "account", old.ID, contract.ProviderMeta, "Invented"); err != nil {
+		t.Fatal(err)
+	}
+	check := func(auth *proxyauth.Auth) {
+		t.Helper()
+		checkQuota := func(got proxyauth.QuotaState) {
+			t.Helper()
+			if got.Exceeded || got.Reason != "" || !got.NextRecoverAt.IsZero() || got.BackoffLevel != 0 || !got.ObservedAt.Equal(now) || got.Signals["X-Meta-Test"] != "42" {
+				t.Fatalf("unexpected quota state: %+v", got)
+			}
+		}
+		if auth.Unavailable || auth.LastError != nil || auth.StatusMessage != "" || auth.Status != proxyauth.StatusActive || !auth.NextRetryAfter.IsZero() {
+			t.Fatal("credential retains runtime availability state")
+		}
+		checkQuota(auth.Quota)
+		state := auth.ModelStates["muse"]
+		if len(auth.ModelStates) != 1 || state == nil || state.Unavailable || state.LastError != nil || state.StatusMessage != "" || state.Status != proxyauth.StatusActive || !state.NextRetryAfter.IsZero() {
+			t.Fatal("model retains runtime availability state or lost its observation")
+		}
+		checkQuota(state.Quota)
+	}
+	loaded, err := p.List(ctx)
+	if err != nil || len(loaded) != 1 || loaded[0].Disabled {
+		t.Fatalf("could not load bound legacy credential: %d, %v", len(loaded), err)
+	}
+	check(loaded[0])
+	if _, err := p.Save(ctx, old); err != nil {
+		t.Fatal(err)
+	}
+	records, err := db.ListProxyAuths(ctx)
+	if err != nil || len(records) != 1 {
+		t.Fatalf("could not read saved credential: %d, %v", len(records), err)
+	}
+	var saved proxyauth.Auth
+	if err := json.Unmarshal(records[0].Record, &saved); err != nil {
+		t.Fatal(err)
+	}
+	check(&saved)
+	if old.LastError != denial || !old.Unavailable || !old.ModelStates["muse"].Unavailable {
+		t.Fatal("saving changed the live credential's runtime protections")
 	}
 }
 
@@ -123,8 +205,11 @@ func TestProxyStoreReloadsCredentialAndRejectsDuplicate(t *testing.T) {
 	if _, err := p.Save(ctx, auth); err != nil {
 		t.Fatal(err)
 	}
-	if auth.Metadata["access_token"] != "invented-token" {
-		t.Fatal("runtime adoption lost token")
+	if auth.Metadata["access_token"] != "invented-token" || auth.Metadata[proxyauth.DynaRequestQuotaOnly] != true {
+		t.Fatal("runtime adoption lost Claude's token or quota policy")
+	}
+	if _, ok := auth.DisableCoolingOverride(); ok {
+		t.Fatal("runtime adoption overrode the upstream non-quota cooling policy")
 	}
 	if _, err := p.Save(ctx, auth); err == nil {
 		t.Fatal("duplicate sign-in replaced a credential")
@@ -144,8 +229,8 @@ func TestProxyStoreReloadsCredentialAndRejectsDuplicate(t *testing.T) {
 	if err := mgr.Load(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	if loaded = mgr.List(); len(loaded) != 1 || loaded[0].Disabled {
-		t.Fatal("bound credential was not enabled after restart")
+	if loaded = mgr.List(); len(loaded) != 1 || loaded[0].Disabled || loaded[0].Metadata[proxyauth.DynaRequestQuotaOnly] != true {
+		t.Fatal("bound credential was not enabled with the right quota policy after restart")
 	}
 	if err := p.Delete(context.Background(), auth.ID); err != nil {
 		t.Fatal(err)

@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -326,6 +327,45 @@ func TestProxySingleCodexCredentialCooldownPolicy(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+
+func TestProxyFreshSpentCodexReturnsResetToBox(t *testing.T) {
+	const id, model = "only-codex", "gpt-5.1-codex"
+	var calls atomic.Int32
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		calls.Add(1)
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer upstream.Close()
+	cfg := &config.Config{}
+	manager := newCooldownTestManager(t, cfg, upstream.URL)
+	manager.SetSelector(&coreauth.SoonestResetSelector{})
+	now := time.Now()
+	manager.PublishQuotaReading(id, coreauth.QuotaResetHint{ObservedAt: now, Windows: []coreauth.QuotaResetWindow{{Seconds: 7 * 86400, UsedPercent: 100, ResetAt: now.Add(72 * time.Hour)}}})
+	base := handlers.NewBaseAPIHandlers(&cfg.SDKConfig, manager)
+	proxy := unixServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		payload, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Error(err)
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		_, _, problem := base.ExecuteWithAuthManager(r.Context(), "openai-response", model, payload, "")
+		if problem == nil {
+			t.Error("spent account should not be used")
+			return
+		}
+		c, _ := gin.CreateTestContext(w)
+		c.Request = r
+		base.WriteErrorResponse(c, problem)
+	}))
+	defer proxy.Close()
+	req := httptest.NewRequest(http.MethodPost, "/model/v1/responses", strings.NewReader(`{"model":"gpt-5.1-codex"}`))
+	resp := httptest.NewRecorder()
+	Handler(proxy.Listener.Addr().String(), "secret", "session", []string{model}, []string{id}, "", nil, false).ServeHTTP(resp, req)
+	if resp.Code != http.StatusTooManyRequests || resp.Header().Get("Retry-After") != "259200" || !strings.Contains(resp.Body.String(), `"reset_seconds":259200`) || calls.Load() != 0 {
+		t.Fatalf("status=%d headers=%v body=%s upstream calls=%d", resp.Code, resp.Header(), resp.Body, calls.Load())
 	}
 }
 
