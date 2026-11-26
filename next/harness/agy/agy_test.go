@@ -7,6 +7,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -28,15 +29,14 @@ func TestMain(m *testing.M) {
 
 // rig is one test's agent: its message log and the hooks' calls.
 type rig struct {
-	log      string
-	notices  chan string
-	accounts chan AccountError
+	log     string
+	notices chan string
 }
 
 // open starts a harness on the fake agent, which is this test binary run again as `agy acp`.
 func open(t *testing.T, env map[string]string, edit func(*Config)) (*Harness, *rig, Config) {
 	t.Helper()
-	r := &rig{log: filepath.Join(t.TempDir(), "agent.log"), notices: make(chan string, 8), accounts: make(chan AccountError, 8)}
+	r := &rig{log: filepath.Join(t.TempDir(), "agent.log"), notices: make(chan string, 8)}
 	t.Setenv(fakeagent.EnvVar, "1")
 	t.Setenv("FAKE_AGY_LOG", r.log)
 	for k, v := range env {
@@ -53,7 +53,6 @@ func open(t *testing.T, env map[string]string, edit func(*Config)) (*Harness, *r
 		MCPServers:    []MCPServer{{Name: "dyna", URL: "http://127.0.0.1:7781/dyna/", Headers: map[string]string{"Authorization": "Bearer x"}}},
 		CancelTimeout: 300 * time.Millisecond,
 		Notice:        func(s string) { r.notices <- s },
-		Account:       func(a AccountError) { r.accounts <- a },
 	}
 	if edit != nil {
 		edit(&c)
@@ -213,7 +212,7 @@ func TestTurnWithToolCallsMirrorsPiTranscript(t *testing.T) {
 	}
 }
 
-func TestOpenNewResumeAndFallback(t *testing.T) {
+func TestOpenNewAndResume(t *testing.T) {
 	h, r, c := open(t, nil, nil)
 	start(t, h, "t1", input(1, "say hello"))
 	h.Close()
@@ -241,23 +240,39 @@ func TestOpenNewResumeAndFallback(t *testing.T) {
 		t.Fatalf("set_config_option calls = %v", options)
 	}
 	h2.Close()
-	// agy no longer has the session: a new one starts in a new mirror file, with a notice.
+	// T3 has no fallback: a session agy cannot resume fails the open.
 	t.Setenv("FAKE_AGY_MISSING", "fake-session-1")
-	h3, err := Open(context.Background(), c)
-	if err != nil {
-		t.Fatal(err)
+	if _, err := Open(context.Background(), c); err == nil || !strings.Contains(err.Error(), "session not found") {
+		t.Fatalf("open = %v", err)
 	}
-	defer h3.Close()
-	select {
-	case n := <-r.notices:
-		if !strings.Contains(n, "could not resume") {
-			t.Fatalf("notice %q", n)
-		}
-	default:
-		t.Fatal("no notice")
+}
+
+func TestSessionSetupAuthenticatesAgainOnAuthRequired(t *testing.T) {
+	_, r, _ := open(t, map[string]string{"FAKE_AGY_REAUTH": "1"}, nil)
+	if n := len(r.calls(t, "authenticate")); n != 2 {
+		t.Fatalf("authenticate calls = %d", n)
 	}
-	if h3.SessionFile() != filepath.Join(c.SessionDir, "agy-2.jsonl") {
-		t.Fatalf("file = %s", h3.SessionFile())
+	if n := len(r.calls(t, "session/new")); n != 2 {
+		t.Fatalf("session/new calls = %d", n)
+	}
+}
+
+func TestCancelledContextCancelsThePrompt(t *testing.T) {
+	h, r, _ := open(t, nil, nil)
+	ctx, cancel := context.WithCancel(context.Background())
+	running := make(chan struct{})
+	done := make(chan error, 1)
+	go func() {
+		_, err := h.Start(ctx, "t1", []contract.TurnInput{input(1, "hold")}, func() { close(running) })
+		done <- err
+	}()
+	<-running
+	cancel()
+	if err := <-done; !errors.Is(err, context.Canceled) {
+		t.Fatalf("err = %v", err)
+	}
+	if len(r.calls(t, "session/cancel")) != 1 {
+		t.Fatal("the prompt was left running")
 	}
 }
 
@@ -478,27 +493,23 @@ func TestRefusalAndOutputLimit(t *testing.T) {
 	}
 }
 
-func TestAccountErrorsCallTheHookOnce(t *testing.T) {
-	for text, kind := range map[string]string{"forbidden": "forbidden", "tos": "tos_violation"} {
+func TestGoogleErrorsFailTheTurnLikeT3(t *testing.T) {
+	// No ban-specific handling (T3 has none): Google's own message, and a cause the engine does not retry.
+	for text, want := range map[string]string{"forbidden": "The caller does not have permission", "tos": "TOS_VIOLATION", "validation": "Verify your Google account, then retry this turn. https://accounts.google.com/verify"} {
 		h, r, _ := open(t, nil, nil)
 		res, err := h.Start(context.Background(), "t1", []contract.TurnInput{input(1, text)}, func() {})
-		var account *AccountError
-		if !errors.As(err, &account) || account.Kind != kind || res.Outcome != contract.TurnFailed {
+		if err != nil || res.Outcome != contract.TurnFailed || res.Cause != contract.CauseHarnessFailed || !strings.Contains(res.Error, want) || res.ModelRetryAfterSeconds != 0 {
 			t.Fatalf("%s: %+v %v", text, res, err)
 		}
-		select {
-		case got := <-r.accounts:
-			if got.Kind != kind {
-				t.Fatalf("hook got %+v", got)
-			}
-		case <-time.After(2 * time.Second):
-			t.Fatal("hook not called")
+		if len(r.prompts(t)) != 1 {
+			t.Fatal("retried")
 		}
-		h.Start(context.Background(), "t2", []contract.TurnInput{input(2, text)}, func() {})
-		time.Sleep(50 * time.Millisecond)
-		if len(r.accounts) != 0 {
-			t.Fatal("hook called twice")
-		}
+	}
+	// A 5xx is retryable: the engine's model retry applies.
+	h, _, _ := open(t, nil, nil)
+	res, err := h.Start(context.Background(), "t1", []contract.TurnInput{input(1, "fivexx")}, func() {})
+	if err != nil || res.Cause != contract.CauseModelFailed || res.Error != "backend unavailable" {
+		t.Fatalf("5xx: %+v %v", res, err)
 	}
 }
 
@@ -513,16 +524,15 @@ func TestPromptRPCErrorIsAnErrorAndNotRetried(t *testing.T) {
 }
 
 func TestSignInRequired(t *testing.T) {
-	r := &rig{}
-	_ = r
 	t.Setenv(fakeagent.EnvVar, "1")
-	t.Setenv("FAKE_AGY_AUTH_FAIL", "1")
 	exe, _ := os.Executable()
-	accounts := make(chan AccountError, 1)
-	_, err := Open(context.Background(), Config{Binary: exe, GeminiDir: t.TempDir(), Dir: t.TempDir(), SessionDir: t.TempDir(), Account: func(a AccountError) { accounts <- a }})
-	var account *AccountError
-	if !errors.As(err, &account) || account.Kind != "signin_required" || len(accounts) != 1 {
-		t.Fatalf("err = %v", err)
+	for env, want := range map[string]error{"FAKE_AGY_AUTH_FAIL": ErrSignInRequired, "FAKE_AGY_AUTH_SUBSCRIPTION": ErrSubscriptionRequired} {
+		t.Setenv(env, "1")
+		_, err := Open(context.Background(), Config{Binary: exe, GeminiDir: t.TempDir(), Dir: t.TempDir(), SessionDir: t.TempDir()})
+		if !errors.Is(err, want) {
+			t.Fatalf("%s: err = %v", env, err)
+		}
+		t.Setenv(env, "")
 	}
 }
 
@@ -610,10 +620,8 @@ func TestNewConversationStartsANewSessionAndMirror(t *testing.T) {
 }
 
 func TestSilentTurnIsEnded(t *testing.T) {
-	was := [3]time.Duration{promptInactivity, toolInactivity, watchEvery}
-	defer func() { promptInactivity, toolInactivity, watchEvery = was[0], was[1], was[2] }()
-	promptInactivity, watchEvery = 100*time.Millisecond, 20*time.Millisecond
 	h, _, _ := open(t, nil, nil)
+	h.promptInactivity, h.watchEvery = 100*time.Millisecond, 20*time.Millisecond
 	_, err := h.Start(context.Background(), "t1", []contract.TurnInput{input(1, "stubborn")}, func() {})
 	if !errors.Is(err, errInactive) {
 		t.Fatalf("err = %v", err)
@@ -634,7 +642,7 @@ func TestCloseEndsTheProcessAndDone(t *testing.T) {
 }
 
 func TestEnvironmentFollowsT3(t *testing.T) {
-	env := environment([]string{"HOME=/h", "PATH=/p", "GEMINI_API_KEY=k", "GOOGLE_API_KEY=k", "BROWSER=b", "SSH_CONNECTION=1 2 3 4", "TMPDIR=/t", "KEEP=1"}, "/gd", "/tmp/x")
+	env := environment([]string{"HOME=/h", "PATH=/p", "GEMINI_API_KEY=k", "GOOGLE_API_KEY=k", "BROWSER=b", "TMPDIR=/t", "KEEP=1"}, "/gd", "/tmp/x")
 	joined := "\n" + strings.Join(env, "\n") + "\n"
 	for _, want := range []string{"HOME=/h", "PATH=/p", "KEEP=1", "GEMINI_HOME=/gd", "AGY_ACP_FORCE_FILE_STORAGE=1", "AGY_CLI_DISABLE_AUTO_UPDATE=true",
 		"PYTHONUNBUFFERED=1", "TMPDIR=/tmp/x", "SSH_CONNECTION=127.0.0.1 0 127.0.0.1 0"} {
@@ -642,44 +650,56 @@ func TestEnvironmentFollowsT3(t *testing.T) {
 			t.Errorf("missing %s in %v", want, env)
 		}
 	}
-	for _, bad := range []string{"GEMINI_API_KEY", "GOOGLE_API_KEY", "BROWSER", "1 2 3 4", "TMPDIR=/t\n"} {
+	for _, bad := range []string{"GEMINI_API_KEY", "GOOGLE_API_KEY", "BROWSER", "TMPDIR=/t\n"} {
 		if strings.Contains(joined, bad) {
 			t.Errorf("%s was kept", bad)
 		}
+	}
+	// The host's SSH_CONNECTION wins over the fake one (ASUP:230-234).
+	if env := environment([]string{"SSH_CONNECTION=1 2 3 4"}, "/gd", "/tmp/x"); !slices.Contains(env, "SSH_CONNECTION=1 2 3 4") || slices.Contains(env, "SSH_CONNECTION=127.0.0.1 0 127.0.0.1 0") {
+		t.Errorf("env = %v", env)
 	}
 }
 
 func TestClassify(t *testing.T) {
 	now := time.Now()
+	body := "{\n  \"error\": {\"code\": 403, \"status\": \"PERMISSION_DENIED\", \"details\": [{\"reason\": \"VALIDATION_REQUIRED\", \"domain\": \"cloudcode-pa.googleapis.com\", \"metadata\": {\"validation_url\": \"https://v/x\"}}]}}"
 	cases := []struct {
-		text, kind string
-		reset      time.Duration
+		text    string
+		cause   contract.FailureCause // empty: not an error
+		message string
+		retry   time.Duration
 	}{
-		{"Error 429, Message: Resource exhausted. Resets in 4m42s., Status: RESOURCE_EXHAUSTED", "quota", 282 * time.Second},
-		{"RESOURCE_EXHAUSTED (code 429): too many requests retryDelay:3.5s ]", "quota", 3500 * time.Millisecond},
-		{"[reason:QUOTA_EXHAUSTED quotaResetDelay:1h2m3s ]", "quota", time.Hour + 2*time.Minute + 3*time.Second},
-		{"[reason:QUOTA_EXHAUSTED quotaResetTimeStamp:" + now.Add(90*time.Second).UTC().Format(time.RFC3339) + " ]", "quota", 90 * time.Second},
-		{"Error 403, Message: denied, Status: PERMISSION_DENIED", "forbidden", 0},
-		{"TOS_VIOLATION", "tos_violation", 0},
-		{"SUBSCRIPTION_REQUIRED", "subscription_required", 0},
-		{"Error 500, Message: backend, Status: INTERNAL", "", 0},
-		{"The server returned 429 once, which I handled by retrying.", "", 0},
-		{strings.Repeat("x ", 20000) + "Error 429, Message: m, Status: RESOURCE_EXHAUSTED", "", 0},
+		{"Error 429, Message: Resource exhausted. Resets in 4m42s., Status: RESOURCE_EXHAUSTED", contract.CauseModelFailed, "Resource exhausted. Resets in 4m42s.", 282 * time.Second},
+		{"RESOURCE_EXHAUSTED (code 429): too many requests retryDelay:3.5s ]", contract.CauseModelFailed, "too many requests retryDelay:3.5s ]", 4 * time.Second},
+		{"Agent error:\nError 429, Message: out [reason:QUOTA_EXHAUSTED quotaResetDelay:1h2m3s ], Status: RESOURCE_EXHAUSTED", contract.CauseModelFailed, "out [reason:QUOTA_EXHAUSTED quotaResetDelay:1h2m3s ]", time.Hour},
+		{"Error 429, Message: out [quotaResetTimeStamp:" + now.Add(90*time.Second).UTC().Format(time.RFC3339) + " ], Status: RESOURCE_EXHAUSTED", contract.CauseModelFailed, "", 90 * time.Second},
+		{"Error 500, Message: backend, Status: INTERNAL", contract.CauseModelFailed, "backend", 0},
+		// Not retried: Google's own message, shown as it is (no ban-specific handling, as in T3).
+		{"Error 403, Message: denied, Status: PERMISSION_DENIED", contract.CauseHarnessFailed, "denied", 0},
+		{"Error 403, Message: restricted (TOS_VIOLATION), Status: PERMISSION_DENIED", contract.CauseHarnessFailed, "restricted (TOS_VIOLATION)", 0},
+		{"Error 403, Message: SUBSCRIPTION_REQUIRED, Status: PERMISSION_DENIED", contract.CauseHarnessFailed, "SUBSCRIPTION_REQUIRED", 0},
+		{"Error 404, Message: no such model, Status: NOT_FOUND", contract.CauseHarnessFailed, "no such model", 0},
+		{body, contract.CauseHarnessFailed, "Verify your Google account, then retry this turn. https://v/x", 0},
+		// An answer that talks about these is not an error.
+		{"The server returned 429 once, which I handled by retrying.", "", "", 0},
+		{"The code maps SUBSCRIPTION_REQUIRED to an account error.", "", "", 0},
+		{"The fixture has reason:QUOTA_EXHAUSTED quotaResetDelay:5s in it.", "", "", 0},
+		{"I saw TOS_VIOLATION in the log, and 'Error 403, Message: x, Status: PERMISSION_DENIED' is its shape.", "", "", 0},
+		{"the body is " + body, "", "", 0},
+		{"TOS_VIOLATION", "", "", 0},
+		{strings.Repeat("x ", 20000) + "\nError 429, Message: m, Status: RESOURCE_EXHAUSTED", "", "", 0},
 	}
 	for _, c := range cases {
-		switch err := classify(c.text, now).(type) {
-		case *QuotaError:
-			if c.kind != "quota" || err.ResetAfter < c.reset-2*time.Second || err.ResetAfter > c.reset+time.Second {
-				t.Errorf("%q: %+v", c.text, err)
-			}
-		case *AccountError:
-			if c.kind != err.Kind {
-				t.Errorf("%q: %+v", c.text, err)
-			}
-		default:
-			if c.kind != "" {
-				t.Errorf("%q not classified", c.text)
-			}
+		f := classify(c.text, now)
+		switch {
+		case f == nil && c.cause != "":
+			t.Errorf("%.60q not classified", c.text)
+		case f != nil && c.cause == "":
+			t.Errorf("%.60q taken for an error: %+v", c.text, f)
+		case f != nil && (f.cause != c.cause || (c.message != "" && f.message != c.message) ||
+			time.Duration(f.retryAfter)*time.Second < c.retry-2*time.Second || time.Duration(f.retryAfter)*time.Second > c.retry+2*time.Second):
+			t.Errorf("%.60q = %+v", c.text, f)
 		}
 	}
 }

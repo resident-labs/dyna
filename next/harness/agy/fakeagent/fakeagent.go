@@ -10,6 +10,8 @@
 //	stubborn       run forever and ignore session/cancel
 //	quota          an upstream 429 as the chat text, then end_turn
 //	forbidden      an upstream 403 as the chat text
+//	validation     Google's VALIDATION_REQUIRED error body
+//	fivexx         an upstream 503
 //	tos            a TOS_VIOLATION as the chat text
 //	rpcerror       a JSON-RPC error answer
 //	refusal        stopReason refusal
@@ -18,8 +20,8 @@
 //	/compact       reply "compacted"
 //
 // Environment: FAKE_AGY_LOG (file every received line is appended to, the answers to its permission requests included),
-// FAKE_AGY_VERSION, FAKE_AGY_NO_APPEND, FAKE_AGY_AUTH_FAIL, FAKE_AGY_MISSING (a session id resume refuses),
-// FAKE_AGY_STARTUP_PERMISSION (ask permission once the session exists, with no prompt open), FAKE_AGY_NO_COMPACT.
+// FAKE_AGY_VERSION, FAKE_AGY_NO_APPEND, FAKE_AGY_AUTH_FAIL (FAKE_AGY_AUTH_SUBSCRIPTION: the error is SUBSCRIPTION_REQUIRED), FAKE_AGY_MISSING (a session id resume refuses),
+// FAKE_AGY_STARTUP_PERMISSION (ask permission once the session exists, with no prompt open), FAKE_AGY_NO_COMPACT, FAKE_AGY_REAUTH (session setup answers -32000 until authenticate has run twice).
 package fakeagent
 
 import (
@@ -41,11 +43,12 @@ type agent struct {
 	logM   sync.Mutex
 	log    *os.File
 
-	mu       sync.Mutex
-	sessions int
-	model    string
-	thought  string
-	held     chan string // the running "hold" prompt waits on this: "cancel" or "steer"
+	mu        sync.Mutex
+	sessions  int
+	authCount int
+	model     string
+	thought   string
+	held      chan string // the running "hold" prompt waits on this: "cancel" or "steer"
 }
 
 // Run serves the agent protocol on in and out until in ends.
@@ -132,12 +135,21 @@ func (a *agent) handle(id json.RawMessage, method string, raw json.RawMessage) {
 			"authMethods":       []map[string]any{{"id": "oauth-personal", "name": "Log in with Google"}},
 		})
 	case "authenticate":
+		a.authCount++
+		if os.Getenv("FAKE_AGY_AUTH_SUBSCRIPTION") != "" {
+			a.fail(id, -32603, "SUBSCRIPTION_REQUIRED")
+			return
+		}
 		if os.Getenv("FAKE_AGY_AUTH_FAIL") != "" {
 			a.fail(id, -32603, "No browser is available here to sign in")
 			return
 		}
 		a.reply(id, map[string]any{"_meta": map[string]any{"antigravity": map[string]any{"tier": map[string]any{"name": "fake"}}}})
 	case "session/new", "session/resume":
+		if os.Getenv("FAKE_AGY_REAUTH") != "" && a.authCount < 2 {
+			a.fail(id, -32000, "authentication required")
+			return
+		}
 		var p struct {
 			SessionID string `json:"sessionId"`
 		}
@@ -185,7 +197,28 @@ func (a *agent) handle(id json.RawMessage, method string, raw json.RawMessage) {
 			}
 		}
 	case "session/prompt":
-		go a.prompt(id, raw)
+		// Whether this prompt steers a running one is decided here, in the order the prompts arrive.
+		var p struct {
+			Prompt []struct{ Text string } `json:"prompt"`
+		}
+		json.Unmarshal(raw, &p)
+		text := ""
+		if len(p.Prompt) > 0 {
+			text = p.Prompt[len(p.Prompt)-1].Text
+		}
+		verb, _, _ := strings.Cut(text, " ")
+		a.mu.Lock()
+		steered := a.held
+		if steered != nil && text == "stubborn" {
+			steered = nil
+		}
+		var held chan string
+		if steered == nil && (verb == "hold" || verb == "stubborn") {
+			held = make(chan string, 4)
+			a.held = held
+		}
+		a.mu.Unlock()
+		go a.prompt(id, text, steered, held)
 	default:
 		if len(id) > 0 {
 			a.fail(id, -32601, "method not found")
@@ -212,26 +245,13 @@ func (a *agent) text(s string) {
 	a.update(map[string]any{"sessionUpdate": "agent_message_chunk", "content": map[string]any{"type": "text", "text": s}})
 }
 
-func (a *agent) prompt(id json.RawMessage, raw json.RawMessage) {
-	var p struct {
-		Prompt []struct{ Text string } `json:"prompt"`
-	}
-	json.Unmarshal(raw, &p)
-	text := ""
-	if len(p.Prompt) > 0 {
-		text = p.Prompt[len(p.Prompt)-1].Text
-	}
-	a.mu.Lock()
-	if a.held != nil && text != "stubborn" {
-		// A prompt while another runs steers it.
-		held := a.held
-		a.mu.Unlock()
+func (a *agent) prompt(id json.RawMessage, text string, steered, held chan string) {
+	if steered != nil {
 		a.text("steer seen")
 		a.end(id, "end_turn")
-		held <- "steer"
+		steered <- "steer"
 		return
 	}
-	a.mu.Unlock()
 	verb, rest, _ := strings.Cut(text, " ")
 	switch verb {
 	case "say":
@@ -253,10 +273,6 @@ func (a *agent) prompt(id json.RawMessage, raw json.RawMessage) {
 		a.text("tool done")
 		a.end(id, "end_turn")
 	case "hold", "stubborn":
-		held := make(chan string, 4)
-		a.mu.Lock()
-		a.held = held
-		a.mu.Unlock()
 		a.text("working")
 		if verb == "stubborn" {
 			select {}
@@ -278,7 +294,13 @@ func (a *agent) prompt(id json.RawMessage, raw json.RawMessage) {
 		a.text("Error 403, Message: The caller does not have permission, Status: PERMISSION_DENIED")
 		a.end(id, "end_turn")
 	case "tos":
-		a.text("Your account is restricted: TOS_VIOLATION")
+		a.text("Error 403, Message: Your account is restricted (TOS_VIOLATION), Status: PERMISSION_DENIED")
+		a.end(id, "end_turn")
+	case "validation":
+		a.text("{\"error\": {\"code\": 403, \"status\": \"PERMISSION_DENIED\", \"details\": [{\"reason\": \"VALIDATION_REQUIRED\", \"domain\": \"cloudcode-pa.googleapis.com\", \"metadata\": {\"validation_url\": \"https://accounts.google.com/verify\"}}]}}")
+		a.end(id, "end_turn")
+	case "fivexx":
+		a.text("Error 503, Message: backend unavailable, Status: UNAVAILABLE")
 		a.end(id, "end_turn")
 	case "rpcerror":
 		a.fail(id, -32603, "boom")

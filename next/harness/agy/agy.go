@@ -47,9 +47,8 @@ type Config struct {
 	Instructions, ModelInstructions string
 	MCPServers                      []MCPServer
 	New                             bool          // a fresh conversation instead of resuming the stored one
-	CancelTimeout                   time.Duration // wait for the prompt's response after session/cancel, then kill; default 10s
+	CancelTimeout                   time.Duration // wait for the prompt's response after session/cancel, then kill; default 15s as T3 (ARUN:92)
 	Notice                          func(string)  // out-of-turn warnings
-	Account                         func(AccountError)
 }
 
 // Harness drives one agy process and its conversation.
@@ -59,11 +58,12 @@ type Harness struct {
 	// Finished hears each tool call as it ends.
 	Finished func(contract.TurnID, contract.ToolFinished)
 
-	cfg         Config
-	done        chan struct{}
-	doneOnce    sync.Once
-	accountOnce sync.Once
-	starting    sync.Mutex // serializes spawning a process
+	cfg Config
+	// The inactivity limits (turn.go); fields so a test can shorten them.
+	promptInactivity, toolInactivity, watchEvery time.Duration
+	done                                         chan struct{}
+	doneOnce                                     sync.Once
+	starting                                     sync.Mutex // serializes spawning a process
 
 	fm      sync.Mutex // the mirror file: its path and entry count; never held with mu
 	mirror  string
@@ -136,7 +136,7 @@ func Open(ctx context.Context, c Config) (*Harness, error) {
 		return nil, errors.New("agy needs Binary, GeminiDir, Dir and SessionDir")
 	}
 	if c.CancelTimeout == 0 {
-		c.CancelTimeout = 10 * time.Second
+		c.CancelTimeout = 15 * time.Second
 	}
 	if err := os.MkdirAll(c.SessionDir, 0o700); err != nil {
 		return nil, err
@@ -145,7 +145,8 @@ func Open(ctx context.Context, c Config) (*Harness, error) {
 	if err != nil {
 		return nil, err
 	}
-	h := &Harness{cfg: c, done: make(chan struct{}), modelText: c.ModelInstructions, nonce: time.Now().UnixNano()}
+	h := &Harness{cfg: c, done: make(chan struct{}), modelText: c.ModelInstructions, nonce: time.Now().UnixNano(),
+		promptInactivity: defaultPromptInactivity, toolInactivity: defaultToolInactivity, watchEvery: defaultWatchEvery}
 	if !c.New {
 		h.sessionID, h.mirror = meta.SessionID, filepath.Join(c.SessionDir, meta.Mirror)
 	}
@@ -166,28 +167,32 @@ var dropped = []string{
 	"GEMINI_API_KEY", "GOOGLE_API_KEY", "GOOGLE_APPLICATION_CREDENTIALS", "GOOGLE_CLOUD_PROJECT", "GOOGLE_CLOUD_LOCATION",
 	"GOOGLE_CLOUD_QUOTA_PROJECT", "GOOGLE_GENAI_USE_VERTEXAI", "GCLOUD_PROJECT", "CLOUDSDK_CORE_PROJECT", "AGY_ACP_CCPA_PROJECT",
 	"AGY_ACP_ENABLE_OAUTH", "GEMINI_HOME", "AGY_ACP_FORCE_FILE_STORAGE", "AGY_CLI_DISABLE_AUTO_UPDATE", "BROWSER",
-	"PYTHONUNBUFFERED", "ELECTRON_RUN_AS_NODE", "CHROME_CRASHPAD_PIPE_NAME", "TMPDIR", "SSH_CONNECTION",
+	"PYTHONUNBUFFERED", "ELECTRON_RUN_AS_NODE", "CHROME_CRASHPAD_PIPE_NAME", "TMPDIR",
 }
 
 var caBundles = []string{"/etc/ssl/certs/ca-bundle.crt", "/etc/ssl/certs/ca-certificates.crt", "/etc/pki/tls/certs/ca-bundle.crt", "/etc/ssl/cert.pem"}
 
 // environment is T3's agent environment (ASUP:202-246). HOME and PATH come from base. T3's BROWSER helper and Electron
-// variable are left out: Dyna signs in outside the harness. SSH_CONNECTION makes the 1.5 CLI keep the login in the profile
-// and not in the OS keyring.
+// variable are left out: Dyna signs in outside the harness. SSH_CONNECTION is the host's, else a fake one (ASUP:230-234), so the
+// 1.5 CLI keeps the login in the profile and not in the OS keyring.
 func environment(base []string, geminiDir, tmp string) []string {
 	var env []string
-	hasCA := false
+	hasCA, hasSSH := false, false
 	for _, kv := range base {
 		name, _, _ := strings.Cut(kv, "=")
 		if name == "SSL_CERT_FILE" && kv != "SSL_CERT_FILE=" {
 			hasCA = true
 		}
+		hasSSH = hasSSH || (name == "SSH_CONNECTION" && kv != "SSH_CONNECTION=")
 		if !slices.Contains(dropped, name) {
 			env = append(env, kv)
 		}
 	}
 	env = append(env, "GEMINI_HOME="+geminiDir, "AGY_ACP_FORCE_FILE_STORAGE=1", "AGY_CLI_DISABLE_AUTO_UPDATE=true",
-		"PYTHONUNBUFFERED=1", "TMPDIR="+tmp, `SSH_CONNECTION=127.0.0.1 0 127.0.0.1 0`)
+		"PYTHONUNBUFFERED=1", "TMPDIR="+tmp)
+	if !hasSSH {
+		env = append(env, "SSH_CONNECTION=127.0.0.1 0 127.0.0.1 0")
+	}
 	if !hasCA {
 		for _, path := range caBundles {
 			if _, err := os.Stat(path); err == nil {
@@ -229,17 +234,13 @@ func (h *Harness) ensure(ctx context.Context) error {
 			return nil
 		}
 	}
-	p, err := h.spawn(ctx)
+	p, err := h.spawn()
 	if err == nil {
 		err = h.setup(ctx, p)
 	}
 	if err != nil {
 		if p != nil {
 			p.kill()
-		}
-		var account *AccountError
-		if errors.As(err, &account) {
-			h.reportAccount(*account)
 		}
 		return err
 	}
@@ -249,19 +250,16 @@ func (h *Harness) ensure(ctx context.Context) error {
 	return nil
 }
 
-func (h *Harness) reportAccount(e AccountError) {
-	h.accountOnce.Do(func() {
-		if h.cfg.Account != nil {
-			h.cfg.Account(e)
-		}
-	})
-}
-
-func (h *Harness) spawn(ctx context.Context) (*process, error) {
+func (h *Harness) spawn() (p *process, err error) {
 	tmp, err := os.MkdirTemp("", "agy-")
 	if err != nil {
 		return nil, err
 	}
+	defer func() {
+		if err != nil {
+			os.RemoveAll(tmp)
+		}
+	}()
 	cmd := exec.Command(h.cfg.Binary, "acp", "--gemini-dir", h.cfg.GeminiDir, "--app-data-dir", "antigravity-acp")
 	cmd.Dir = h.cfg.Dir
 	cmd.Env = environment(os.Environ(), h.cfg.GeminiDir, tmp)
@@ -279,10 +277,9 @@ func (h *Harness) spawn(ctx context.Context) (*process, error) {
 		return nil, err
 	}
 	if err := cmd.Start(); err != nil {
-		os.RemoveAll(tmp)
 		return nil, fmt.Errorf("start agy: %w", err)
 	}
-	p := &process{cmd: cmd, stdin: stdin, exited: make(chan struct{})}
+	p = &process{cmd: cmd, stdin: stdin, exited: make(chan struct{})}
 	p.client = acp.NewClient(stdout, stdin, acp.Handler{Request: h.request, Notify: h.notify})
 	drained := make(chan struct{})
 	go func() {
@@ -306,9 +303,13 @@ func (h *Harness) spawn(ctx context.Context) (*process, error) {
 	return p, nil
 }
 
-// kill ends the process and anything it started.
+// kill ends the process and anything it started, and waits for it to be gone so the next turn starts a new one.
 func (p *process) kill() {
 	syscall.Kill(-p.cmd.Process.Pid, syscall.SIGKILL)
+	select {
+	case <-p.exited:
+	case <-time.After(2 * time.Second):
+	}
 }
 
 // setup runs the lifecycle (ARUN:2326-2530, ACPS:115-155): initialize, authenticate, session resume or new. The sign-in error test is ASUP:167-177.
@@ -334,15 +335,34 @@ func (h *Harness) setup(ctx context.Context, p *process) error {
 	p.version = init.AgentInfo.Version
 	p.steers = steersWithPrompt(p.version)
 	p.append = init.Caps.Meta.Antigravity.SystemPrompt.Append
-	err = p.client.Call(ctx, "authenticate", map[string]any{"methodId": "oauth-personal"}, nil)
+	if err := h.authenticate(ctx, p); err != nil {
+		return err
+	}
+	err = h.openSession(ctx, p, h.sessionID)
+	// T3 authenticates again and retries the session setup once when it fails with auth-required, -32000 (ARUN:2411-2455, 2525-2531).
 	var rpc *acp.Error
+	if errors.As(err, &rpc) && rpc.Code == -32000 {
+		if err = h.authenticate(ctx, p); err == nil {
+			err = h.openSession(ctx, p, h.sessionID)
+		}
+	}
+	return err
+}
+
+// authenticate signs in with oauth-personal, the only method Dyna uses. An agent with no sign-in is ASUP:167-177.
+func (h *Harness) authenticate(ctx context.Context, p *process) error {
+	err := p.client.Call(ctx, "authenticate", map[string]any{"methodId": "oauth-personal"}, nil)
+	var rpc *acp.Error
+	if errors.As(err, &rpc) && strings.Contains(rpc.Message, "SUBSCRIPTION_REQUIRED") {
+		return ErrSubscriptionRequired
+	}
 	if errors.As(err, &rpc) && (rpc.Code == -32000 || (rpc.Code == -32603 && strings.HasPrefix(rpc.Message, "No browser is available here"))) {
-		return &AccountError{Kind: "signin_required", Message: "agy is not signed in on this host"}
+		return ErrSignInRequired
 	}
 	if err != nil {
 		return h.exitError("authenticate", err, p)
 	}
-	return h.openSession(ctx, p, h.sessionID)
+	return nil
 }
 
 // exitError adds what agy said on stderr when the process ended during a call.
@@ -411,24 +431,14 @@ func (h *Harness) openSession(ctx context.Context, p *process, resume string) er
 		SessionID     string         `json:"sessionId"`
 		ConfigOptions []configOption `json:"configOptions"`
 	}
+	// T3 has no fallback: a conversation agy cannot resume fails the open (ARUN:2463-2490).
 	id := resume
 	if resume != "" {
 		params["sessionId"] = resume
-		err := p.client.Call(ctx, "session/resume", params, &res)
-		var rpc *acp.Error
-		if errors.As(err, &rpc) {
-			h.notice("agy could not resume its conversation (" + harness.Mask(rpc.Message) + "); starting a new one")
-			resume = ""
-		} else if err != nil {
+		if err := p.client.Call(ctx, "session/resume", params, &res); err != nil {
 			return h.exitError("session/resume", err, p)
 		}
-	}
-	if resume == "" {
-		delete(params, "sessionId")
-		res = struct {
-			SessionID     string         `json:"sessionId"`
-			ConfigOptions []configOption `json:"configOptions"`
-		}{}
+	} else {
 		if err := p.client.Call(ctx, "session/new", params, &res); err != nil {
 			return h.exitError("session/new", err, p)
 		}

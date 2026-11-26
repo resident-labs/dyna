@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log"
 	"os"
 	"slices"
 	"strings"
@@ -19,11 +18,11 @@ import (
 
 // T3 ends a prompt that agy leaves open without updates after 15 minutes, and holds a turn for a background command at
 // most 30 minutes (ADAPT:251-263, quirks 1 and 31). One timer does both: the limit is the long one while a tool call is open.
-// They are variables so tests can shorten them.
-var (
-	promptInactivity = 15 * time.Minute
-	toolInactivity   = 30 * time.Minute
-	watchEvery       = 10 * time.Second
+// They are fields of the Harness so tests can shorten them.
+const (
+	defaultPromptInactivity = 15 * time.Minute
+	defaultToolInactivity   = 30 * time.Minute
+	defaultWatchEvery       = 10 * time.Second
 )
 
 var errInactive = errors.New("agy sent no update for too long; the turn was ended")
@@ -59,6 +58,8 @@ type turn struct {
 	queued     chan struct{}
 	queuedOnce sync.Once
 	finished   chan struct{}
+	idle       chan struct{} // closed once an aborted turn has no prompt open
+	idleOnce   sync.Once
 	wake       chan struct{}
 	activity   func(contract.TurnID, contract.ActivityKind, string)
 	toolFinish func(contract.TurnID, contract.ToolFinished)
@@ -77,14 +78,11 @@ func (h *Harness) Start(ctx context.Context, id contract.TurnID, inputs []contra
 		return contract.TurnEnded{Turn: id}, errors.New("a turn needs at least one input")
 	}
 	if err := h.ensure(ctx); err != nil {
-		var account *AccountError
-		if !errors.As(err, &account) {
-			h.doneOnce.Do(func() { close(h.done) })
-		}
+		h.doneOnce.Do(func() { close(h.done) })
 		return contract.TurnEnded{Turn: id}, err
 	}
 	t := &turn{
-		id: id, lastUpdate: time.Now(), calls: map[string]*call{}, queued: make(chan struct{}), finished: make(chan struct{}),
+		id: id, lastUpdate: time.Now(), calls: map[string]*call{}, queued: make(chan struct{}), finished: make(chan struct{}), idle: make(chan struct{}),
 		wake: make(chan struct{}, 1), activity: func(contract.TurnID, contract.ActivityKind, string) {}, toolFinish: h.Finished,
 	}
 	if h.Activity != nil {
@@ -106,7 +104,10 @@ func (h *Harness) Start(ctx context.Context, id contract.TurnID, inputs []contra
 		select {
 		case <-t.wake:
 		case <-ctx.Done():
-			return h.endTurn(t, ctx.Err())
+			// A cancelled run still leaves agy running its prompt, so cancel it, as Abort does.
+			h.cancel(context.Background(), t)
+			res, _ := h.endTurn(t, nil)
+			return res, ctx.Err()
 		}
 		h.mu.Lock()
 		if t.open > 0 {
@@ -149,7 +150,7 @@ func (h *Harness) endTurn(t *turn, err error) (contract.TurnEnded, error) {
 		return res, err
 	case t.fail != nil:
 		res.Outcome, res.Error, res.Cause, res.ModelRetryAfterSeconds = contract.TurnFailed, t.fail.message, t.fail.cause, t.fail.retryAfter
-		return res, t.fail.err
+		return res, nil
 	case t.stopped:
 		res.Outcome, res.Final = contract.TurnStopped, ""
 	}
@@ -170,14 +171,19 @@ func (h *Harness) begin(t *turn, inputs []contract.TurnInput, started func()) er
 		blocks = append(blocks, map[string]any{"type": "text", "text": input.Text})
 	}
 	pending, err := p.client.Start("session/prompt", map[string]any{"sessionId": sid, "prompt": blocks})
-	if err == nil {
-		err = h.recordInputs(inputs)
-	}
 	if err != nil {
 		h.mu.Lock()
 		t.open--
+		t.settle()
 		h.mu.Unlock()
+		t.signal()
 		return h.exitError("session/prompt", err, p)
+	}
+	// agy has the prompt now. A mirror that cannot be written fails the turn when the prompt ends, but does not leave it running unseen.
+	if err := h.recordInputs(inputs); err != nil {
+		h.mu.Lock()
+		t.err = errors.Join(t.err, err)
+		h.mu.Unlock()
 	}
 	t.queuedOnce.Do(func() { close(t.queued) })
 	if started != nil {
@@ -223,26 +229,15 @@ func diffSections(sent, now []contract.ContextSection) string {
 // finishPrompt takes a prompt's response. Harness.mu is held.
 func (t *turn) finishPrompt(h *Harness, p *process, reason string, in, out, cachedRead, cachedWrite int64, err error) {
 	t.open--
-	defer func() {
-		select {
-		case t.wake <- struct{}{}:
-		default:
-		}
-	}()
+	t.settle()
+	defer t.signal()
 	if err != nil {
 		if t.aborted || t.err != nil {
 			return
 		}
 		var rpc *acp.Error
 		if errors.As(err, &rpc) {
-			text := rpc.Message + " " + string(rpc.Data)
-			switch classified := classify(text, time.Now()).(type) {
-			case *QuotaError:
-				t.fail = quotaFailure(classified)
-				return
-			case *AccountError:
-				t.fail = &failure{cause: contract.CauseModelFailed, message: classified.Error(), err: classified}
-				h.account(classified)
+			if t.fail = classify(rpc.Message+"\n"+string(rpc.Data), time.Now()); t.fail != nil {
 				return
 			}
 			t.err = fmt.Errorf("agy session/prompt: %w", err)
@@ -262,21 +257,12 @@ func (t *turn) finishPrompt(h *Harness, p *process, reason string, in, out, cach
 	}
 	if t.fail == nil {
 		t.fail = stopFailure(reason, t.cur, time.Now())
-		var account *AccountError
-		if t.fail != nil && errors.As(t.fail.err, &account) {
-			h.account(account)
-		}
 	}
-}
-
-// account tells the owner's hook. It runs off the lock and the reading goroutine.
-func (h *Harness) account(e *AccountError) {
-	go h.reportAccount(*e)
 }
 
 // watch ends a turn agy has left silent (quirks 1 and 31).
 func (h *Harness) watch(t *turn, stop <-chan struct{}) {
-	ticker := time.NewTicker(watchEvery)
+	ticker := time.NewTicker(h.watchEvery)
 	defer ticker.Stop()
 	for {
 		select {
@@ -285,9 +271,9 @@ func (h *Harness) watch(t *turn, stop <-chan struct{}) {
 		case <-ticker.C:
 		}
 		h.mu.Lock()
-		limit := promptInactivity
+		limit := h.promptInactivity
 		if t.openCalls > 0 {
-			limit = toolInactivity
+			limit = h.toolInactivity
 		}
 		silent := t.open > 0 && time.Since(t.lastUpdate) > limit
 		p := h.p
@@ -302,7 +288,8 @@ func (h *Harness) watch(t *turn, stop <-chan struct{}) {
 	}
 }
 
-// request answers what agy asks. Permissions are answered here as T3 does (adapter.ts:1742 selectPermissionOptionId, selectAutoApprovedPermissionOption):
+// request answers what agy asks. Permissions are answered here as T3 does (adapter.ts:8222-8290: a request with no turn, or a
+// question nobody answers, is cancelled) (adapter.ts:1742 selectPermissionOptionId, selectAutoApprovedPermissionOption):
 // allow once, else allow always; nothing is rejected. An approval nobody is waiting for, or a question agy puts as a
 // permission, is cancelled so agy is not left hanging.
 func (h *Harness) request(method string, raw json.RawMessage) (any, error) {
@@ -327,7 +314,7 @@ func (h *Harness) request(method string, raw json.RawMessage) (any, error) {
 	running := h.turn != nil
 	h.mu.Unlock()
 	if !running {
-		log.Printf("agy asked permission with no turn running: %s", harness.Mask(req.ToolCall.Title))
+		h.notice("agy asked permission with no turn running: " + harness.Mask(req.ToolCall.Title))
 		return cancelled, nil
 	}
 	// Choices of a question are not approvals (AntigravityProtocol.ts:78-83).
@@ -550,41 +537,71 @@ func (h *Harness) ClearQueue(context.Context) error {
 	return nil
 }
 
-// Abort cancels the turn as T3 does (ARUN:2625-2688): agy drops a cancel that reaches it before its prompt, so wait until
-// the prompt is written; send session/cancel; wait for the prompt's response; kill the process if it does not come.
+// Abort cancels the running turn.
 func (h *Harness) Abort(ctx context.Context) error {
 	h.mu.Lock()
-	t, p, sid := h.turn, h.p, h.sessionID
-	if t != nil {
-		t.aborted = true
-		h.held = nil
-	}
+	t := h.turn
 	h.mu.Unlock()
-	if t == nil || p == nil {
+	if t == nil {
 		return nil
 	}
-	timeout := time.NewTimer(h.cfg.CancelTimeout)
-	defer timeout.Stop()
+	return h.cancel(ctx, t)
+}
+
+// cancel is T3's cancel (ARUN:2625-2688, cancelBehavior "wait-for-prompt"): agy drops a cancel that reaches it before its
+// prompt, so wait until the prompt is written; send session/cancel; wait for the prompt's response; kill the process if
+// it does not come. Each wait has its own CancelTimeout.
+func (h *Harness) cancel(ctx context.Context, t *turn) error {
+	h.mu.Lock()
+	p, sid := h.p, h.sessionID
+	t.aborted = true
+	t.settle()
+	h.held = nil
+	h.mu.Unlock()
+	if p == nil {
+		return nil
+	}
+	wait := time.NewTimer(h.cfg.CancelTimeout)
 	select {
 	case <-t.queued:
 	case <-t.finished:
+		wait.Stop()
 		return nil
-	case <-timeout.C:
+	case <-wait.C:
 	case <-ctx.Done():
+		wait.Stop()
 		return ctx.Err()
 	}
+	wait.Stop()
 	if err := p.client.Notify("session/cancel", map[string]any{"sessionId": sid}); err != nil {
 		p.kill()
 		return nil
 	}
+	wait = time.NewTimer(h.cfg.CancelTimeout)
+	defer wait.Stop()
 	select {
-	case <-t.finished:
-	case <-timeout.C:
+	case <-t.idle:
+	case <-wait.C:
 		p.kill()
 	case <-ctx.Done():
 		return ctx.Err()
 	}
 	return nil
+}
+
+// settle closes idle once an aborted turn has no prompt open. Harness.mu is held.
+func (t *turn) settle() {
+	if t.aborted && t.open == 0 {
+		t.idleOnce.Do(func() { close(t.idle) })
+	}
+}
+
+// signal wakes Start to look at the turn again.
+func (t *turn) signal() {
+	select {
+	case t.wake <- struct{}{}:
+	default:
+	}
 }
 
 // SetPromptSections keeps the sections: a later change reaches agy as a block at the head of the next prompt.
@@ -636,6 +653,7 @@ func (h *Harness) Compact(ctx context.Context, over int64) (harness.Compaction, 
 	}
 	h.mu.Lock()
 	p, sid := h.p, h.sessionID
+	h.used = 0 // the usage_update after the compaction is what it left
 	h.mu.Unlock()
 	var res struct {
 		StopReason string `json:"stopReason"`
