@@ -15,7 +15,7 @@ Taste is design, wording and UI judgment; diagnostics is finding the cause of a 
 
 Choose review lenses for the work: correctness, security, performance or whether it reproduces. A workflow can run one worker per lens and a final pass over their results.
 
-An integrator uses a topic branch of its own for each PR, based on the target branch, and merges the exact commit the reviewer passed into it (`git fetch origin <branch>`, then merge the reviewed SHA): one reused branch would update the previous PR, and before a PR exists a session cannot push to a sibling's branch or open a PR from it. The approval that counts is on the integrated head. PR events go to the session that opened the PR, so the integrator passes them to the lead.
+An integrator uses a topic branch of its own for each PR, based on the target branch, and applies exactly what the reviewer passed: an attached patch (`git format-patch` by the author, `git am` here) or a pushed commit (`git fetch origin <branch>`, then merge the reviewed SHA). A patch needs no push access and says which base it was cut from. One reused branch would update the previous PR, and before a PR exists a session cannot push to a sibling's branch or open a PR from it. The approval that counts is on the integrated head. PR events go to the session that opened the PR, so the integrator passes them to the lead.
 
 # Delivery and troubleshooting
 

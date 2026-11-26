@@ -66,8 +66,8 @@ A child session costs more than it looks: a fresh context, a brief to write and 
 - **Lead:** captain of one feature, repository or project. It splits the work, coordinates the team, speaks for the result, and is the contact for its PRs, issues and subscriptions.
 - **Implementer:** writes code and does not build or run it, so it works in a small box. Its work goes straight to the reviewer.
 - **Reviewer:** reads code and judges it without running it. It sends problems back to the implementer and passes reviewed work to the integrator.
-- **Integrator:** where authored code comes together. It fetches the reviewed commits into its own branch, resolves conflicts, builds, runs the tests and opens the PR, on a medium or large box.
-These are a starting point. Read the task and cut it into the jobs it needs: a tester, a planner, an email reader. Give each job one holder and say in its brief who it receives work from and who it hands to. A handoff is a post that mentions the next holder.
+- **Integrator:** where authored code comes together. It applies the reviewed work to its own branch, resolves conflicts, builds, runs the tests and opens the PR, on a medium or large box.
+These are a starting point. Read the task and cut it into the jobs it needs: a tester, a planner, an email reader. Give each job one holder and say in its brief who it receives work from and who it hands to. A handoff is a post that mentions the next holder and carries the work: an attached patch, or the pushed branch and commit.
 
 **A brief** (session start with goal, doneWhen and brief) is all a child knows besides AGENTS.md and its tools. It has not seen your conversation. A good one gives:
 - the goal and why it matters, so the child can make judgment calls;
