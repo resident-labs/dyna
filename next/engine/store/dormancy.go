@@ -23,9 +23,11 @@ func BoxUpdateNoticeID(box contract.BoxID, update string) string {
 // boxUpdateNotice finds that notice among deliveries. It is not work: it holds no close and does not pass to the parent.
 const boxUpdateNotice = `EXISTS (SELECT 1 FROM events e WHERE e.seq=d.seq AND e.client_id LIKE 'box-update:%')`
 
+// CanDispatch says a session's box is up and may be given a turn. A box that started before the session's handoff became due, as
+// when it changed harness or agy account, is not: its launch is the old one, so it takes no turn until it restarts.
 func (s *Store) CanDispatch(ctx context.Context, id contract.SessionID) (bool, error) {
 	var ok bool
-	err := s.Read().QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM sessions s JOIN boxes b ON b.session=s.id WHERE s.id=? AND s.closed_at IS NULL AND s.state='open' AND b.want='run' AND b.state='ready')`, id).Scan(&ok)
+	err := s.Read().QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM sessions s JOIN boxes b ON b.session=s.id WHERE s.id=? AND s.closed_at IS NULL AND s.state='open' AND b.want='run' AND b.state='ready' AND NOT (s.handoff>0 AND b.hello_seq<=s.handoff))`, id).Scan(&ok)
 	return ok, err
 }
 
@@ -231,4 +233,20 @@ func (s *Store) ForgetShellJobs(ctx context.Context, id contract.SessionID) erro
 		_, err := tx.ExecContext(ctx, "UPDATE sessions SET shell_jobs=0 WHERE id=? AND shell_jobs>0", id)
 		return err
 	})
+}
+
+// NoteBoxHello records what a box said when it started: the events seq it started from, so a handoff due after that seq is one it
+// has not seen, and whether it can hand a conversation over.
+func (s *Store) NoteBoxHello(ctx context.Context, box contract.BoxID, canHandoff bool) error {
+	return s.Write(ctx, func(tx *sql.Tx) error {
+		_, err := tx.ExecContext(ctx, "UPDATE boxes SET hello_seq=(SELECT COALESCE(MAX(seq),0) FROM events),can_handoff=? WHERE id=?", canHandoff, box)
+		return err
+	})
+}
+
+// BoxCanHandoff says the session's box reported at its last hello that it can hand a conversation over.
+func (s *Store) BoxCanHandoff(ctx context.Context, box contract.BoxID) (bool, error) {
+	var ok bool
+	err := s.Read().QueryRowContext(ctx, "SELECT can_handoff FROM boxes WHERE id=?", box).Scan(&ok)
+	return ok, err
 }

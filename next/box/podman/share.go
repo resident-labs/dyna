@@ -142,16 +142,21 @@ func (h *Host) makeMountFolder(ctx context.Context, m box.Mount) error {
 }
 
 // agyAccountsScript lists the folder names directly under the accounts folder $1, and reads nothing inside any of them.
-const agyAccountsScript = `[ -d "$1" ] || exit 0; find "$1" -mindepth 1 -maxdepth 1 -type d -printf '%f\n'`
+const agyAccountsScript = `[ -d "$1" ] || exit 0; find "$1" -mindepth 1 -maxdepth 1 -type d -printf '%f\0'`
 
-// AgyAccounts names the folders under dir, one per agy account the owner signed in with. Only the names are listed: Dyna never
+// AgyAccounts names the folders under dir (NUL-separated, so a name with spaces stays whole), one per agy account the owner signed in with. Only the names are listed: Dyna never
 // reads inside a folder, so it cannot tell a signed-in one from an empty one.
 func (h *Host) AgyAccounts(ctx context.Context, dir string) ([]string, error) {
 	out, err := h.run(ctx, "bash", "-c", agyAccountsScript, "dyna", dir)
 	if err != nil {
 		return nil, err
 	}
-	names := strings.Fields(string(out))
+	var names []string
+	for _, name := range strings.Split(string(out), "\x00") {
+		if name != "" {
+			names = append(names, name)
+		}
+	}
 	slices.Sort(names)
 	return names, nil
 }

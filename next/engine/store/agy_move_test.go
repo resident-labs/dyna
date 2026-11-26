@@ -182,3 +182,39 @@ func TestHarnessSwitchHoldsTheAgyLimit(t *testing.T) {
 		t.Fatalf("err = %v", err)
 	}
 }
+
+// When the account the session moved to is limited too, it waits for the earliest reset in the streak, on the account whose reset
+// that is, and not for the later reset of the account it is on.
+func TestAgyAllAccountsLimitedWakesAtTheEarliestReset(t *testing.T) {
+	r := newAgyRig(t)
+	r.owner("work")
+	r.start("t1")
+	r.limit("t1", 60, "b")
+	r.owner("again")
+	r.now = r.now.Add(time.Second)
+	r.start("t2")
+	// The wake that follows a move is not an owner post, so the first account is still in the streak.
+	if _, err := r.s.writer.Exec("INSERT OR REPLACE INTO agy_streak(session,account,reset_at) VALUES('s','main',?)", r.now.Add(59*time.Second).UnixMilli()); err != nil {
+		t.Fatal(err)
+	}
+	r.limit("t2", 3600, "")
+	account, handoff, retryAt := r.account()
+	if account != "main" || handoff == 0 || retryAt != r.now.Add(59*time.Second).UnixMilli() {
+		t.Fatalf("account %q, handoff %d, retry at %d, want main at %d", account, handoff, retryAt, r.now.Add(59*time.Second).UnixMilli())
+	}
+}
+
+// A session that is closing takes no harness switch.
+func TestHarnessSwitchRefusesAClosingSession(t *testing.T) {
+	r := newAgyRig(t)
+	if _, err := r.s.writer.Exec("UPDATE sessions SET state='closing' WHERE id='s'"); err != nil {
+		t.Fatal(err)
+	}
+	event := contract.Event{ID: "switch", Room: "r", Time: r.now, From: contract.Principal{Kind: contract.PrincipalOwner}, Body: contract.SessionProfileChanged{Session: "s", Profile: "g"}}
+	if err := r.s.SetSessionProfile(r.ctx, "s", "g", event, &HarnessSwitch{}); err != ErrSessionClosing {
+		t.Fatalf("err = %v", err)
+	}
+	if _, handoff, _ := r.account(); handoff != 0 {
+		t.Fatalf("handoff %d", handoff)
+	}
+}

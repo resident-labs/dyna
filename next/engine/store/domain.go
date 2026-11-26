@@ -65,6 +65,7 @@ type Session struct {
 	ClearedAt       int64  // read back only: unix millis when a clear is pending for the next turn, or 0
 	AgyAccount      string // read back only: the agy account folder its box mounts, empty for the default
 	Handoff         bool   // read back only: its next conversation starts from a handoff of the earlier files
+	HandoffGen      int64  // read back only: names that handoff, the events seq it became due at; 0 when none
 	// Workflow makes the new session a crew. It is set only to start one: Session does not read it back.
 	Workflow *WorkflowRun
 }
@@ -405,7 +406,7 @@ func (s *Store) EndTurn(ctx context.Context, session contract.SessionID, output 
 				if deferred {
 					retryAt = event.Time.Add(time.Duration(output.ModelRetryAfterSeconds) * time.Second).UnixMilli()
 				}
-				if deferred {
+				if deferred && !output.LeftAgy {
 					// The account that returned the limit stays out of this streak until its reset.
 					if _, err := tx.ExecContext(ctx, "INSERT INTO agy_streak(session,account,reset_at) SELECT id,COALESCE(NULLIF(agy_account,''),?),? FROM sessions WHERE id=? ON CONFLICT(session,account) DO UPDATE SET reset_at=excluded.reset_at", box.DefaultAgyAccount, retryAt, session); err != nil {
 						return err
@@ -414,6 +415,15 @@ func (s *Store) EndTurn(ctx context.Context, session contract.SessionID, output 
 						// Another account is free: the session moves to it and wakes at once, on its new box, with a handoff.
 						retryAt = event.Time.UnixMilli()
 						if _, err := tx.ExecContext(ctx, "UPDATE sessions SET agy_account=?,handoff=MAX(1,(SELECT COALESCE(MAX(seq),0) FROM events)) WHERE id=?", output.MoveTo, session); err != nil {
+							return err
+						}
+					} else {
+						// Every account is limited: the session waits for the earliest reset, on the account whose reset it is.
+						var account string
+						if err := tx.QueryRowContext(ctx, "SELECT account,reset_at FROM agy_streak WHERE session=? AND reset_at>? ORDER BY reset_at,account LIMIT 1", session, event.Time.UnixMilli()).Scan(&account, &retryAt); err != nil {
+							return err
+						}
+						if _, err := tx.ExecContext(ctx, "UPDATE sessions SET agy_account=?,handoff=MAX(1,(SELECT COALESCE(MAX(seq),0) FROM events)) WHERE id=? AND COALESCE(NULLIF(agy_account,''),?)!=?", account, session, box.DefaultAgyAccount, account); err != nil {
 							return err
 						}
 					}
@@ -707,7 +717,8 @@ func (s *Store) EndTurn(ctx context.Context, session contract.SessionID, output 
 
 func (s *Store) Session(ctx context.Context, id contract.SessionID) (Session, error) {
 	var session Session
-	err := s.Read().QueryRowContext(ctx, "SELECT s.id,s.room,s.name,s.repo,s.profile,b.id,s.close_reason,s.compose,s.parent IS NULL,s.state='closing',s.cleared_at,COALESCE((SELECT id FROM turns WHERE session=s.id AND ended_at IS NULL),''),s.agy_account,s.handoff>0 FROM sessions s JOIN boxes b ON b.session=s.id WHERE s.id=? AND s.closed_at IS NULL", id).Scan(&session.ID, &session.Room, &session.Name, &session.Repo, &session.Profile, &session.Box, &session.CloseReason, &session.Compose, &session.Root, &session.Closing, &session.ClearedAt, &session.Turn, &session.AgyAccount, &session.Handoff)
+	err := s.Read().QueryRowContext(ctx, "SELECT s.id,s.room,s.name,s.repo,s.profile,b.id,s.close_reason,s.compose,s.parent IS NULL,s.state='closing',s.cleared_at,COALESCE((SELECT id FROM turns WHERE session=s.id AND ended_at IS NULL),''),s.agy_account,s.handoff FROM sessions s JOIN boxes b ON b.session=s.id WHERE s.id=? AND s.closed_at IS NULL", id).Scan(&session.ID, &session.Room, &session.Name, &session.Repo, &session.Profile, &session.Box, &session.CloseReason, &session.Compose, &session.Root, &session.Closing, &session.ClearedAt, &session.Turn, &session.AgyAccount, &session.HandoffGen)
+	session.Handoff = session.HandoffGen > 0
 	return session, err
 }
 

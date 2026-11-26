@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -292,5 +293,26 @@ func TestCheckPresentOnlyStats(t *testing.T) {
 	}
 	if _, err := os.Stat(folder); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("a required folder was made: %v", err)
+	}
+}
+
+// A folder name with a space stays one name, so no account is made up from its pieces.
+func TestAgyAccountsKeepWholeNames(t *testing.T) {
+	root := t.TempDir()
+	for _, name := range []string{"main", "not signed-in"} {
+		if err := os.Mkdir(filepath.Join(root, name), 0700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	h, err := New("user@host", t.TempDir(), "host", localShell{path: os.Getenv("PATH")}, root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := h.AgyAccounts(t.Context(), root)
+	if err != nil || !slices.Equal(got, []string{"main", "not signed-in"}) {
+		t.Fatalf("names %q: %v", got, err)
+	}
+	if box.ValidAgyAccount("not signed-in") {
+		t.Fatal("a name with a space is a valid account")
 	}
 }

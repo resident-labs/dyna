@@ -789,6 +789,9 @@ func (s *Service) SessionSetProfile(ctx context.Context, caller contract.Princip
 			if errors.Is(err, store.ErrProfileFull) {
 				return &contract.Error{Code: contract.ErrConflict, Message: fmt.Sprintf("the agy account allows %d open sessions at once across every agy profile, and they are open; close one, or ask the owner to raise max-concurrent on the agy profiles", harness.Limit)}
 			}
+			if harness != nil && errors.Is(err, store.ErrSessionClosing) {
+				return &contract.Error{Code: contract.ErrConflict, Message: "session is closing"}
+			}
 			if errors.Is(err, store.ErrTreeForbidden) {
 				return &contract.Error{Code: contract.ErrForbidden, Message: fmt.Sprintf("session %s is not under you; you manage only sessions below you, so ask your parent", target.Name)}
 			}

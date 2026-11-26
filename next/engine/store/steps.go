@@ -13,11 +13,14 @@ const agentsTable = `CREATE TABLE agents (id TEXT PRIMARY KEY, session TEXT NOT 
 // Every schema change adds an entry here and updates schema.sql. A store below floorVersion stops at floorCommit, so
 // steps below the floor go when the floor moves. Later steps are ordinary.
 var steps = map[int][]string{
-	// agy: the account a session's box mounts, the events seq from which a fresh conversation needs a handoff, and the accounts that
-	// returned a usage limit since the session last completed a turn.
+	// agy: the account a session's box mounts, the events seq from which a fresh conversation needs a handoff, the accounts that
+	// returned a usage limit since the session last completed a turn, and what its box said at its last hello: the events seq it
+	// started from, and whether it can hand a conversation over.
 	130: {
 		`ALTER TABLE sessions ADD COLUMN agy_account TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE sessions ADD COLUMN handoff INTEGER NOT NULL DEFAULT 0`,
+		`ALTER TABLE boxes ADD COLUMN hello_seq INTEGER NOT NULL DEFAULT 0`,
+		`ALTER TABLE boxes ADD COLUMN can_handoff INTEGER NOT NULL DEFAULT 0`,
 		`CREATE TABLE agy_streak (session TEXT NOT NULL REFERENCES sessions(id), account TEXT NOT NULL, reset_at INTEGER NOT NULL, PRIMARY KEY(session, account))`,
 	},
 	// Session conversation clearing: pending clear timestamp on sessions, and the turn that consumed it.

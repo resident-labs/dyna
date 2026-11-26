@@ -55,6 +55,13 @@ func (s *Store) SetSessionProfile(ctx context.Context, target contract.SessionID
 			return ErrTreeForbidden
 		}
 		if harness != nil {
+			var state string
+			if err := tx.QueryRowContext(ctx, "SELECT state FROM sessions WHERE id=? AND closed_at IS NULL", target).Scan(&state); err != nil {
+				return err
+			}
+			if state != "open" {
+				return ErrSessionClosing
+			}
 			if len(harness.Profiles) > 0 {
 				var open int
 				if err := tx.QueryRowContext(ctx, "SELECT COUNT(*) FROM sessions WHERE profile IN (SELECT value FROM json_each(?)) AND closed_at IS NULL", mustJSON(harness.Profiles)).Scan(&open); err != nil {
@@ -132,4 +139,15 @@ func (s *Store) AgyStreak(ctx context.Context, session contract.SessionID, now t
 		limited[account] = true
 	}
 	return limited, rows.Err()
+}
+
+// TurnPredatesHandoff says a turn started before the session's handoff became due, so the harness that serves it is the one the
+// session left: the turn was running when the session changed harness.
+func (s *Store) TurnPredatesHandoff(ctx context.Context, session contract.SessionID, turn contract.TurnID) (bool, error) {
+	var predates bool
+	err := s.Read().QueryRowContext(ctx, "SELECT s.handoff>0 AND s.handoff>=COALESCE(t.started_seq,0) FROM sessions s JOIN turns t ON t.session=s.id WHERE s.id=? AND t.id=?", session, turn).Scan(&predates)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	return predates, err
 }

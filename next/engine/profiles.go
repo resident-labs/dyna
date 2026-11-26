@@ -535,15 +535,17 @@ func (s *Service) checkHarnessSwitch(ctx context.Context, target store.Session, 
 	} else if !errors.Is(err, store.ErrNotFound) {
 		return failure(err)
 	}
-	if s.profiles.Harness(profile) != contract.HarnessAgy {
-		return nil
-	}
 	current, err := s.store.Box(ctx, target.Box)
 	if err != nil {
 		return failure(err)
 	}
-	if current.Host != agyHost {
+	if s.profiles.Harness(profile) == contract.HarnessAgy && current.Host != agyHost {
 		return &contract.Error{Code: contract.ErrConflict, Message: fmt.Sprintf("session %s runs on host %q and agy runs only on host %s, where the owner signed in to Google; its files cannot move there, so start a new session on profile %s", target.Name, current.Host, agyHost, profile)}
+	}
+	if can, err := s.store.BoxCanHandoff(ctx, target.Box); err != nil {
+		return failure(err)
+	} else if !can {
+		return &contract.Error{Code: contract.ErrConflict, Message: fmt.Sprintf("session %s runs in a box that cannot hand its conversation to another harness yet; the engine and box binaries differ until the box restarts, so try again after its box has restarted, or start a new session on profile %s", target.Name, profile)}
 	}
 	return nil
 }
@@ -560,6 +562,9 @@ func (s *Service) agyMoveTarget(ctx context.Context, session store.Session) stri
 	if err != nil {
 		return ""
 	}
+	if can, err := s.store.BoxCanHandoff(ctx, session.Box); err != nil || !can {
+		return ""
+	}
 	names, err := s.agyAccounts(ctx, current.Host)
 	if err != nil {
 		log.Printf("session %s: listing agy accounts: %v", session.ID, err)
@@ -569,15 +574,19 @@ func (s *Service) agyMoveTarget(ctx context.Context, session store.Session) stri
 	if err != nil {
 		return ""
 	}
-	own := session.AgyAccount
-	if own == "" {
-		own = box.DefaultAgyAccount
-	}
-	limited[own] = true
+	limited[agyAccountName(session.AgyAccount)] = true
 	for _, name := range names {
 		if box.ValidAgyAccount(name) && !limited[name] {
 			return name
 		}
 	}
 	return ""
+}
+
+// agyAccountName is the account a session without one recorded uses.
+func agyAccountName(account string) string {
+	if account == "" {
+		return box.DefaultAgyAccount
+	}
+	return account
 }

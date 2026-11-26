@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"log"
+	"strconv"
 	"strings"
 	"unicode/utf8"
 
@@ -55,6 +56,9 @@ func (s *Service) BoxHello(ctx context.Context, caller contract.Principal, req c
 		return contract.BoxHelloResponse{}, invalid("box is not starting, ready, or closing")
 	}
 	if err := s.store.ForgetShellJobs(ctx, session.ID); err != nil {
+		return contract.BoxHelloResponse{}, failure(err)
+	}
+	if err := s.store.NoteBoxHello(ctx, session.Box, req.CanHandoff); err != nil {
 		return contract.BoxHelloResponse{}, failure(err)
 	}
 	model, _, err := s.profiles.Model(session.Profile)
@@ -160,7 +164,7 @@ func (s *Service) BoxHello(ctx context.Context, caller contract.Principal, req c
 	if harness == contract.HarnessAgy {
 		agy = &agyMount
 	}
-	return contract.BoxHelloResponse{Harness: harness, Agy: agy, Discord: discordProblem == nil, Room: session.Room, GitName: gitName, GitEmail: gitEmail, GitSigningKey: signingKey, Session: session.ID, Box: session.Box, Model: model, ModelInstructions: prompt.ModelInstructions(model), TextOnlyModels: s.profiles.TextOnlyModels(), CompactTokens: s.profiles.CompactionTokens(session.Profile), Repos: repos, Transcripts: files, Instructions: prompt.Session(vars), WorkerInstructions: prompt.Core, Root: vars.Role == prompt.Root, Advisor: vars.Advisor, Workflow: workflow, GitHub: githubAvailable, Fresh: session.ClearedAt > 0, Handoff: session.Handoff}, nil
+	return contract.BoxHelloResponse{Harness: harness, Agy: agy, Discord: discordProblem == nil, Room: session.Room, GitName: gitName, GitEmail: gitEmail, GitSigningKey: signingKey, Session: session.ID, Box: session.Box, Model: model, ModelInstructions: prompt.ModelInstructions(model), TextOnlyModels: s.profiles.TextOnlyModels(), CompactTokens: s.profiles.CompactionTokens(session.Profile), Repos: repos, Transcripts: files, Instructions: prompt.Session(vars), WorkerInstructions: prompt.Core, Root: vars.Role == prompt.Root, Advisor: vars.Advisor, Workflow: workflow, GitHub: githubAvailable, Fresh: session.ClearedAt > 0, Handoff: session.Handoff, HandoffGen: handoffGen(session)}, nil
 }
 
 func (s *Service) DeliveryDone(ctx context.Context, caller contract.Principal, req contract.DeliveryDoneRequest) (contract.DeliveryDoneResponse, *contract.Error) {
@@ -205,8 +209,20 @@ func (s *Service) TurnOutput(ctx context.Context, caller contract.Principal, req
 		req.Outcome, req.Cause, req.Error = contract.TurnStopped, contract.CauseClosed, ""
 	}
 	req.Usage.Model = req.Model
-	req.OneWake = s.profiles.Harness(session.Profile) == contract.HarnessAgy
-	if req.OneWake && req.Outcome == contract.TurnFailed && req.Cause == contract.CauseModelFailed && req.ModelRetryAfterSeconds > 0 {
+	// The harness that served the turn is the session's now, unless the session changed harness while the turn ran.
+	served := s.profiles.Harness(session.Profile)
+	if predates, err := s.store.TurnPredatesHandoff(ctx, session.ID, req.Turn); err != nil {
+		return contract.TurnOutputResponse{}, failure(err)
+	} else if predates {
+		if served == contract.HarnessAgy {
+			served = contract.HarnessPig
+		} else {
+			served = contract.HarnessAgy
+		}
+	}
+	req.OneWake = served == contract.HarnessAgy
+	req.LeftAgy = req.OneWake && s.profiles.Harness(session.Profile) != contract.HarnessAgy
+	if req.OneWake && !req.LeftAgy && req.Outcome == contract.TurnFailed && req.Cause == contract.CauseModelFailed && req.ModelRetryAfterSeconds > 0 {
 		req.MoveTo = s.agyMoveTarget(ctx, session)
 	}
 	run, err := s.store.SessionWorkflow(ctx, session.ID)
@@ -245,10 +261,10 @@ func (s *Service) TurnOutput(ctx context.Context, caller contract.Principal, req
 	if err != nil {
 		return contract.TurnOutputResponse{}, failure(err)
 	}
-	if req.MoveTo != "" {
-		// The store moved the session if the turn was not cancelled meanwhile. Its box restarts on the new account, and the wake it
-		// scheduled for now follows the restart.
-		if moved, err := s.store.Session(ctx, session.ID); err == nil && moved.AgyAccount == req.MoveTo {
+	if req.OneWake && !req.LeftAgy {
+		// The store moves the session to another account on a limit, or to the one that resets first when all are limited. Its box
+		// restarts on that account, and the wake follows the restart.
+		if moved, err := s.store.Session(ctx, session.ID); err == nil && agyAccountName(moved.AgyAccount) != agyAccountName(session.AgyAccount) {
 			s.refreshBox(ctx, moved)
 		}
 	}
@@ -343,4 +359,12 @@ func (s *Service) ConversationRead(ctx context.Context, caller contract.Principa
 	}
 	s.live.Publish(req.Room, event, false)
 	return contract.ConversationReadResponse{}, nil
+}
+
+// handoffGen names a session's pending handoff for the box, empty when there is none.
+func handoffGen(session store.Session) string {
+	if !session.Handoff {
+		return ""
+	}
+	return strconv.FormatInt(session.HandoffGen, 10)
 }

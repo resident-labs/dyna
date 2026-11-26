@@ -766,6 +766,9 @@ type EventsListResponse struct {
 // Older agents omit it and retain the ready-on-hello handshake.
 type BoxHelloRequest struct {
 	WaitForChannel bool `json:"waitForChannel,omitempty"`
+	// CanHandoff says the box starts a new native conversation from a handoff of the session's earlier files when the hello carries
+	// one. Until a box says so, the engine neither switches its session between pig and agy nor moves it between agy accounts.
+	CanHandoff bool `json:"canHandoff,omitempty"`
 }
 type ModelProvider string
 
@@ -858,6 +861,9 @@ type BoxHelloResponse struct {
 	// Handoff says the session's native conversation must start again from a history of its earlier session files, as when it
 	// changed harness or agy account. The engine sets it until the first turn after the change has ended.
 	Handoff bool `json:"handoff,omitempty"`
+	// HandoffGen names that handoff: the same text every hello until it is delivered, and a different one for the next change of
+	// harness or account, so a box tells a repeat from a new handoff. Empty when Handoff is false.
+	HandoffGen string `json:"handoffGen,omitempty"`
 }
 
 // MaxModelRetryAfterSeconds bounds hints for transient provider failures.
@@ -891,6 +897,9 @@ type TurnOutputRequest struct {
 	// MoveTo is set by the engine, not the box, when another agy account is free after a usage limit: the session wakes at once on
 	// that account, with a handoff, instead of at the reset.
 	MoveTo string `json:"-"`
+	// LeftAgy is set by the engine when an agy turn ends after its session moved to pig: the turn is still held to agy's one wake at
+	// its reset, but the streak and the account are left alone, as the session no longer runs there.
+	LeftAgy bool `json:"-"`
 }
 type TurnOutputResponse struct{}
 
