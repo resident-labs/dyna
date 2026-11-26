@@ -33,10 +33,19 @@ type messageStreamKey struct {
 }
 
 type messageStreamState struct {
-	itemID   string
-	hasDelta bool
-	done     bool
+	itemID           string
+	hasOutputIndex   bool
+	suppressFallback bool
+	done             bool
 }
+
+type messageTextEvent int
+
+const (
+	messageAdded messageTextEvent = iota
+	messageDelta
+	messageDone
+)
 
 type toolCallStreamState struct {
 	Index            int
@@ -114,7 +123,7 @@ type ConvertCliToOpenAIParams struct {
 	citationKeys          map[string]struct{}
 	emittedTextRunes      int64
 	messageStates         map[messageStreamKey]*messageStreamState
-	unkeyedMessageDelta   bool
+	unattributedText      bool
 	LastImageHashByItemID map[string][32]byte
 }
 
@@ -174,7 +183,7 @@ func ConvertCodexResponseToOpenAI(_ context.Context, modelName string, originalR
 		p.CreatedAt = rootResult.Get("response.created_at").Int()
 		p.Model = rootResult.Get("response.model").String()
 		p.messageStates = nil
-		p.unkeyedMessageDelta = false
+		p.unattributedText = false
 		if p.LastImageHashByItemID == nil {
 			p.LastImageHashByItemID = make(map[string][32]byte)
 		}
@@ -231,11 +240,7 @@ func ConvertCodexResponseToOpenAI(_ context.Context, modelName string, originalR
 			template, _ = sjson.SetBytes(template, "choices.0.delta.content", delta)
 			p.emittedTextRunes += int64(utf8.RuneCountInString(delta))
 			if delta != "" {
-				if state := p.observeMessage(rootResult, gjson.Result{}, true); state != nil {
-					state.hasDelta = true
-				} else {
-					p.unkeyedMessageDelta = true
-				}
+				p.observeMessage(rootResult, gjson.Result{}, messageDelta)
 			}
 		}
 	} else if dataType == "response.output_text.annotation.added" || dataType == "response.output_text.done" || dataType == "response.content_part.done" {
@@ -299,9 +304,7 @@ func ConvertCodexResponseToOpenAI(_ context.Context, modelName string, originalR
 		itemResult := rootResult.Get("item")
 		itemType := itemResult.Get("type").String()
 		if itemType == "message" {
-			if p.observeMessage(rootResult, itemResult, false) == nil {
-				p.unkeyedMessageDelta = false
-			}
+			p.observeMessage(rootResult, itemResult, messageAdded)
 			return [][]byte{}
 		}
 		if !isCodexToolCallType(itemType) {
@@ -384,18 +387,8 @@ func ConvertCodexResponseToOpenAI(_ context.Context, modelName string, originalR
 		}
 		itemType := itemResult.Get("type").String()
 		if itemType == "message" {
-			state := p.observeMessage(rootResult, itemResult, true)
-			var hadText bool
-			if state != nil {
-				hadText = state.hasDelta || state.done
-				state.done = true
-			}
-			if !hadText {
-				hadText = p.unkeyedMessageDelta
-				p.unkeyedMessageDelta = false
-			}
 			var fallback strings.Builder
-			if !hadText {
+			if p.observeMessage(rootResult, itemResult, messageDone) {
 				for _, part := range itemResult.Get("content").Array() {
 					if part.Get("type").String() == "output_text" {
 						fallback.WriteString(part.Get("text").String())
@@ -851,31 +844,15 @@ func buildCodexURLCitations(annotations []gjson.Result, runeOffset int64, seen m
 	return citations
 }
 
-// observeMessage links the ID and index whenever an event supplies both.
-// Unkeyed text can be attributed only when exactly one known item is still open.
-func (p *ConvertCliToOpenAIParams) observeMessage(event, item gjson.Result, allowUnkeyed bool) *messageStreamState {
+// observeMessage updates item attribution and reports whether a done event can
+// supply fallback text without replaying text already sent in a delta.
+func (p *ConvertCliToOpenAIParams) observeMessage(event, item gjson.Result, kind messageTextEvent) bool {
 	itemID := strings.TrimSpace(item.Get("id").Str)
 	if itemID == "" {
 		itemID = strings.TrimSpace(event.Get("item_id").Str)
 	}
 	index := event.Get("output_index")
 	hasIndex := index.Type == gjson.Number
-	if itemID == "" && !hasIndex {
-		if !allowUnkeyed {
-			return nil
-		}
-		var sole *messageStreamState
-		for _, state := range p.messageStates {
-			if state.done || state == sole {
-				continue
-			}
-			if sole != nil {
-				return nil
-			}
-			sole = state
-		}
-		return sole
-	}
 
 	var state *messageStreamState
 	if itemID != "" {
@@ -889,13 +866,44 @@ func (p *ConvertCliToOpenAIParams) observeMessage(event, item gjson.Result, allo
 				state = byIndex
 			} else if state != byIndex {
 				// Earlier events may have supplied only one of the two keys.
-				state.hasDelta = state.hasDelta || byIndex.hasDelta
+				state.suppressFallback = state.suppressFallback || byIndex.suppressFallback
 				state.done = state.done || byIndex.done
 			}
 		}
 	}
+
+	var ambiguous bool
+	if state == nil && kind != messageAdded && (itemID == "" || !hasIndex) {
+		var sole *messageStreamState
+		for _, open := range p.messageStates {
+			if open.done || open == sole || (itemID != "" && open.itemID != "") || (hasIndex && open.hasOutputIndex) {
+				continue
+			}
+			if sole == nil {
+				sole = open
+				continue
+			}
+			ambiguous = true
+			if kind == messageDelta {
+				// Keep the streamed delta, but don't replay any item it could belong to.
+				sole.suppressFallback = true
+				open.suppressFallback = true
+			}
+		}
+		if !ambiguous {
+			state = sole
+		}
+	}
+
+	if state == nil && itemID == "" && !hasIndex {
+		if kind == messageDelta && !ambiguous {
+			// No open item explains the delta; a later announcement may describe it.
+			p.unattributedText = true
+		}
+		return kind == messageDone && !ambiguous && !p.unattributedText && len(p.messageStates) == 0
+	}
 	if state == nil {
-		state = &messageStreamState{}
+		state = &messageStreamState{suppressFallback: ambiguous || p.unattributedText}
 	}
 	if p.messageStates == nil {
 		p.messageStates = make(map[messageStreamKey]*messageStreamState)
@@ -905,9 +913,18 @@ func (p *ConvertCliToOpenAIParams) observeMessage(event, item gjson.Result, allo
 		p.messageStates[messageStreamKey{itemID: state.itemID}] = state
 	}
 	if hasIndex {
+		state.hasOutputIndex = true
 		p.messageStates[indexKey] = state
 	}
-	return state
+	switch kind {
+	case messageDelta:
+		state.suppressFallback = true
+	case messageDone:
+		fallback := !state.done && !state.suppressFallback
+		state.done = true
+		return fallback
+	}
+	return false
 }
 
 func registerToolCallState(p *ConvertCliToOpenAIParams, eventResult, itemResult gjson.Result, state *toolCallStreamState) {
