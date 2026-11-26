@@ -101,7 +101,6 @@ type process struct {
 	stdin   io.Closer
 	exited  chan struct{}
 	version string
-	steers  bool
 	options []configOption
 	tail    tail
 
@@ -236,17 +235,27 @@ func environment(base []string, geminiDir, tmp string) []string {
 	return env
 }
 
-var versionPattern = regexp.MustCompile(`(\d+)\.(\d+)\.(\d+)`)
+// parseVersion reads agy's version as T3 does, tolerating the historical agy_acp_server_ prefix (ASUP:62-66, quirk 32).
+var versionPattern = regexp.MustCompile(`^(?:v|agy_acp_server_)?(\d+)\.(\d+)\.(\d+)`)
 
-// steersWithPrompt is T3's check: agy 1.5.0 and later steers a running turn with the next prompt.
-func steersWithPrompt(version string) bool {
-	m := versionPattern.FindStringSubmatch(version)
+// minVersion is the first agy that offers every model to every ACP client. T3 refuses older ones (ASUP:70-88, AntigravityDriver.ts:
+// 340-356) and its model manifest marks below 1.5.0 broken; there is no withdrawn build listed. The steering that 1.5.0 added
+// (ASUP:77-85) is therefore always there. An agent that gives no parseable version is not refused, as in T3.
+var minVersion = [3]int{1, 5, 1}
+
+func versionRefused(version string) error {
+	m := versionPattern.FindStringSubmatch(strings.TrimSpace(version))
 	if m == nil {
-		return false
+		return nil
 	}
-	major, _ := strconv.Atoi(m[1])
-	minor, _ := strconv.Atoi(m[2])
-	return major > 1 || (major == 1 && minor >= 5)
+	var v [3]int
+	for i := range v {
+		v[i], _ = strconv.Atoi(m[i+1])
+	}
+	if slices.Compare(v[:], minVersion[:]) < 0 {
+		return fmt.Errorf("agy %s only serves allowlisted editors, not Dyna; use 1.5.1 or newer", version)
+	}
+	return nil
 }
 
 // ensure runs a live process with the conversation open on it, starting one if the last has gone.
@@ -371,7 +380,9 @@ func (h *Harness) setup(ctx context.Context, p *process) error {
 		return h.exitError("initialize", err, p)
 	}
 	p.version = init.AgentInfo.Version
-	p.steers = steersWithPrompt(p.version)
+	if err := versionRefused(p.version); err != nil {
+		return err
+	}
 	p.image, p.audio, p.embedded = init.Caps.Prompt.Image, init.Caps.Prompt.Audio, init.Caps.Prompt.EmbeddedContext
 	p.resume = init.Caps.Session.Resume != nil
 	if err := h.authenticate(ctx, p); err != nil {

@@ -308,20 +308,18 @@ func TestSteerSendsSecondPrompt(t *testing.T) {
 	}
 }
 
-func TestSteerRefusedBeforeVersion15(t *testing.T) {
-	h, _, _ := open(t, map[string]string{"FAKE_AGY_VERSION": "agy_acp_server_1.4.5"}, nil)
-	running := make(chan struct{})
-	done := make(chan struct{})
-	go func() {
-		h.Start(context.Background(), "t1", []contract.TurnInput{input(1, "hold")}, func() { close(running) })
-		close(done)
-	}()
-	<-running
-	if err := h.Steer(context.Background(), input(2, "x")); err == nil || !strings.Contains(err.Error(), "1.5.0") {
-		t.Fatalf("steer = %v", err)
+func TestVersionBelow151IsRefused(t *testing.T) {
+	t.Setenv(fakeagent.EnvVar, "1")
+	t.Setenv("FAKE_AGY_VERSION", "agy_acp_server_1.4.5")
+	exe, _ := os.Executable()
+	if _, err := Open(context.Background(), Config{Binary: exe, GeminiDir: t.TempDir(), Dir: t.TempDir(), SessionDir: t.TempDir()}); err == nil || !strings.Contains(err.Error(), "1.5.1") {
+		t.Fatalf("err = %v", err)
 	}
-	h.Abort(context.Background())
-	<-done
+	for v, refused := range map[string]bool{"1.5.0": true, "v1.5.1": false, "1.6.0-beta": false, "agy_acp_server_1.5.18": false, "": false, "weird": false} {
+		if (versionRefused(v) != nil) != refused {
+			t.Errorf("%q refused = %v", v, !refused)
+		}
+	}
 }
 
 func TestFollowUpIsHeldUntilTheResponse(t *testing.T) {
@@ -484,7 +482,7 @@ func TestQuotaFailsTheTurnWithoutRetry(t *testing.T) {
 func TestRefusalAndOutputLimit(t *testing.T) {
 	h, _, _ := open(t, nil, nil)
 	res := start(t, h, "t1", input(1, "refusal"))
-	if res.Outcome != contract.TurnFailed || res.Cause != contract.CauseModelFailed {
+	if res.Outcome != contract.TurnFailed || res.Cause != contract.CauseHarnessFailed {
 		t.Fatalf("refusal = %+v", res)
 	}
 	res = start(t, h, "t2", input(2, "maxtokens"))
@@ -859,7 +857,7 @@ func TestClassify(t *testing.T) {
 	}{
 		{"Error 429, Message: Resource exhausted. Resets in 4m42s., Status: RESOURCE_EXHAUSTED", contract.CauseModelFailed, "Resource exhausted. Resets in 4m42s.", 282 * time.Second},
 		{"RESOURCE_EXHAUSTED (code 429): too many requests retryDelay:3.5s ]", contract.CauseModelFailed, "too many requests retryDelay:3.5s ]", 4 * time.Second},
-		{"Agent error:\nError 429, Message: out [reason:QUOTA_EXHAUSTED quotaResetDelay:1h2m3s ], Status: RESOURCE_EXHAUSTED", contract.CauseModelFailed, "", time.Hour},
+		{"Agent error:\nError 429, Message: out [reason:QUOTA_EXHAUSTED quotaResetDelay:1h2m3s ], Status: RESOURCE_EXHAUSTED", contract.CauseModelFailed, "", time.Hour + 3*time.Second + 2*time.Minute},
 		{"Error 429, Message: out [quotaResetTimeStamp:" + now.Add(90*time.Second).UTC().Format(time.RFC3339) + " ], Status: RESOURCE_EXHAUSTED", contract.CauseModelFailed, "", 90 * time.Second},
 		{"Error 500, Message: backend, Status: INTERNAL", contract.CauseModelFailed, "backend", 0},
 		// Not retried: Google's own message, shown as it is (no ban-specific handling, as in T3).
@@ -884,5 +882,26 @@ func TestClassify(t *testing.T) {
 			time.Duration(f.retryAfter)*time.Second < c.retry-2*time.Second || time.Duration(f.retryAfter)*time.Second > c.retry+2*time.Second):
 			t.Errorf("%.60q = %+v", c.text, f)
 		}
+	}
+}
+
+func TestUsageLimitResets(t *testing.T) {
+	now := time.Now()
+	for text, want := range map[string]struct {
+		cause   contract.FailureCause
+		seconds int64
+	}{
+		"Error 429, Message: out [reason:QUOTA_EXHAUSTED quotaResetDelay:72h ], Status: RESOURCE_EXHAUSTED": {contract.CauseModelFailed, 72 * 3600},
+		"Error 429, Message: out, Status: RESOURCE_EXHAUSTED":                                               {contract.CauseHarnessFailed, 0}, // no reset: no ladder
+		"Error 429, Message: out [quotaResetDelay:1000h ], Status: RESOURCE_EXHAUSTED":                      {contract.CauseHarnessFailed, 0}, // beyond the bound
+		"Error 503, Message: down, Status: UNAVAILABLE":                                                     {contract.CauseModelFailed, 0},
+	} {
+		f := classify(text, now, false)
+		if f == nil || f.cause != want.cause || f.retryAfter != want.seconds {
+			t.Errorf("%q = %+v", text, f)
+		}
+	}
+	if f := classify("Error 429, Message: x [quotaResetDelay:100h], Status: RESOURCE_EXHAUSTED", now, false); f != nil && f.retryAfter > contract.MaxModelQuotaResetSeconds {
+		t.Error("over the bound")
 	}
 }

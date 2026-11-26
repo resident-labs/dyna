@@ -50,10 +50,20 @@ type failure struct {
 	broken     bool  // agy's saved conversation can no longer be sent
 }
 
-func retryable(message string, reset time.Duration) *failure {
-	// TODO: use the contract's longer limit-reset bound once it is on main; until then a long reset is capped here.
-	seconds := min(int64(reset.Seconds()+0.5), contract.MaxModelRetryAfterSeconds)
-	return &failure{cause: contract.CauseModelFailed, message: harness.Mask(clip(message)), retryAfter: seconds}
+// retryable is a failure the engine's model retry may act on. A usage limit is retried at its reset when Google states one, up to
+// the contract's quota bound; with no reset, or one beyond it, the 5-minute ladder would knock on a spent account up to eight
+// times, so the turn fails with Google's message instead and the session waits for new input. A transient failure (5xx,
+// 404 after the model answered) uses the ladder, with the delay Google gives if any.
+func retryable(message string, reset time.Duration, limit bool) *failure {
+	message = harness.Mask(clip(message))
+	seconds := int64(reset.Seconds() + 0.5)
+	if limit {
+		if seconds <= 0 || seconds > contract.MaxModelQuotaResetSeconds {
+			return &failure{cause: contract.CauseHarnessFailed, message: message}
+		}
+		return &failure{cause: contract.CauseModelFailed, message: message, retryAfter: seconds}
+	}
+	return &failure{cause: contract.CauseModelFailed, message: message, retryAfter: min(seconds, contract.MaxModelRetryAfterSeconds)}
 }
 
 // validationRequired is T3's verificationErrorInfo: a 403 PERMISSION_DENIED JSON body whose details carry the
@@ -129,7 +139,7 @@ func balancedJSON(text string, start int) string {
 // (reachedModel: a planner response came in the prompt), or the message of a JSON-RPC error. It is nil when text is not an error.
 func classify(text string, now time.Time, reachedModel bool) *failure {
 	if quotaExhausted.MatchString(text) {
-		return retryable("You have reached your Antigravity quota for this period.", resetDelay(text, now))
+		return retryable("You have reached your Antigravity quota for this period.", resetDelay(text, now), true)
 	}
 	if invalidSignature.MatchString(text) {
 		return &failure{cause: contract.CauseHarnessFailed, broken: true,
@@ -138,7 +148,7 @@ func classify(text string, now time.Time, reachedModel bool) *failure {
 	if url, ok := validationRequired(text); ok {
 		message := "Verify your Google account, then retry this turn."
 		if url != "" {
-			message += " " + url
+			message += " " + harness.Mask(clip(url))
 		}
 		return &failure{cause: contract.CauseHarnessFailed, message: message}
 	}
@@ -151,11 +161,11 @@ func classify(text string, now time.Time, reachedModel bool) *failure {
 		return nil
 	}
 	if code == "429" || status == "RESOURCE_EXHAUSTED" {
-		return retryable(message, resetDelay(text, now))
+		return retryable(message, resetDelay(text, now), true)
 	}
 	// A 404 before the model answered is an unknown or unentitled model; after, a transient edge error (Outcome:263-276).
 	if code >= "500" || (code == "404" && reachedModel) {
-		return retryable(message, resetDelay(text, now))
+		return retryable(message, resetDelay(text, now), false)
 	}
 	return &failure{cause: contract.CauseHarnessFailed, message: harness.Mask(clip(message))}
 }
@@ -168,7 +178,7 @@ func outcome(reason string, step *sessiondb.Step, now time.Time) *failure {
 		if step != nil {
 			text = step.Error
 		}
-		return retryable("You have reached your Antigravity quota for this period.", resetDelay(text, now))
+		return retryable("You have reached your Antigravity quota for this period.", resetDelay(text, now), true)
 	}
 	if step == nil || !step.IsError {
 		return nil

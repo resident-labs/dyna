@@ -97,6 +97,7 @@ func (h *Harness) Start(ctx context.Context, id contract.TurnID, inputs []contra
 	if broken {
 		// The saved conversation fails every prompt (T3 Outcome:53-55, 231-241). T3 starts a fresh session with a portable
 		// handoff of the thread's context; that is a later change here, so for now the context is not carried over.
+		h.notice("agy's saved conversation can no longer be sent to the model; a blank one is opened, without the old context")
 		if err := h.NewConversationForce(ctx); err != nil {
 			return contract.TurnEnded{Turn: id}, err
 		}
@@ -233,7 +234,7 @@ type told struct {
 // changed as <external_KEY> blocks before the prompt; the user text, wrapped with the instructions the first time; the
 // attachments; and the runtime info after, when its text changed. A native slash command is sent as it is, with nothing
 // around it. It returns what to mark as told once the prompt has been answered (adapter.ts:10185-10225).
-func (h *Harness) promptBlocks(inputs []contract.TurnInput, p *process) ([]map[string]any, func(), error) {
+func (h *Harness) promptBlocks(inputs []contract.TurnInput, p *process) ([]map[string]any, func(bool), error) {
 	h.mu.Lock()
 	state := h.told
 	current := h.current()
@@ -287,11 +288,16 @@ func (h *Harness) promptBlocks(inputs []contract.TurnInput, p *process) ([]map[s
 			next.runtime = info
 		}
 	}
-	commit := func() {
+	commit := func(failed bool) {
 		h.mu.Lock()
 		defer h.mu.Unlock()
 		if h.told.gen != next.gen {
 			return
+		}
+		// A prompt that ended in an error leaves the context entries unsent, so the next prompt carries them; the instructions
+		// are kept told (T3 adapter.ts:10185-10225, rollbackOfferedAppContext).
+		if failed {
+			next.context = state.context
 		}
 		h.told = next
 	}
@@ -367,7 +373,7 @@ func (h *Harness) begin(t *turn, inputs []contract.TurnInput, started func()) er
 		// T3 marks the prompt's contents as told unless it was cancelled, refused or failed (adapter.ts:10185-10192).
 		if err == nil && raw.StopReason != "cancelled" && raw.StopReason != "refusal" {
 			h.mu.Unlock()
-			commit()
+			commit(t.fail != nil)
 			h.mu.Lock()
 		}
 	}()
@@ -385,10 +391,7 @@ func (t *turn) finishPrompt(h *Harness, p *process, reason string, step *session
 		}
 		var rpc *acp.Error
 		if errors.As(err, &rpc) {
-			if t.fail = classify(rpc.Message+"\n"+string(rpc.Data), time.Now(), t.answered); t.fail != nil {
-				h.noteBroken(t.fail)
-				return
-			}
+			// T3 reads no failure out of an RPC error's text; it is an error, shown as it is.
 			t.err = fmt.Errorf("agy session/prompt: %w", err)
 			return
 		}
@@ -460,7 +463,8 @@ func (h *Harness) request(method string, raw json.RawMessage) (any, error) {
 		return nil, &acp.Error{Code: acp.MethodNotFound, Message: "method not found: " + method}
 	}
 	var req struct {
-		ToolCall struct {
+		SessionID string `json:"sessionId"`
+		ToolCall  struct {
 			ID    string `json:"toolCallId"`
 			Title string `json:"title"`
 		} `json:"toolCall"`
@@ -474,8 +478,12 @@ func (h *Harness) request(method string, raw json.RawMessage) (any, error) {
 	}
 	cancelled := map[string]any{"outcome": map[string]any{"outcome": "cancelled"}}
 	h.mu.Lock()
-	running := h.turn != nil
+	running, foreign := h.turn != nil, h.sessionID != "" && req.SessionID != h.sessionID
 	h.mu.Unlock()
+	// A request of a session that is not ours is answered cancelled too (adapter.ts:8222).
+	if foreign {
+		return cancelled, nil
+	}
 	if !running {
 		h.notice("agy asked permission with no turn running: " + harness.Mask(req.ToolCall.Title))
 		return cancelled, nil
@@ -699,14 +707,10 @@ func (h *Harness) Recover(id contract.TurnID, inputs []contract.TurnInput) (cont
 // Steer is a second prompt while the first runs: agy 1.5 and later steers the turn with it (T3 ACPS:77-85, adapter.ts:10229-10345).
 func (h *Harness) Steer(_ context.Context, input contract.TurnInput) error {
 	h.mu.Lock()
-	t, p := h.turn, h.p
+	t := h.turn
 	if t == nil || t.closing {
 		h.mu.Unlock()
 		return harness.ErrNoTurn
-	}
-	if !p.steers {
-		h.mu.Unlock()
-		return fmt.Errorf("agy %s cannot steer a running turn; it needs 1.5.0", p.version)
 	}
 	t.open++
 	t.kept, t.cur = joinReply(t.kept, t.cur), ""
