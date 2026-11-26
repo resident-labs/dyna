@@ -97,7 +97,7 @@ func (e *XAIExecutor) Execute(ctx context.Context, auth *cliproxyauth.Auth, req 
 	var sawData bool
 	if raw := bytes.TrimSpace(data); len(raw) > 0 && raw[0] == '{' {
 		sawData = true
-		if terminalErr, failed := xaiTerminalFailure("", raw, gjson.ValidBytes(raw), httpResp.Header); failed {
+		if terminalErr, failed := xaiTerminalError("", raw, gjson.ValidBytes(raw), httpResp.Header); failed {
 			upstreamUsage.ObserveResponsesStream(raw)
 			return resp, terminalErr
 		}
@@ -117,7 +117,7 @@ func (e *XAIExecutor) Execute(ctx context.Context, auth *cliproxyauth.Auth, req 
 			// intact JSON, plain text needs the line ending to prove completion.
 			break
 		}
-		if terminalErr, failed := xaiTerminalFailure(eventName, eventData, validJSON, httpResp.Header); failed {
+		if terminalErr, failed := xaiTerminalError(eventName, eventData, validJSON, httpResp.Header); failed {
 			return resp, terminalErr
 		}
 		if !validJSON {
@@ -145,9 +145,6 @@ func (e *XAIExecutor) Execute(ctx context.Context, auth *cliproxyauth.Auth, req 
 			case "response.output_item.done":
 				xaiCollectOutputItemDone(eventData, outputItemsByIndex, &outputItemsFallback)
 			case "response.completed", "response.incomplete", "response.done":
-				if !gjson.GetBytes(eventData, "response").IsObject() {
-					return resp, statusErr{code: http.StatusBadGateway, msg: xaiIncompleteStreamMessage, streamTruncated: true}
-				}
 				if eventType == "response.done" {
 					eventType = xaiDoneEventType(eventData)
 					eventData, _ = sjson.SetBytes(eventData, "type", eventType)

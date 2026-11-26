@@ -31,15 +31,17 @@ func TestXAIHTTPTerminal(t *testing.T) {
 		limited      = "event: response.failed\ndata: {\"type\":\"response.failed\",\ndata: \"response\":{\"status\":\"failed\",\"error\":{\"code\":\"resource_exhausted\",\"message\":\"provider overloaded\"}}}\n"
 		wrappedLimit = `data: {"type":"error","error":{},"body":{"error":{"code":"resource_exhausted","message":"wrapped provider limit"}}}`
 		plainError   = "event: error\ndata: upstream gateway refusal"
+		badPatch     = `data: {"type":"response.output_item.added","output_index":0,"item":{"type":"function_call","id":"a","call_id":"c","name":"apply_patch","arguments":""}}` + "\n\n" + `data: {"type":"response.completed"}` + "\n\n"
 		done         = `data: {"type":"response.done","response":{"id":"resp_ok","status":"completed","model":"grok-4.7","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"ready"}]}],"usage":{"input_tokens":7,"output_tokens":3}}}` + "\n\n"
 	)
 	for _, tc := range []struct {
-		name, body, want                               string
-		stream, chat, short, limit, recover, truncated bool
-		status, posts, cooled                          int
+		name, body, want                                      string
+		stream, chat, short, limit, recover, truncated, patch bool
+		status, posts, cooled                                 int
 	}{
 		{name: "buffered_empty", body: ": comment\n\n", want: "empty upstream stream", status: 502, posts: 1},
 		{name: "buffered_cut", body: malformed, want: "closed before", short: true, status: 502, posts: 1},
+		{name: "buffered_patch_terminal_missing_response", body: badPatch, patch: true, want: "closed before", status: 502, posts: 1, truncated: true},
 		{name: "buffered_raw_error", body: `{"code":"invalid_argument","error":"invalid provider input"}`, want: "invalid provider input", status: 400, posts: 1},
 		{name: "buffered_reverse_error_fields", body: "data: {\"code\":\"invalid_argument\",\"message\":\"invalid provider input\"}\nevent: error\n\n", want: "invalid provider input", status: 400, posts: 1},
 		{name: "buffered_retry_429", body: limited, want: "ready", limit: true, recover: true, status: 200, posts: 2, cooled: 1},
@@ -108,6 +110,9 @@ func TestXAIHTTPTerminal(t *testing.T) {
 			base := handlers.NewBaseAPIHandlers(&cfg.SDKConfig, manager)
 			router := gin.New()
 			path, payload := "/v1/responses", fmt.Sprintf(`{"model":%q,"input":"hi","stream":%t}`, model, tc.stream)
+			if tc.patch {
+				payload = strings.TrimSuffix(payload, "}") + `,"tools":[{"type":"custom","name":"apply_patch"}]}`
+			}
 			if tc.chat {
 				path, payload = "/v1/chat/completions", fmt.Sprintf(`{"model":%q,"messages":[{"role":"user","content":"hi"}],"stream":%t}`, model, tc.stream)
 				router.POST(path, NewOpenAIAPIHandler(base).ChatCompletions)
@@ -144,7 +149,7 @@ func TestXAIHTTPTerminal(t *testing.T) {
 				select {
 				case record := <-records:
 					if !record.Failed || record.Fail.StatusCode != http.StatusBadGateway || record.Fail.Code != usage.FailureStreamTruncatedCode {
-						t.Errorf("cut plain error is not typed 502 truncation: %+v", record.Fail)
+						t.Errorf("local failure is not typed 502 truncation: %+v", record.Fail)
 					}
 				case <-time.After(3 * time.Second):
 					t.Fatal("missing usage failure record")
@@ -234,6 +239,59 @@ func TestXAIHTTPDisconnectUsage(t *testing.T) {
 				}
 			case <-ctx.Done():
 				t.Fatal("missing usage record after disconnect")
+			}
+		})
+	}
+}
+
+// Only the terminal event carries usage. Fail the write or flush of that
+// specific frame, after the executor read and translated it.
+func TestXAIHTTPTerminalDeliveryFailure(t *testing.T) {
+	const model = "grok-4.7"
+	for _, mode := range []string{"write", "flush"} {
+		t.Run(mode, func(t *testing.T) {
+			ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+			defer cancel()
+			upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "text/event-stream")
+				_, _ = io.WriteString(w, "data: {\"type\":\"response.output_text.delta\",\"delta\":\"progress\"}\n\n"+
+					"data: {\"type\":\"response.completed\",\"response\":{\"status\":\"completed\",\"usage\":{\"input_tokens\":7,\"output_tokens\":3}}}\n\n")
+				w.(http.Flusher).Flush()
+				select {
+				case <-r.Context().Done():
+				case <-ctx.Done():
+				}
+			}))
+			defer upstream.Close()
+			cfg := &sdkconfig.Config{}
+			manager := coreauth.NewManager(nil, nil, nil)
+			manager.RegisterExecutor(executor.NewXAIAutoExecutor(cfg))
+			id := t.Name()
+			auth := &coreauth.Auth{ID: id, Provider: "xai", Status: coreauth.StatusActive, Attributes: map[string]string{"base_url": upstream.URL, "api_key": "test"}}
+			if _, err := manager.Register(ctx, auth); err != nil {
+				t.Fatal(err)
+			}
+			registry.GetGlobalRegistry().RegisterClient(id, "xai", []*registry.ModelInfo{{ID: model}})
+			defer registry.GetGlobalRegistry().UnregisterClient(id)
+			records := make(chan usage.Record, 4)
+			usage.RegisterNamedPlugin(id, xaiHTTPUsageCapture{id: id, records: records})
+			defer usage.RegisterNamedPlugin(id, xaiHTTPUsageCapture{})
+
+			router := gin.New()
+			router.POST("/v1/responses", NewOpenAIResponsesAPIHandler(handlers.NewBaseAPIHandlers(&cfg.SDKConfig, manager)).Responses)
+			writer := &issue6332Writer{ResponseRecorder: httptest.NewRecorder(), cancel: func() {}, event: `"type":"response.completed"`, failWrite: mode == "write", failFlush: mode == "flush"}
+			request := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"`+model+`","input":"hi","stream":true}`)).WithContext(ctx)
+			router.ServeHTTP(writer, request)
+			if !strings.Contains(writer.Body.String(), "progress") {
+				t.Fatalf("progress wasn't delivered before terminal write or flush: %s", writer.Body.String())
+			}
+			select {
+			case record := <-records:
+				if !record.Failed || record.Detail.InputTokens != 7 || record.Detail.OutputTokens != 3 || !strings.Contains(record.Fail.Body, io.ErrClosedPipe.Error()) {
+					t.Fatalf("terminal %s failure or observed tokens lost: %+v", mode, record)
+				}
+			case <-ctx.Done():
+				t.Fatal("missing terminal delivery failure record")
 			}
 		})
 	}

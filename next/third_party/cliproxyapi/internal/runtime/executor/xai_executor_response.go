@@ -1171,9 +1171,9 @@ func xaiDoneEventType(data []byte) string {
 	return "response.completed"
 }
 
-// xaiTerminalFailure normalizes an accepted HTTP stream's explicit upstream
-// refusal. Local EOF and broken JSON must never be mistaken for a provider 429.
-func xaiTerminalFailure(eventName string, data []byte, validJSON bool, headers http.Header) (statusErr, bool) {
+// xaiTerminalError normalizes an accepted HTTP stream's explicit upstream
+// refusal and rejects malformed terminal envelopes before tool translation.
+func xaiTerminalError(eventName string, data []byte, validJSON bool, headers http.Header) (statusErr, bool) {
 	if !validJSON {
 		if eventName == "error" && len(data) > 0 && data[0] != '{' && data[0] != '[' {
 			body, _ := sjson.SetBytes([]byte(`{"error":{}}`), "error.message", string(data))
@@ -1198,6 +1198,12 @@ func xaiTerminalFailure(eventName string, data []byte, validJSON bool, headers h
 		responseStatus == "failed", responseStatus == "cancelled", responseStatus == "canceled":
 		failure = root.Get("response.error")
 	default:
+		switch eventType {
+		case "response.completed", "response.incomplete", "response.done":
+			if !root.Get("response").IsObject() {
+				return statusErr{code: http.StatusBadGateway, msg: xaiIncompleteStreamMessage, streamTruncated: true}, true
+			}
+		}
 		return statusErr{}, false
 	}
 	// Wrapper errors sometimes provide an empty outer error object and

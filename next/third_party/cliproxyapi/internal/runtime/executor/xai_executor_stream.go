@@ -175,7 +175,7 @@ func (e *XAIExecutor) ExecuteStream(ctx context.Context, auth *cliproxyauth.Auth
 				// An interrupted final line isn't a provider plain-text error.
 				break
 			}
-			if errTerminal, failed := xaiTerminalFailure(eventName, raw, validJSON, httpResp.Header); failed {
+			if errTerminal, failed := xaiTerminalError(eventName, raw, validJSON, httpResp.Header); failed {
 				fail(errTerminal)
 				return
 			}
@@ -203,10 +203,6 @@ func (e *XAIExecutor) ExecuteStream(ctx context.Context, auth *cliproxyauth.Auth
 					}
 				}
 				terminal := terminalKind == "response.completed" || terminalKind == "response.incomplete"
-				if terminal && !gjson.GetBytes(eventData, "response").IsObject() {
-					fail(statusErr{code: http.StatusBadGateway, msg: xaiIncompleteStreamMessage, streamTruncated: true})
-					return
-				}
 				if eventName != "" {
 					if _, ok := emitTranslatedLine(xaiNormalizeReasoningSummaryEventLine([]byte("event: "+eventName), kind), false); !ok {
 						return
