@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"time"
 
 	"github.com/resident-labs/dyna/contract"
 )
@@ -44,7 +45,7 @@ func (s *Store) SessionsOnProfile(ctx context.Context, name contract.ProfileName
 }
 
 // SetSessionProfile changes the profile and delivers the change atomically.
-func (s *Store) SetSessionProfile(ctx context.Context, target contract.SessionID, profile contract.ProfileName, event contract.Event) error {
+func (s *Store) SetSessionProfile(ctx context.Context, target contract.SessionID, profile contract.ProfileName, event contract.Event, harness *HarnessSwitch) error {
 	return s.Write(ctx, func(tx *sql.Tx) error {
 		tree, err := loadTree(ctx, tx, event.Room)
 		if err != nil {
@@ -52,6 +53,21 @@ func (s *Store) SetSessionProfile(ctx context.Context, target contract.SessionID
 		}
 		if !tree.CanManage(event.From, target) {
 			return ErrTreeForbidden
+		}
+		if harness != nil {
+			if len(harness.Profiles) > 0 {
+				var open int
+				if err := tx.QueryRowContext(ctx, "SELECT COUNT(*) FROM sessions WHERE profile IN (SELECT value FROM json_each(?)) AND closed_at IS NULL", mustJSON(harness.Profiles)).Scan(&open); err != nil {
+					return err
+				}
+				if open >= harness.Limit {
+					return ErrProfileFull
+				}
+			}
+			// The handoff is due from the next turn, not from one already running; its account starts at the default.
+			if _, err := tx.ExecContext(ctx, "UPDATE sessions SET agy_account='',handoff=MAX(1,(SELECT COALESCE(MAX(seq),0) FROM events)) WHERE id=?", target); err != nil {
+				return err
+			}
 		}
 		return s.setProfile(ctx, tx, target, profile, event)
 	})
@@ -89,4 +105,31 @@ func (s *Store) setProfile(ctx context.Context, tx *sql.Tx, target contract.Sess
 		return err
 	}
 	return s.InsertDelivery(ctx, tx, seq, event.Body, contract.Delivery{To: contract.Principal{Kind: contract.PrincipalSession, Session: target}, Surface: contract.SurfaceSession, Reply: contract.ReplyChannel{Kind: contract.ReplyNone}, Wake: outcome == contract.TurnFailed})
+}
+
+// HarnessSwitch says a session's profile change is a change of harness, which starts its native conversation again from a
+// handoff. Profiles are the profiles of the agy account when the session moves onto agy, so the account's limit is held inside
+// the same transaction; nil for a change within one harness.
+type HarnessSwitch struct {
+	Profiles []contract.ProfileName
+	Limit    int
+}
+
+// AgyStreak returns the accounts that returned a usage limit since the session last completed a turn or heard from the owner,
+// and whose reset has not passed.
+func (s *Store) AgyStreak(ctx context.Context, session contract.SessionID, now time.Time) (map[string]bool, error) {
+	limited := map[string]bool{}
+	rows, err := s.Read().QueryContext(ctx, "SELECT account FROM agy_streak WHERE session=? AND reset_at>?", session, now.UnixMilli())
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var account string
+		if err := rows.Scan(&account); err != nil {
+			return nil, err
+		}
+		limited[account] = true
+	}
+	return limited, rows.Err()
 }

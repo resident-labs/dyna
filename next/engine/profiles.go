@@ -526,3 +526,58 @@ func (p *ProfileConfig) agyAccountLocked(name contract.ProfileName) ([]contract.
 	}
 	return names, limit
 }
+
+// checkHarnessSwitch refuses a live session's move between pig and agy that cannot be made, with the next step. The session keeps
+// its volume, so its earlier files carry over to the new harness as a handoff; what cannot move is the host, and a workflow's crew.
+func (s *Service) checkHarnessSwitch(ctx context.Context, target store.Session, profile contract.ProfileName) *contract.Error {
+	if _, err := s.store.SessionWorkflow(ctx, target.ID); err == nil {
+		return invalid(fmt.Sprintf("session %s is a workflow's crew, and a crew runs only on PiG profiles; a profile whose harness is pig is the only one it can use", target.Name))
+	} else if !errors.Is(err, store.ErrNotFound) {
+		return failure(err)
+	}
+	if s.profiles.Harness(profile) != contract.HarnessAgy {
+		return nil
+	}
+	current, err := s.store.Box(ctx, target.Box)
+	if err != nil {
+		return failure(err)
+	}
+	if current.Host != agyHost {
+		return &contract.Error{Code: contract.ErrConflict, Message: fmt.Sprintf("session %s runs on host %q and agy runs only on host %s, where the owner signed in to Google; its files cannot move there, so start a new session on profile %s", target.Name, current.Host, agyHost, profile)}
+	}
+	return nil
+}
+
+// agyMoveTarget is the signed-in agy account a session moves to after a usage limit with a stated reset: the first one on its host
+// that is not the session's own and has not returned a limit in this streak, or empty when there is none, the service cannot
+// list accounts, or anything fails, in which case the session waits for its reset. Names come only from the host's folder
+// listing and must be one plain path element.
+func (s *Service) agyMoveTarget(ctx context.Context, session store.Session) string {
+	if s.agyAccounts == nil {
+		return ""
+	}
+	current, err := s.store.Box(ctx, session.Box)
+	if err != nil {
+		return ""
+	}
+	names, err := s.agyAccounts(ctx, current.Host)
+	if err != nil {
+		log.Printf("session %s: listing agy accounts: %v", session.ID, err)
+		return ""
+	}
+	limited, err := s.store.AgyStreak(ctx, session.ID, s.now())
+	if err != nil {
+		return ""
+	}
+	own := session.AgyAccount
+	if own == "" {
+		own = box.DefaultAgyAccount
+	}
+	limited[own] = true
+	for _, name := range names {
+		if box.ValidAgyAccount(name) && !limited[name] {
+			return name
+		}
+	}
+	return ""
+}

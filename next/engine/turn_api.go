@@ -160,7 +160,7 @@ func (s *Service) BoxHello(ctx context.Context, caller contract.Principal, req c
 	if harness == contract.HarnessAgy {
 		agy = &agyMount
 	}
-	return contract.BoxHelloResponse{Harness: harness, Agy: agy, Discord: discordProblem == nil, Room: session.Room, GitName: gitName, GitEmail: gitEmail, GitSigningKey: signingKey, Session: session.ID, Box: session.Box, Model: model, ModelInstructions: prompt.ModelInstructions(model), TextOnlyModels: s.profiles.TextOnlyModels(), CompactTokens: s.profiles.CompactionTokens(session.Profile), Repos: repos, Transcripts: files, Instructions: prompt.Session(vars), WorkerInstructions: prompt.Core, Root: vars.Role == prompt.Root, Advisor: vars.Advisor, Workflow: workflow, GitHub: githubAvailable, Fresh: session.ClearedAt > 0}, nil
+	return contract.BoxHelloResponse{Harness: harness, Agy: agy, Discord: discordProblem == nil, Room: session.Room, GitName: gitName, GitEmail: gitEmail, GitSigningKey: signingKey, Session: session.ID, Box: session.Box, Model: model, ModelInstructions: prompt.ModelInstructions(model), TextOnlyModels: s.profiles.TextOnlyModels(), CompactTokens: s.profiles.CompactionTokens(session.Profile), Repos: repos, Transcripts: files, Instructions: prompt.Session(vars), WorkerInstructions: prompt.Core, Root: vars.Role == prompt.Root, Advisor: vars.Advisor, Workflow: workflow, GitHub: githubAvailable, Fresh: session.ClearedAt > 0, Handoff: session.Handoff}, nil
 }
 
 func (s *Service) DeliveryDone(ctx context.Context, caller contract.Principal, req contract.DeliveryDoneRequest) (contract.DeliveryDoneResponse, *contract.Error) {
@@ -206,6 +206,9 @@ func (s *Service) TurnOutput(ctx context.Context, caller contract.Principal, req
 	}
 	req.Usage.Model = req.Model
 	req.OneWake = s.profiles.Harness(session.Profile) == contract.HarnessAgy
+	if req.OneWake && req.Outcome == contract.TurnFailed && req.Cause == contract.CauseModelFailed && req.ModelRetryAfterSeconds > 0 {
+		req.MoveTo = s.agyMoveTarget(ctx, session)
+	}
 	run, err := s.store.SessionWorkflow(ctx, session.ID)
 	if err != nil && !errors.Is(err, store.ErrNotFound) {
 		return contract.TurnOutputResponse{}, failure(err)
@@ -241,6 +244,13 @@ func (s *Service) TurnOutput(ctx context.Context, caller contract.Principal, req
 	}
 	if err != nil {
 		return contract.TurnOutputResponse{}, failure(err)
+	}
+	if req.MoveTo != "" {
+		// The store moved the session if the turn was not cancelled meanwhile. Its box restarts on the new account, and the wake it
+		// scheduled for now follows the restart.
+		if moved, err := s.store.Session(ctx, session.ID); err == nil && moved.AgyAccount == req.MoveTo {
+			s.refreshBox(ctx, moved)
+		}
 	}
 	if crew && run.Subscription != "" && run.Key == "" && summary.State == contract.WorkflowFailed {
 		// A service that ends in failure starts again after a wait, and its parent hears of the first failure in a row.

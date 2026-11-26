@@ -177,6 +177,7 @@ func (b *Boxes) Create(ctx context.Context, spec lifecycle.BoxSpec) (string, err
 	}
 	spec.Root = session.Root
 	spec.Agy = b.Pressure != nil && b.Pressure.AgyProfile(session.Profile)
+	spec.AgyAccount = session.AgyAccount
 	if err := b.Sockets.AddBox(spec.Box, spec.Session, session.Room); err != nil {
 		return "", box.RuntimeCreateError{Err: err}
 	}
@@ -303,6 +304,12 @@ func (b *Boxes) Inspect(ctx context.Context, id contract.BoxID) (box.ContainerSt
 		return box.ContainerStatus{}, false, err
 	}
 	status.StaleLayout = status.StaleLayout || status.Binary != wanted
+	// A session that changed harness or account since its container was made needs the container its mounts and label belong to.
+	if record, err := b.Store.Box(ctx, id); err == nil {
+		if session, err := b.Store.Session(ctx, record.Session); err == nil {
+			status.StaleLayout = status.StaleLayout || status.Agy != b.agyLabel(session)
+		}
+	}
 	return status, true, nil
 }
 
@@ -369,7 +376,7 @@ func (b *Boxes) Start(ctx context.Context, id contract.BoxID) error {
 	// A closing box starts only to archive, so a missing sign-in cannot hold up its close.
 	agy := record.State != contract.BoxClosing && b.Pressure != nil && b.Pressure.AgyProfile(session.Profile)
 	return run(contract.StartContainer, func(ctx context.Context) error {
-		if err := b.checkAgySources(ctx, host, agy); err != nil {
+		if err := b.checkAgySources(ctx, host, agy, session.AgyAccount); err != nil {
 			return err
 		}
 		return host.StartContainer(ctx, id)
@@ -380,11 +387,11 @@ func (b *Boxes) Start(ctx context.Context, id contract.BoxID) error {
 // container made before they went would start on whatever Podman finds there.
 func (b *Boxes) checkAgySources(ctx context.Context, host interface {
 	CheckPresent(context.Context, box.Mount) error
-}, agy bool) error {
+}, agy bool, account string) error {
 	if !agy {
 		return nil
 	}
-	for _, m := range b.agyMounts() {
+	for _, m := range b.agyMounts(account) {
 		if err := host.CheckPresent(ctx, m); err != nil {
 			return err
 		}
@@ -548,6 +555,7 @@ func (b *Boxes) Recreate(ctx context.Context, spec lifecycle.BoxSpec, image stri
 	}
 	spec.Root = session.Root
 	spec.Agy = b.Pressure != nil && b.Pressure.AgyProfile(session.Profile)
+	spec.AgyAccount = session.AgyAccount
 	slice, c := b.container(spec, image, shared)
 	if err := run(contract.StartSlice, func(ctx context.Context) error { return h.EnsureSlice(ctx, slice) }); err != nil {
 		return err
@@ -578,11 +586,28 @@ func (b *Boxes) Recreate(ctx context.Context, spec lifecycle.BoxSpec, image stri
 
 // agyMounts are what a box of an agy session mounts from its host: the installed program and the signed-in profile folder. Each must
 // be there already, which a create and a warm start both check.
-func (b *Boxes) agyMounts() []box.Mount {
+func (b *Boxes) agyMounts(account string) []box.Mount {
+	folder := b.Layout.HostAgyAccount(account)
 	return []box.Mount{
 		{HostPath: b.Layout.HostAgyBinary(), BoxPath: box.AgyBinary, ReadOnly: true, Present: "agy binary not installed at " + b.Layout.HostAgyBinary()},
-		{HostPath: b.Layout.HostAgyAccount(), BoxPath: contract.AgyGeminiDir, Present: "agy account folder missing at " + b.Layout.HostAgyAccount() + ": sign in first"},
+		{HostPath: folder, BoxPath: contract.AgyGeminiDir, Present: "agy account folder missing at " + folder + ": sign in first"},
 	}
+}
+
+// agyAccountName is the account a session without one recorded uses.
+func agyAccountName(account string) string {
+	if account == "" {
+		return box.DefaultAgyAccount
+	}
+	return account
+}
+
+// agyLabel is the label a session's container should carry: its account on agy, none otherwise.
+func (b *Boxes) agyLabel(session store.Session) string {
+	if b.Pressure == nil || !b.Pressure.AgyProfile(session.Profile) {
+		return ""
+	}
+	return agyAccountName(session.AgyAccount)
 }
 
 func (b *Boxes) container(spec lifecycle.BoxSpec, image string, shared box.Mount) (box.Slice, box.ContainerSpec) {
@@ -607,7 +632,8 @@ func (b *Boxes) container(spec lifecycle.BoxSpec, image string, shared box.Mount
 			box.Mount{HostPath: filepath.Dir(b.Layout.HostRootAddons(spec.Room)), BoxPath: "/run/dyna/root-addons/room", ReadOnly: true, MakeDir: true})
 	}
 	if spec.Agy {
-		c.Mounts = append(c.Mounts, b.agyMounts()...)
+		c.Mounts = append(c.Mounts, b.agyMounts(spec.AgyAccount)...)
+		c.Labels = append(c.Labels, box.Label{Key: box.AgyLabel, Value: agyAccountName(spec.AgyAccount)})
 	}
 	for _, repo := range spec.Repos {
 		c.Mounts = append(c.Mounts, box.Mount{HostPath: repo.Cache, BoxPath: repo.Cache, ReadOnly: true})

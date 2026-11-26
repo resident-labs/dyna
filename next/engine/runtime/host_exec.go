@@ -92,3 +92,12 @@ func (b *Boxes) StopHostexec(ctx context.Context, host contract.HostName, scope 
 	}
 	return r.StopHostexec(ctx, scope)
 }
+
+// AgyAccounts names the agy account folders on a host, for a session that hit a usage limit to move to another.
+func (b *Boxes) AgyAccounts(ctx context.Context, host contract.HostName) ([]string, error) {
+	h, err := b.host(ctx, host)
+	if err != nil {
+		return nil, err
+	}
+	return h.AgyAccounts(ctx, b.Layout.HostAgyAccounts())
+}

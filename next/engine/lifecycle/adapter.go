@@ -20,6 +20,8 @@ type BoxSpec struct {
 	Stack   *box.Stack
 	GPUCard *int // the card the box was assigned, nil when it asked for none
 	Agy     bool // the session runs on the agy harness, so its box mounts agy's program and signed-in profile folder
+	// AgyAccount is the account whose profile folder it mounts; empty is the default.
+	AgyAccount string
 }
 
 type BoxAdapter interface {

@@ -340,8 +340,33 @@ func (l Layout) HostGit(repo contract.RepoName) (string, error) {
 	return repoFolder(l.HostGitRoot(), repo)
 }
 
-// HostAgyAccount is the signed-in agy profile folder on the agy host, which a box of an agy session mounts read-write. Dyna never reads it.
-func (l Layout) HostAgyAccount() string { return filepath.Join(l.HostData, "agy", "accounts", "main") }
+// HostAgyAccounts holds one folder per Google account the owner signed in to agy with, on the agy host.
+func (l Layout) HostAgyAccounts() string { return filepath.Join(l.HostData, "agy", "accounts") }
+
+// DefaultAgyAccount is the account of a session that has none recorded.
+const DefaultAgyAccount = "main"
+
+// HostAgyAccount is the signed-in agy profile folder of an account on the agy host, which a box of an agy session mounts
+// read-write; empty is the default account. Dyna never reads it.
+func (l Layout) HostAgyAccount(name string) string {
+	if name == "" {
+		name = DefaultAgyAccount
+	}
+	return filepath.Join(l.HostAgyAccounts(), name)
+}
+
+// ValidAgyAccount says a folder name under HostAgyAccounts may name an account: one path element of plain characters.
+func ValidAgyAccount(name string) bool {
+	if name == "" || len(name) > 64 || name[0] == '.' || name[0] == '-' {
+		return false
+	}
+	for _, r := range name {
+		if !(r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || r == '.' || r == '_' || r == '-') {
+			return false
+		}
+	}
+	return true
+}
 
 // HostAgyBinary is the installed agy program on the agy host, which a box of an agy session mounts read-only.
 func (l Layout) HostAgyBinary() string { return filepath.Join(l.HostData, "agy", "antigravity") }

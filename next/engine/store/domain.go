@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/resident-labs/dyna/box"
 	"github.com/resident-labs/dyna/contract"
 	"github.com/resident-labs/dyna/room"
 )
@@ -59,9 +60,11 @@ type Session struct {
 	// allows at once. Both are set to start, not read back; with no profiles there is no limit.
 	AccountProfiles []contract.ProfileName
 	AccountLimit    int
-	Root            bool  // read back only: the session has no parent
-	Closing         bool  // read back only: the session is closing
-	ClearedAt       int64 // read back only: unix millis when a clear is pending for the next turn, or 0
+	Root            bool   // read back only: the session has no parent
+	Closing         bool   // read back only: the session is closing
+	ClearedAt       int64  // read back only: unix millis when a clear is pending for the next turn, or 0
+	AgyAccount      string // read back only: the agy account folder its box mounts, empty for the default
+	Handoff         bool   // read back only: its next conversation starts from a handoff of the earlier files
 	// Workflow makes the new session a crew. It is set only to start one: Session does not read it back.
 	Workflow *WorkflowRun
 }
@@ -369,12 +372,19 @@ func (s *Store) EndTurn(ctx context.Context, session contract.SessionID, output 
 			}
 			return nil
 		}
+		// A turn that started after the handoff became due has carried it; one that was already running when it was set has not.
+		if _, err := tx.ExecContext(ctx, "UPDATE sessions SET handoff=0 WHERE id=? AND handoff>0 AND handoff<(SELECT COALESCE(started_seq,0) FROM turns WHERE id=?)", session, output.Turn); err != nil {
+			return err
+		}
 		deferred := false
 		if output.Outcome == contract.TurnCompleted {
 			if _, err := tx.ExecContext(ctx, "UPDATE boxes SET failures=0 WHERE session=?", session); err != nil {
 				return err
 			}
 			if _, err := tx.ExecContext(ctx, "UPDATE sessions SET model_retry_at=0,model_retries=0 WHERE id=?", session); err != nil {
+				return err
+			}
+			if _, err := tx.ExecContext(ctx, "DELETE FROM agy_streak WHERE session=?", session); err != nil {
 				return err
 			}
 		} else if output.Outcome == contract.TurnFailed && output.Cause == contract.CauseModelFailed {
@@ -394,6 +404,19 @@ func (s *Store) EndTurn(ctx context.Context, session contract.SessionID, output 
 				retryAt, deferred = 0, output.ModelRetryAfterSeconds > 0
 				if deferred {
 					retryAt = event.Time.Add(time.Duration(output.ModelRetryAfterSeconds) * time.Second).UnixMilli()
+				}
+				if deferred {
+					// The account that returned the limit stays out of this streak until its reset.
+					if _, err := tx.ExecContext(ctx, "INSERT INTO agy_streak(session,account,reset_at) SELECT id,COALESCE(NULLIF(agy_account,''),?),? FROM sessions WHERE id=? ON CONFLICT(session,account) DO UPDATE SET reset_at=excluded.reset_at", box.DefaultAgyAccount, retryAt, session); err != nil {
+						return err
+					}
+					if output.MoveTo != "" {
+						// Another account is free: the session moves to it and wakes at once, on its new box, with a handoff.
+						retryAt = event.Time.UnixMilli()
+						if _, err := tx.ExecContext(ctx, "UPDATE sessions SET agy_account=?,handoff=MAX(1,(SELECT COALESCE(MAX(seq),0) FROM events)) WHERE id=?", output.MoveTo, session); err != nil {
+							return err
+						}
+					}
 				}
 			} else if retries < 8 && !cancelled {
 				delay := 5 * time.Minute * time.Duration(1<<retries)
@@ -684,7 +707,7 @@ func (s *Store) EndTurn(ctx context.Context, session contract.SessionID, output 
 
 func (s *Store) Session(ctx context.Context, id contract.SessionID) (Session, error) {
 	var session Session
-	err := s.Read().QueryRowContext(ctx, "SELECT s.id,s.room,s.name,s.repo,s.profile,b.id,s.close_reason,s.compose,s.parent IS NULL,s.state='closing',s.cleared_at,COALESCE((SELECT id FROM turns WHERE session=s.id AND ended_at IS NULL),'') FROM sessions s JOIN boxes b ON b.session=s.id WHERE s.id=? AND s.closed_at IS NULL", id).Scan(&session.ID, &session.Room, &session.Name, &session.Repo, &session.Profile, &session.Box, &session.CloseReason, &session.Compose, &session.Root, &session.Closing, &session.ClearedAt, &session.Turn)
+	err := s.Read().QueryRowContext(ctx, "SELECT s.id,s.room,s.name,s.repo,s.profile,b.id,s.close_reason,s.compose,s.parent IS NULL,s.state='closing',s.cleared_at,COALESCE((SELECT id FROM turns WHERE session=s.id AND ended_at IS NULL),''),s.agy_account,s.handoff>0 FROM sessions s JOIN boxes b ON b.session=s.id WHERE s.id=? AND s.closed_at IS NULL", id).Scan(&session.ID, &session.Room, &session.Name, &session.Repo, &session.Profile, &session.Box, &session.CloseReason, &session.Compose, &session.Root, &session.Closing, &session.ClearedAt, &session.Turn, &session.AgyAccount, &session.Handoff)
 	return session, err
 }
 
@@ -764,6 +787,12 @@ func (s *Store) InsertDelivery(ctx context.Context, tx *sql.Tx, seq int64, body 
 	var immediate bool
 	if err := tx.QueryRowContext(ctx, "SELECT from_kind='owner' AND type='post.created' FROM events WHERE seq=?", seq).Scan(&immediate); err != nil {
 		return err
+	}
+	if immediate && d.To.Kind == contract.PrincipalSession {
+		// An owner post is new input: the accounts that returned a limit since the last turn may be tried again.
+		if _, err := tx.ExecContext(ctx, "DELETE FROM agy_streak WHERE session=?", d.To.Session); err != nil {
+			return err
+		}
 	}
 	if !immediate {
 		switch body := body.(type) {

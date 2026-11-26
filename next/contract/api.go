@@ -855,6 +855,9 @@ type BoxHelloResponse struct {
 	Agy     *BoxAgy `json:"agy,omitempty"`
 	// Fresh says the session's conversation was cleared since its last turn, so the box starts a new session file instead of resuming.
 	Fresh bool `json:"fresh,omitempty"`
+	// Handoff says the session's native conversation must start again from a history of its earlier session files, as when it
+	// changed harness or agy account. The engine sets it until the first turn after the change has ended.
+	Handoff bool `json:"handoff,omitempty"`
 }
 
 // MaxModelRetryAfterSeconds bounds hints for transient provider failures.
@@ -885,6 +888,9 @@ type TurnOutputRequest struct {
 	// OneWake is set by the engine, not the box, for a session whose failed turn gets at most one retry: at the stated reset, and none
 	// without one. It stands outside the eight-attempt ladder that other profiles use.
 	OneWake bool `json:"-"`
+	// MoveTo is set by the engine, not the box, when another agy account is free after a usage limit: the session wakes at once on
+	// that account, with a handoff, instead of at the reset.
+	MoveTo string `json:"-"`
 }
 type TurnOutputResponse struct{}
 

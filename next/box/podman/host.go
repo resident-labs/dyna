@@ -718,7 +718,7 @@ func (h *Host) ListContainers(ctx context.Context) ([]box.ContainerStatus, error
 	}
 	out := make([]box.ContainerStatus, 0, len(records))
 	for _, r := range records {
-		out = append(out, box.ContainerStatus{Box: contract.BoxID(r.Labels["dyna.box"]), Running: r.State == "running", StaleLayout: r.Labels["dyna.layout"] != box.ContainerLayout || r.State == "removing", Binary: r.Labels["dyna.binary"], Stack: r.Labels[StackHashLabel]})
+		out = append(out, box.ContainerStatus{Box: contract.BoxID(r.Labels["dyna.box"]), Running: r.State == "running", StaleLayout: r.Labels["dyna.layout"] != box.ContainerLayout || r.State == "removing", Binary: r.Labels["dyna.binary"], Stack: r.Labels[StackHashLabel], Agy: r.Labels[box.AgyLabel]})
 	}
 	return out, nil
 }

@@ -178,6 +178,7 @@ var deleteRoom = []string{
 	`DELETE FROM goal_items WHERE room=?1`,
 	`DELETE FROM goals WHERE room=?1`,
 	`DELETE FROM checkins WHERE session IN (SELECT id FROM sessions WHERE room=?1)`,
+	`DELETE FROM agy_streak WHERE session IN (SELECT id FROM sessions WHERE room=?1)`,
 	`DELETE FROM boxes WHERE session IN (SELECT id FROM sessions WHERE room=?1)`,
 	`DELETE FROM sessions WHERE room=?1`,
 	`DELETE FROM room_pr_observed WHERE room=?1`,

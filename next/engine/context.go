@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/resident-labs/dyna/box"
 	"slices"
 	"strings"
 	"unicode/utf8"
@@ -152,6 +153,13 @@ func (s *Service) ContextSnapshot(ctx context.Context, caller contract.Principal
 			}
 			lines = append(lines, line)
 		}
+	}
+	if s.profiles.Harness(data.Profile) == contract.HarnessAgy {
+		account := data.AgyAccount
+		if account == "" {
+			account = box.DefaultAgyAccount
+		}
+		lines = append(lines, "you run on agy account "+account+"; on a usage limit with a reset, another signed-in account takes the session at once, if one is free")
 	}
 	add(contract.ContextProfiles, lines, 1200, 0)
 	if s.usage != nil {

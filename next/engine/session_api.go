@@ -615,26 +615,48 @@ func (s *Service) SessionRefresh(ctx context.Context, caller contract.Principal,
 		if req.Session != "" && target != req.Session || !self && !tree.CanManage(caller, target) {
 			continue
 		}
-		mark, err := id("refresh_", s.now())
-		if err != nil {
-			return response, failure(err)
-		}
-		handle, problem := s.lockSession(ctx, target)
-		if problem != nil {
+		if problem := s.markRefresh(ctx, target, wake); problem != nil {
 			if problem.Code == contract.ErrNotFound {
 				continue // It closed just now, so it needs nothing.
 			}
 			return response, problem
 		}
-		handle.MarkRefresh(mark, wake)
-		if channel := handle.Channel(); channel != nil {
-			channel.Wake()
-		}
-		handle.Unlock()
 		response.Marked = append(response.Marked, target)
 	}
 	s.reconciler.Kick()
 	return response, nil
+}
+
+// markRefresh asks a session's box to restart once nothing runs in it, and with wake to come straight back.
+func (s *Service) markRefresh(ctx context.Context, target contract.SessionID, wake bool) *contract.Error {
+	mark, err := id("refresh_", s.now())
+	if err != nil {
+		return failure(err)
+	}
+	handle, problem := s.lockSession(ctx, target)
+	if problem != nil {
+		return problem
+	}
+	handle.MarkRefresh(mark, wake)
+	if channel := handle.Channel(); channel != nil {
+		channel.Wake()
+	}
+	handle.Unlock()
+	return nil
+}
+
+// refreshBox restarts a session's box on the container its profile and account now call for: at once if a box is up, which waits
+// for its turn to end and comes back to the input that follows; a box asleep starts that way on its next input.
+func (s *Service) refreshBox(ctx context.Context, target store.Session) {
+	running, err := s.store.RunningSessions(ctx, target.Room)
+	if err != nil {
+		log.Printf("session %s: box restart: %v", target.ID, err)
+		return
+	}
+	if problem := s.markRefresh(ctx, target.ID, slices.Contains(running, target.ID)); problem != nil && problem.Code != contract.ErrNotFound {
+		log.Printf("session %s: box restart: %v", target.ID, problem)
+	}
+	s.reconciler.Kick()
 }
 
 // BoxStopped starts a box marked to refresh straight back up. Its wake waits for the stop because Dispatch steers a
@@ -747,15 +769,26 @@ func (s *Service) SessionSetProfile(ctx context.Context, caller contract.Princip
 	if _, _, err := s.profiles.Model(req.Profile); err != nil {
 		return response, invalid("unknown profile")
 	}
-	if was, now := s.profiles.Harness(target.Profile), s.profiles.Harness(req.Profile); was != now {
-		return response, &contract.Error{Code: contract.ErrConflict, Message: fmt.Sprintf("session %s runs on %s and profile %s on %s, and a live session cannot move between pig and agy; start a new session on %s, and give it what it needs in its brief", target.Name, was, req.Profile, now, req.Profile)}
+	switching := s.profiles.Harness(target.Profile) != s.profiles.Harness(req.Profile)
+	if switching {
+		if problem := s.checkHarnessSwitch(ctx, target, req.Profile); problem != nil {
+			return response, problem
+		}
 	}
 	event, err := s.event(target.Room, caller, contract.SessionProfileChanged{Session: target.ID, Profile: req.Profile})
 	if err != nil {
 		return response, failure(err)
 	}
 	problem = s.withProfile(req.Profile, func() *contract.Error {
-		if err := s.store.SetSessionProfile(ctx, target.ID, req.Profile, event); err != nil {
+		var harness *store.HarnessSwitch
+		if switching {
+			harness = &store.HarnessSwitch{}
+			harness.Profiles, harness.Limit = s.agyAccount(req.Profile)
+		}
+		if err := s.store.SetSessionProfile(ctx, target.ID, req.Profile, event, harness); err != nil {
+			if errors.Is(err, store.ErrProfileFull) {
+				return &contract.Error{Code: contract.ErrConflict, Message: fmt.Sprintf("the agy account allows %d open sessions at once across every agy profile, and they are open; close one, or ask the owner to raise max-concurrent on the agy profiles", harness.Limit)}
+			}
 			if errors.Is(err, store.ErrTreeForbidden) {
 				return &contract.Error{Code: contract.ErrForbidden, Message: fmt.Sprintf("session %s is not under you; you manage only sessions below you, so ask your parent", target.Name)}
 			}
@@ -765,6 +798,9 @@ func (s *Service) SessionSetProfile(ctx context.Context, caller contract.Princip
 	})
 	if problem == nil {
 		s.sessionsMoved(ctx, []store.Session{target}, req.Profile)
+		if switching {
+			s.refreshBox(ctx, target)
+		}
 	}
 	return response, problem
 }

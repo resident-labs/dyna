@@ -106,6 +106,7 @@ type Service struct {
 	discordDownloadMu sync.Mutex
 	discordDownloads  map[contract.RoomID][]*discordDownloadCharge
 	githubTools       http.Handler
+	agyAccounts       func(context.Context, contract.HostName) ([]string, error)
 	hostexec          HostexecRunner
 	promoteHost       func(context.Context, contract.HostName, bool) error
 	hostexecTimeout   func(context.Context, time.Duration) (context.Context, context.CancelFunc)
@@ -202,6 +203,12 @@ func (s *Service) SetGitIdentity(name, email string) { s.gitName, s.gitEmail = n
 
 // SetGitHubTools gives boxes GitHub's read-only MCP server, before the service starts. Box hellos then offer it to Pi.
 func (s *Service) SetGitHubTools(tools http.Handler) { s.githubTools = tools }
+
+// SetAgyAccounts gives the service the names of the signed-in agy account folders on a host, before it starts. Without it a
+// session stays on its account and waits out a usage limit.
+func (s *Service) SetAgyAccounts(list func(context.Context, contract.HostName) ([]string, error)) {
+	s.agyAccounts = list
+}
 
 // GitHubTools is the MCP server a box socket serves at /github/, or nil when the engine has no GitHub token.
 func (s *Service) GitHubTools() http.Handler { return s.githubTools }

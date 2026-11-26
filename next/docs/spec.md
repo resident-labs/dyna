@@ -212,6 +212,7 @@ This table lists the current tables in `engine/store/schema.sql`, the authority 
 | `workflow_queue` | bounded events by subscription and key: waiting, or claimed by a service run, with the box start and hand-over count |
 | `workflow_state` | small JSON state by subscription and key |
 | `workflow_streaks` | the keys of a workflow service whose failures its parent has been told of, until one event of the key succeeds |
+| `agy_streak` | the agy accounts that returned a usage limit for a session since it last completed a turn or heard from the owner, with the reset of each; a move never returns to one before its reset |
 | `workflow_steps` | a run's journal: each step's start and result, by step key |
 | `workflow_scripts` | every version of a run's script, which a reload adds (9.2) |
 | `agents` | one row per turn of an in-box agent: its session and parent turn, name, state, the transcript file and offset its steps begin at, and usage (the advisor) |

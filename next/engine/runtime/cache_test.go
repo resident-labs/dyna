@@ -119,7 +119,7 @@ func TestWarmStartChecksTheAgySources(t *testing.T) {
 	b := &Boxes{Layout: box.Layout{HostData: "/host"}}
 	ctx := context.Background()
 	present := &presentHost{}
-	if err := b.checkAgySources(ctx, present, true); err != nil || len(present.checked) != 2 {
+	if err := b.checkAgySources(ctx, present, true, ""); err != nil || len(present.checked) != 2 {
 		t.Fatalf("present sources: %v, checked %v", err, present.checked)
 	}
 	for _, gone := range []struct{ path, text string }{
@@ -128,12 +128,38 @@ func TestWarmStartChecksTheAgySources(t *testing.T) {
 	} {
 		host := &presentHost{missing: map[string]bool{gone.path: true}}
 		var missing box.MissingMount
-		if err := b.checkAgySources(ctx, host, true); !errors.As(err, &missing) || missing.Text != gone.text {
+		if err := b.checkAgySources(ctx, host, true, ""); !errors.As(err, &missing) || missing.Text != gone.text {
 			t.Fatalf("%s gone: %v", gone.path, err)
 		}
 	}
 	skipped := &presentHost{missing: map[string]bool{"/host/agy/antigravity": true}}
-	if err := b.checkAgySources(ctx, skipped, false); err != nil || len(skipped.checked) != 0 {
+	if err := b.checkAgySources(ctx, skipped, false, ""); err != nil || len(skipped.checked) != 0 {
 		t.Fatalf("a box that is not agy, or is closing: %v, checked %v", err, skipped.checked)
+	}
+}
+
+// A session on another account mounts that account's folder and is checked and labelled for it, so a change of account finds the
+// container stale.
+func TestAgyAccountNamesTheFolderAndTheLabel(t *testing.T) {
+	b := &Boxes{Layout: box.Layout{HostData: "/host"}}
+	_, c := b.container(lifecycle.BoxSpec{Agy: true, AgyAccount: "work"}, "image", box.Mount{})
+	want := box.Mount{HostPath: "/host/agy/accounts/work", BoxPath: "/opt/agy/account", Present: "agy account folder missing at /host/agy/accounts/work: sign in first"}
+	if !slices.Contains(c.Mounts, want) || !slices.Contains(c.Labels, box.Label{Key: box.AgyLabel, Value: "work"}) {
+		t.Fatalf("mounts %#v labels %#v", c.Mounts, c.Labels)
+	}
+	_, c = b.container(lifecycle.BoxSpec{Agy: true}, "image", box.Mount{})
+	if !slices.Contains(c.Labels, box.Label{Key: box.AgyLabel, Value: "main"}) {
+		t.Fatalf("default account label: %#v", c.Labels)
+	}
+	_, c = b.container(lifecycle.BoxSpec{}, "image", box.Mount{})
+	for _, l := range c.Labels {
+		if l.Key == box.AgyLabel {
+			t.Fatalf("a pig container has the agy label: %#v", c.Labels)
+		}
+	}
+	host := &presentHost{missing: map[string]bool{"/host/agy/accounts/work": true}}
+	var missing box.MissingMount
+	if err := b.checkAgySources(context.Background(), host, true, "work"); !errors.As(err, &missing) || missing.Text != want.Present {
+		t.Fatalf("err = %v", err)
 	}
 }

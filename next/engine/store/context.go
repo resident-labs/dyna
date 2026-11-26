@@ -17,6 +17,9 @@ type ContextData struct {
 	PRs      []ContextPR
 	Accounts []ContextAccount
 	Depth    int
+	// Profile and AgyAccount are the session's own: the profile it runs on, and the agy account folder its box mounts (empty is the default).
+	Profile    contract.ProfileName
+	AgyAccount string
 	// RootApproves is the root-approves kinds that are on in the session's room. It is read for the room's root only.
 	RootApproves []contract.RootApproval
 }
@@ -28,6 +31,7 @@ func (s *Store) ContextDataForSession(ctx context.Context, id contract.SessionID
 	if err != nil {
 		return data, err
 	}
+	data.Profile, data.AgyAccount = session.Profile, session.AgyAccount
 	if data.Goals, err = s.ContextGoals(ctx, id); err != nil {
 		return data, err
 	}

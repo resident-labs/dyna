@@ -171,6 +171,7 @@ func Run(ctx context.Context, cfg Config) error {
 		return fmt.Errorf("hash binary: %w", err)
 	}
 	service.SetBinary(binary)
+	service.SetAgyAccounts(boxes.AgyAccounts)
 	service.SetMaxDepth(cfg.SessionMaxDepth)
 	service.Reconciler().SetHostMemory(boxes.hostMemory)
 	service.Reconciler().SetHostHealth(boxes.HostHealth)

@@ -44,6 +44,10 @@ type ContainerSpec struct {
 	GPUCard *int
 }
 
+// AgyLabel records on the container of an agy session which account's profile folder it mounts, so a change of account or
+// harness finds the container stale.
+const AgyLabel = "dyna.agy"
+
 // ContainerLayout identifies the mount layout created by the current engine.
 const ContainerLayout = "6"
 
@@ -55,6 +59,8 @@ type ContainerStatus struct {
 	Binary string
 	// Stack is the Hash of the stack the container was made for.
 	Stack string
+	// Agy is the agy account whose profile folder the container mounts, empty for a container with none.
+	Agy string
 }
 type Forward struct {
 	Box                  contract.BoxID
