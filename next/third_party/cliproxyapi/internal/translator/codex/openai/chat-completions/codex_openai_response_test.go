@@ -1168,13 +1168,37 @@ func TestConvertCodexResponseToOpenAIMessageTextFallback(t *testing.T) {
 			want: "Alpha",
 		},
 		{
+			name: "anonymous announcement is another candidate for a keyless delta",
+			events: []string{
+				`{"type":"response.output_item.added","output_index":0,"item":{"type":"message","id":"a"}}`,
+				`{"type":"response.output_item.added","item":{"type":"message"}}`,
+				`{"type":"response.output_text.delta","delta":"Beta"}`,
+				`{"type":"response.output_item.done","output_index":1,"item":{"type":"message","id":"b","content":[{"type":"output_text","text":"Beta"}]}}`,
+				`{"type":"response.output_item.done","output_index":0,"item":{"type":"message","id":"a","content":[{"type":"output_text","text":"Alpha"}]}}`,
+			},
+			want: "Beta",
+		},
+		{
+			name: "anonymous announcement does not block backfill when deltas have keys",
+			events: []string{
+				`{"type":"response.output_item.added","output_index":0,"item":{"type":"message","id":"a"}}`,
+				`{"type":"response.output_item.added","item":{"type":"message"}}`,
+				`{"type":"response.output_text.delta","output_index":0,"item_id":"a","delta":"Alpha"}`,
+				`{"type":"response.output_item.done","output_index":1,"item":{"type":"message","id":"b","content":[{"type":"output_text","text":"Beta"}]}}`,
+				`{"type":"response.output_item.done","output_index":0,"item":{"type":"message","id":"a","content":[{"type":"output_text","text":"Alpha"}]}}`,
+			},
+			want: "AlphaBeta",
+		},
+		{
 			name: "response.created resets reused state",
 			events: []string{
 				`{"type":"response.output_text.delta","item_id":"a","delta":"Alpha"}`,
+				`{"type":"response.output_item.added","item":{"type":"message"}}`,
+				`{"type":"response.output_text.delta","delta":"!"}`,
 				`{"type":"response.created","response":{"id":"resp_next"}}`,
 				`{"type":"response.output_item.done","item":{"type":"message","id":"a","content":[{"type":"output_text","text":"Beta"}]}}`,
 			},
-			want: "AlphaBeta",
+			want: "Alpha!Beta",
 		},
 	} {
 		t.Run(tt.name, func(t *testing.T) {

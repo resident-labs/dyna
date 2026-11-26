@@ -123,6 +123,7 @@ type ConvertCliToOpenAIParams struct {
 	citationKeys          map[string]struct{}
 	emittedTextRunes      int64
 	messageStates         map[messageStreamKey]*messageStreamState
+	hasAnonymousMessage   bool
 	unattributedText      bool
 	LastImageHashByItemID map[string][32]byte
 }
@@ -183,6 +184,7 @@ func ConvertCodexResponseToOpenAI(_ context.Context, modelName string, originalR
 		p.CreatedAt = rootResult.Get("response.created_at").Int()
 		p.Model = rootResult.Get("response.model").String()
 		p.messageStates = nil
+		p.hasAnonymousMessage = false
 		p.unattributedText = false
 		if p.LastImageHashByItemID == nil {
 			p.LastImageHashByItemID = make(map[string][32]byte)
@@ -847,12 +849,19 @@ func buildCodexURLCitations(annotations []gjson.Result, runeOffset int64, seen m
 // observeMessage updates item attribution and reports whether a done event can
 // supply fallback text without replaying text already sent in a delta.
 func (p *ConvertCliToOpenAIParams) observeMessage(event, item gjson.Result, kind messageTextEvent) bool {
+	if p.unattributedText {
+		return false
+	}
 	itemID := strings.TrimSpace(item.Get("id").Str)
 	if itemID == "" {
 		itemID = strings.TrimSpace(event.Get("item_id").Str)
 	}
 	index := event.Get("output_index")
 	hasIndex := index.Type == gjson.Number
+	if kind == messageAdded && itemID == "" && !hasIndex {
+		p.hasAnonymousMessage = true
+		return false
+	}
 
 	var state *messageStreamState
 	if itemID != "" {
@@ -874,6 +883,14 @@ func (p *ConvertCliToOpenAIParams) observeMessage(event, item gjson.Result, kind
 
 	var ambiguous bool
 	if state == nil && kind != messageAdded && (itemID == "" || !hasIndex) {
+		if p.hasAnonymousMessage {
+			// An anonymous announcement is a possible match even when only one
+			// keyed item is open. A delta could replay in any later snapshot.
+			if kind == messageDelta {
+				p.unattributedText = true
+			}
+			return false
+		}
 		var sole *messageStreamState
 		for _, open := range p.messageStates {
 			if open.done || open == sole || (itemID != "" && open.itemID != "") || (hasIndex && open.hasOutputIndex) {
@@ -900,10 +917,10 @@ func (p *ConvertCliToOpenAIParams) observeMessage(event, item gjson.Result, kind
 			// No open item explains the delta; a later announcement may describe it.
 			p.unattributedText = true
 		}
-		return kind == messageDone && !ambiguous && !p.unattributedText && len(p.messageStates) == 0
+		return kind == messageDone && !ambiguous && len(p.messageStates) == 0
 	}
 	if state == nil {
-		state = &messageStreamState{suppressFallback: ambiguous || p.unattributedText}
+		state = &messageStreamState{suppressFallback: ambiguous}
 	}
 	if p.messageStates == nil {
 		p.messageStates = make(map[messageStreamKey]*messageStreamState)
