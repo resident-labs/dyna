@@ -31,6 +31,7 @@ type profile struct {
 	Thinking      contract.ThinkingLevel `json:"thinking"`
 	CompactTokens int                    `json:"compactTokens,omitempty"`
 	MaxConcurrent int                    `json:"maxConcurrent,omitempty"`
+	Harness       contract.Harness       `json:"harness,omitempty"`
 }
 
 func (p profile) modelChoice() contract.ModelChoice {
@@ -60,7 +61,7 @@ func LoadProfiles(path string) (*ProfileConfig, error) {
 	}
 	profiles := make(map[contract.ProfileName]profile, len(raw))
 	for name, data := range raw {
-		p := profile{Images: true}
+		p := profile{Images: true, Harness: contract.HarnessPig}
 		decoder := json.NewDecoder(bytes.NewReader(data))
 		decoder.DisallowUnknownFields()
 		if err := decoder.Decode(&p); err != nil {
@@ -93,10 +94,19 @@ func validateProfiles(profiles map[contract.ProfileName]profile) error {
 		if name == "" || p.Model == "" || !slices.Contains(p.AllowedModels, p.Model) {
 			return fmt.Errorf("profile %q: model must be allowed", name)
 		}
-		switch p.Provider {
-		case contract.ModelProviderAnthropic, contract.ModelProviderOpenAI:
+		switch p.Harness {
+		case contract.HarnessPig:
+			switch p.Provider {
+			case contract.ModelProviderAnthropic, contract.ModelProviderOpenAI:
+			default:
+				return fmt.Errorf("profile %q: invalid provider", name)
+			}
+		case contract.HarnessAgy:
+			if p.Provider != contract.ModelProviderGoogle {
+				return fmt.Errorf("profile %q: an agy profile has provider google", name)
+			}
 		default:
-			return fmt.Errorf("profile %q: invalid provider", name)
+			return fmt.Errorf("profile %q: harness is pig or agy", name)
 		}
 		switch p.Thinking {
 		case contract.ThinkingOff, contract.ThinkingMinimal, contract.ThinkingLow, contract.ThinkingMedium, contract.ThinkingHigh, contract.ThinkingXHigh, contract.ThinkingMax:
@@ -112,7 +122,7 @@ func (p *ProfileConfig) List() []contract.Profile {
 	defer p.mu.RUnlock()
 	result := make([]contract.Profile, 0, len(p.entries))
 	for name, profile := range p.entries {
-		result = append(result, contract.Profile{Name: name, Provider: profile.Provider, Model: profile.Model, Images: &profile.Images, Thinking: profile.Thinking, Description: profile.Description, Taste: profile.Taste, Diagnostics: profile.Diagnostics, Intelligence: profile.Intelligence, Cost: profile.Cost, AllowedModels: slices.Clone(profile.AllowedModels), CompactTokens: profile.CompactTokens, MaxConcurrent: profile.MaxConcurrent})
+		result = append(result, contract.Profile{Name: name, Provider: profile.Provider, Model: profile.Model, Images: &profile.Images, Thinking: profile.Thinking, Description: profile.Description, Taste: profile.Taste, Diagnostics: profile.Diagnostics, Intelligence: profile.Intelligence, Cost: profile.Cost, AllowedModels: slices.Clone(profile.AllowedModels), CompactTokens: profile.CompactTokens, MaxConcurrent: profile.MaxConcurrent, Harness: profile.Harness})
 	}
 	slices.SortFunc(result, func(a, b contract.Profile) int { return strings.Compare(string(a.Name), string(b.Name)) })
 	return result
@@ -124,6 +134,9 @@ func (p *ProfileConfig) List() []contract.Profile {
 func textOnlyModels(profiles map[contract.ProfileName]profile) []contract.TextOnlyModel {
 	images := map[contract.TextOnlyModel]bool{}
 	for _, p := range profiles {
+		if p.Harness == contract.HarnessAgy {
+			continue
+		}
 		for _, id := range append(slices.Clone(p.AllowedModels), p.Model) {
 			model := contract.TextOnlyModel{Provider: p.Provider, Model: id}
 			switch seen, ok := images[model]; {
@@ -294,8 +307,23 @@ func (s *Service) ProfileSet(ctx context.Context, who contract.Principal, req co
 		return contract.ProfileSetResponse{}, &contract.Error{Code: contract.ErrUnavailable, Message: "profile configuration is read-only"}
 	}
 	v := req.Profile
+	if v.Harness == "" {
+		v.Harness = contract.HarnessPig
+	}
+	if !req.Create {
+		for _, old := range p.List() {
+			if old.Name != v.Name || old.Harness == v.Harness {
+				continue
+			}
+			if used, err := s.store.ProfileInUse(ctx, v.Name); err != nil {
+				return contract.ProfileSetResponse{}, failure(err)
+			} else if used {
+				return contract.ProfileSetResponse{}, &contract.Error{Code: contract.ErrConflict, Message: fmt.Sprintf("profile %s runs on %s and open sessions use it, and a session cannot move between pig and agy; make a new profile on %s for new sessions, or close those sessions first", v.Name, old.Harness, v.Harness)}
+			}
+		}
+	}
 	images := v.Images == nil || *v.Images
-	err := p.update(v.Name, &profile{Description: v.Description, Taste: v.Taste, Diagnostics: v.Diagnostics, Intelligence: v.Intelligence, Cost: v.Cost, Provider: v.Provider, Model: v.Model, Images: images, AllowedModels: slices.Clone(v.AllowedModels), Thinking: v.Thinking, CompactTokens: v.CompactTokens, MaxConcurrent: v.MaxConcurrent}, req.Create)
+	err := p.update(v.Name, &profile{Description: v.Description, Taste: v.Taste, Diagnostics: v.Diagnostics, Intelligence: v.Intelligence, Cost: v.Cost, Provider: v.Provider, Model: v.Model, Images: images, AllowedModels: slices.Clone(v.AllowedModels), Thinking: v.Thinking, CompactTokens: v.CompactTokens, MaxConcurrent: v.MaxConcurrent, Harness: v.Harness}, req.Create)
 	if err == nil {
 		s.wakeWorkflowsOnProfile(ctx, v.Name)
 		if !req.Create {
@@ -343,6 +371,9 @@ func (p *ProfileConfig) Replace(name, replacement contract.ProfileName, move fun
 	}
 	if _, ok := p.entries[replacement]; !ok || replacement == name {
 		return invalid("replacement must be another profile")
+	}
+	if p.entries[name].Harness != p.entries[replacement].Harness {
+		return &contract.Error{Code: contract.ErrConflict, Message: fmt.Sprintf("profile %s runs on %s and %s on %s, and a session cannot move between pig and agy; name a replacement on the same harness", name, p.entries[name].Harness, replacement, p.entries[replacement].Harness)}
 	}
 	if err := move(); err != nil {
 		return failure(err)
@@ -411,3 +442,39 @@ func (s *Service) wakeWorkflowsOnProfile(ctx context.Context, name contract.Prof
 	}
 	s.live.Wake(sessions, nil)
 }
+
+// agyHost is the one host agy sessions run on: the owner signs in to Google there, and one IP uses the login.
+const agyHost contract.HostName = "hermeslab"
+
+// harnessOf is the harness a profile runs on. A profile a read-only resolver lists without one runs on pig.
+func (s *Service) harnessOf(name contract.ProfileName) contract.Harness {
+	for _, p := range s.profiles.List() {
+		if p.Name == name && p.Harness != "" {
+			return p.Harness
+		}
+	}
+	return contract.HarnessPig
+}
+
+// pigOnly refuses an agy profile where only PiG runs: a workflow's workers and the room's advisor.
+func (s *Service) pigOnly(name contract.ProfileName, what string) *contract.Error {
+	if s.harnessOf(name) == contract.HarnessAgy {
+		return invalid(fmt.Sprintf("profile %s runs on agy, and %s run only on PiG profiles; pick a profile whose harness is pig", name, what))
+	}
+	return nil
+}
+
+// agyPlacement pins a session on an agy profile to agyHost. host is what the caller asked for: empty, or a host the session may not take.
+func (s *Service) agyPlacement(profile contract.ProfileName, host contract.HostName, sameHost bool) (contract.HostName, *contract.Error) {
+	if s.harnessOf(profile) != contract.HarnessAgy {
+		return host, nil
+	}
+	if sameHost || host != "" && host != agyHost {
+		return "", invalid(fmt.Sprintf("profile %s runs on agy, which runs only on host %s, where the owner signed in to Google; leave host and sameHost out, or pick a pig profile for another host", profile, agyHost))
+	}
+	return agyHost, nil
+}
+
+// The agy program and the signed-in profile directory are mounted into the box by the host's root, the directory read-write.
+// Dyna never reads or copies a file in it.
+var agyMount = contract.BoxAgy{Binary: "/opt/agy/antigravity", GeminiDir: "/opt/agy/account"}

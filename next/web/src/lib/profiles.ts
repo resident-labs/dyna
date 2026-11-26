@@ -13,7 +13,7 @@ const SHOWN_AS: Record<string, string> = { gpt: "GPT", glm: "GLM", mimo: "MiMo",
 export const thinking: Record<ThinkingLevel, string> = {
   off: "no thinking", minimal: "minimal thinking", low: "low thinking", medium: "medium thinking", high: "high thinking", xhigh: "very high thinking", max: "maximum thinking",
 };
-export const providers: Record<ModelProvider, string> = { anthropic: "Anthropic", openai: "OpenAI-compatible" };
+export const providers: Record<ModelProvider, string> = { anthropic: "Anthropic", openai: "OpenAI-compatible", google: "Google (agy)" };
 
 // Settings > Profiles (spec 5.13): its chips, its columns, its provider filter and what a row and the search read.
 export const unrated = (profile: ProfileSummary) => !profile.taste && !profile.diagnostics && !profile.intelligence && !profile.cost;

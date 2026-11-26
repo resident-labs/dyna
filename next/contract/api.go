@@ -772,7 +772,23 @@ type ModelProvider string
 const (
 	ModelProviderAnthropic ModelProvider = "anthropic"
 	ModelProviderOpenAI    ModelProvider = "openai"
+	// ModelProviderGoogle is the provider of a profile that runs on the agy harness: Google's own agent, signed in on its host.
+	ModelProviderGoogle ModelProvider = "google"
 )
+
+// Harness is the program that runs a session's turns. A profile names it; a profile's sessions keep it.
+type Harness string
+
+const (
+	HarnessPig Harness = "pig" // the default, and the empty value of an older profile
+	HarnessAgy Harness = "agy" // Google's Antigravity agent over ACP, on host hermeslab only
+)
+
+// BoxAgy says where the agy harness's files are in the box: the program, and the signed-in profile directory, mounted read-write from the host; nothing in it is read or copied.
+type BoxAgy struct {
+	Binary    string `json:"binary"`
+	GeminiDir string `json:"geminiDir"`
+}
 
 type ThinkingLevel string
 
@@ -831,6 +847,9 @@ type BoxHelloResponse struct {
 	Workflow           *BoxWorkflow     `json:"workflow,omitempty"` // a crew's box runs this script and no Pi of its own
 	// GitHub says the engine serves GitHub's read-only MCP tools at /github/ on the box socket, with its own token.
 	GitHub bool `json:"github,omitempty"`
+	// Harness is the program that runs the session's turns. Agy says where its files are, and is set exactly when Harness is agy.
+	Harness Harness `json:"harness,omitempty"`
+	Agy     *BoxAgy `json:"agy,omitempty"`
 	// Fresh says the session's conversation was cleared since its last turn, so the box starts a new session file instead of resuming.
 	Fresh bool `json:"fresh,omitempty"`
 }

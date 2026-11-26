@@ -40,12 +40,13 @@ func profileCommand(getClient func() client) *cobra.Command {
 			return err
 		}
 		p := e.Profile
-		fmt.Fprintf(cmd.OutOrStdout(), "name: %s\ndescription: %s\nprovider: %s\nmodel: %s\nallowed-models: %s\nthinking: %s\nimages: %s\ntaste: %d\ndiagnostics: %d\nintelligence: %d\ncost: %d\ncompact-tokens: %d\nmax-concurrent: %d\nin-use: %d\n",
-			p.Name, p.Description, p.Provider, p.Model, strings.Join(p.AllowedModels, ","), p.Thinking, onOff(p.Images == nil || *p.Images), p.Taste, p.Diagnostics, p.Intelligence, p.Cost, p.CompactTokens, p.MaxConcurrent, e.InUse)
+		fmt.Fprintf(cmd.OutOrStdout(), "name: %s\ndescription: %s\nprovider: %s\nmodel: %s\nallowed-models: %s\nthinking: %s\nimages: %s\ntaste: %d\ndiagnostics: %d\nintelligence: %d\ncost: %d\ncompact-tokens: %d\nmax-concurrent: %d\nin-use: %d\nharness: %s\n",
+			p.Name, p.Description, p.Provider, p.Model, strings.Join(p.AllowedModels, ","), p.Thinking, onOff(p.Images == nil || *p.Images), p.Taste, p.Diagnostics, p.Intelligence, p.Cost, p.CompactTokens, p.MaxConcurrent, e.InUse, p.Harness)
 		return nil
 	}}
 	var (
 		description, provider, model, thinking, images string
+		harness                                        string
 		allowed                                        []string
 		taste, diagnostics, intelligence, cost         int
 		compactTokens, maxConcurrent                   int
@@ -101,6 +102,9 @@ func profileCommand(getClient func() client) *cobra.Command {
 		if flags.Changed("compact-tokens") {
 			p.CompactTokens = compactTokens
 		}
+		if flags.Changed("harness") {
+			p.Harness = contract.Harness(harness)
+		}
 		if flags.Changed("max-concurrent") {
 			p.MaxConcurrent = maxConcurrent
 		}
@@ -112,7 +116,7 @@ func profileCommand(getClient func() client) *cobra.Command {
 	}}
 	set.Flags().BoolVar(&create, "create", false, "make a new profile")
 	set.Flags().StringVar(&description, "description", "", "what the profile is for")
-	set.Flags().StringVar(&provider, "provider", "", "anthropic or openai")
+	set.Flags().StringVar(&provider, "provider", "", "anthropic, openai, or google for an agy profile")
 	set.Flags().StringVar(&model, "model", "", "the model it runs")
 	set.Flags().StringSliceVar(&allowed, "allowed-models", nil, "every model a session on it may call (MODEL[,MODEL...])")
 	set.Flags().StringVar(&thinking, "thinking", "", "off, minimal, low, medium, high, xhigh or max")
@@ -122,6 +126,7 @@ func profileCommand(getClient func() client) *cobra.Command {
 	set.Flags().IntVar(&intelligence, "intelligence", 0, "rating 0..10")
 	set.Flags().IntVar(&cost, "cost", 0, "rating 0..10")
 	set.Flags().IntVar(&compactTokens, "compact-tokens", 0, "compaction trigger in tokens; 0 is Pi's default")
+	set.Flags().StringVar(&harness, "harness", "", "pig (the default) or agy: Google's agent, provider google, run on host hermeslab only")
 	set.Flags().IntVar(&maxConcurrent, "max-concurrent", 0, "most workflow workers at once; 0 is unlimited")
 	var replacement string
 	remove := &cobra.Command{Use: "remove NAME [--replacement NAME]", Short: "Remove a profile", Long: "Remove a profile. One that open sessions use is refused, unless --replacement names another profile, which takes those sessions first.", Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
