@@ -97,3 +97,22 @@ func (s *Store) applyRoomPRs(ctx context.Context, tx *sql.Tx, passes []RoomPRPas
 	}
 	return nil
 }
+
+// PRPollStatus is the current failure, if any, in polling this repository.
+func (s *Store) PRPollStatus(repo contract.RepoName) string {
+	status, ok := s.prPollStatus.Load(repo)
+	if !ok {
+		return ""
+	}
+	return status.(string)
+}
+
+// SetPRPollStatus returns true when there is a new failure to log.
+func (s *Store) SetPRPollStatus(repo contract.RepoName, status string) bool {
+	if status == "" {
+		s.prPollStatus.Delete(repo)
+		return false
+	}
+	old, _ := s.prPollStatus.Swap(repo, status)
+	return old != status
+}

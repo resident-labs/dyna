@@ -689,22 +689,16 @@ func (s *Server) serveREST(w http.ResponseWriter, r *http.Request) {
 		s.answer(w, r, map[string]any{"object": map[string]string{"sha": head}})
 	case rest == "pulls":
 		list := []map[string]any{}
-		for _, pull := range s.pulls {
-			if pull.Repo == repo && pull.State == "OPEN" {
-				list = append(list, metaNode(map[string]any{"number": pull.Number, "html_url": s.link(pull), "title": pull.Title, "draft": pull.Draft, "state": "open", "user": user(pull.Author)}, pull.Meta))
+		rows := slices.Clone(s.items[repo])
+		slices.SortFunc(rows, func(a, b *listed) int {
+			return cmp.Or(b.updated.Compare(a.updated), cmp.Compare(b.number, a.number))
+		})
+		for _, row := range rows {
+			if pull := s.pulls[key(repo, row.number)]; pull != nil && (pull.State == "OPEN" || r.URL.Query().Get("state") == "all") {
+				list = append(list, s.itemNode(repo, row))
 			}
 		}
-		slices.SortFunc(list, func(a, b map[string]any) int { return cmp.Compare(a["number"].(int), b["number"].(int)) })
-		page, _ := strconv.Atoi(r.URL.Query().Get("page"))
-		if page < 1 {
-			page = 1
-		}
-		start := (page - 1) * 100
-		if start > len(list) {
-			start = len(list)
-		}
-		end := min(start+100, len(list))
-		s.answer(w, r, list[start:end])
+		s.page(w, r, list, false)
 	case rest == "issues" || rest == "issues/events" || rest == "issues/comments" || rest == "pulls/comments":
 		s.serveFeed(w, r, repo, rest)
 	case len(parts) == 5 && parts[3] == "pulls":

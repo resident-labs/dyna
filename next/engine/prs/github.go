@@ -113,7 +113,24 @@ func (c *Client) refused(q *quota, header http.Header) {
 	}
 }
 
+// send retries transient GitHub gateway failures for internal read requests.
 func (c *Client) send(ctx context.Context, q *quota, method, path string, input []byte, etag string) (*http.Response, []byte, error) {
+	for attempt := 0; ; attempt++ {
+		response, data, err := c.sendOnce(ctx, q, method, path, input, etag)
+		if err != nil || attempt == 2 || response.StatusCode != http.StatusBadGateway && response.StatusCode != http.StatusGatewayTimeout {
+			return response, data, err
+		}
+		timer := time.NewTimer(time.Duration(1<<attempt) * 200 * time.Millisecond)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return nil, nil, ctx.Err()
+		case <-timer.C:
+		}
+	}
+}
+
+func (c *Client) sendOnce(ctx context.Context, q *quota, method, path string, input []byte, etag string) (*http.Response, []byte, error) {
 	c.mu.Lock()
 	paused := c.Now().Before(q.until)
 	c.mu.Unlock()
