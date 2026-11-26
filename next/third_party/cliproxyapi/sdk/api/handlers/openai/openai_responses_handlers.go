@@ -1351,12 +1351,23 @@ func (h *OpenAIResponsesAPIHandler) forwardResponsesStream(c *gin.Context, flush
 		framer.failureEvent = "error"
 		framer.isCodexClient = false
 	}
+	terminalDelivered := func() bool {
+		if framer.canComplete == nil || !framer.canComplete() || framer.writeErr != nil || framer.terminalError != nil {
+			return false
+		}
+		switch framer.terminalEvent {
+		case "response.completed", "response.incomplete", "response.done":
+			return true
+		default:
+			return false
+		}
+	}
 	// Initial frames have already been written and flushed by the caller.
 	if framer.writeErr != nil {
 		cancel(framer.writeErr)
 		return
 	}
-	if framer.canComplete != nil && framer.canComplete() && framer.terminalEvent == "response.completed" && framer.terminalError == nil {
+	if terminalDelivered() {
 		if errMsg, pending := handlers.PendingStreamError(errs); pending {
 			h.logResponsesStreamError(c, framer, sanitizeResponsesStreamErrorMessage(errMsg))
 		}
@@ -1399,9 +1410,7 @@ func (h *OpenAIResponsesAPIHandler) forwardResponsesStream(c *gin.Context, flush
 		WriteChunk: func(chunk []byte) {
 			framer.WriteChunk(c.Writer, chunk)
 		},
-		ChunkDone: func() bool {
-			return framer.canComplete != nil && framer.canComplete() && framer.terminalEvent == "response.completed" && framer.writeErr == nil
-		},
+		ChunkDone: terminalDelivered,
 		ChunkError: func() *interfaces.ErrorMessage {
 			if framer.writeErr != nil {
 				return &interfaces.ErrorMessage{Error: framer.writeErr}

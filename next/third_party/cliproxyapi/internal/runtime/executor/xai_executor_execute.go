@@ -43,7 +43,12 @@ func (e *XAIExecutor) Execute(ctx context.Context, auth *cliproxyauth.Auth, req 
 	}
 
 	reporter := helps.NewExecutorUsageReporter(ctx, e, prepared.baseModel, auth)
-	defer reporter.TrackFailure(ctx, &err)
+	var upstreamUsage helps.StreamUsageBuffer
+	defer func() {
+		if err != nil {
+			upstreamUsage.PublishFailure(ctx, reporter, err)
+		}
+	}()
 
 	url := strings.TrimSuffix(baseURL, "/") + "/responses"
 	prepared.body = sanitizeXAIInputEncryptedContentForBaseURL(prepared.body, baseURL)
@@ -73,17 +78,15 @@ func (e *XAIExecutor) Execute(ctx context.Context, auth *cliproxyauth.Auth, req 
 		data, errRead := io.ReadAll(httpResp.Body)
 		if errRead != nil {
 			helps.RecordAPIResponseError(ctx, e.cfg, errRead)
-			return resp, errRead
 		}
 		helps.AppendAPIResponseChunk(ctx, e.cfg, data)
 		helps.LogWithRequestID(ctx).Debugf("request error, error status: %d, error message: %s", httpResp.StatusCode, helps.SummarizeErrorBody(httpResp.Header.Get("Content-Type"), data))
-		return resp, xaiStatusErr(httpResp.StatusCode, data)
+		return resp, xaiHTTPStatusErr(httpResp.StatusCode, data, httpResp.Header)
 	}
 
-	data, err := io.ReadAll(httpResp.Body)
-	if err != nil {
-		helps.RecordAPIResponseError(ctx, e.cfg, err)
-		return resp, err
+	data, errRead := io.ReadAll(httpResp.Body)
+	if errRead != nil {
+		helps.RecordAPIResponseError(ctx, e.cfg, errRead)
 	}
 	helps.AppendAPIResponseChunk(ctx, e.cfg, data)
 
@@ -91,13 +94,37 @@ func (e *XAIExecutor) Execute(ctx context.Context, auth *cliproxyauth.Auth, req 
 	var outputItemsFallback [][]byte
 	responseFilter := newXAIInternalXSearchResponseFilter(prepared.filterInternalXSearch, prepared.clientDeclaredTools)
 	namespaceRestorer := newXAINamespaceRestorer(prepared.namespaceTools)
-	var upstreamUsage helps.StreamUsageBuffer
-	for _, line := range bytes.Split(data, []byte("\n")) {
-		if !bytes.HasPrefix(line, xaiDataTag) {
-			continue
+	var sawData bool
+	if raw := bytes.TrimSpace(data); len(raw) > 0 && raw[0] == '{' {
+		sawData = true
+		if terminalErr, failed := xaiTerminalError("", raw, gjson.ValidBytes(raw), httpResp.Header); failed {
+			upstreamUsage.ObserveResponsesStream(raw)
+			return resp, terminalErr
 		}
-		eventData := xaiNormalizeReasoningSummaryData(bytes.TrimSpace(line[len(xaiDataTag):]))
-		upstreamUsage.ObserveResponsesStream(eventData)
+	}
+
+	scanner := helps.NewCodexSSEScanner(ctx, bytes.NewReader(data), len(data)+1)
+	for event := range xaiResponseEvents(scanner) {
+		eventData := event.data
+		if bytes.Equal(eventData, []byte("[DONE]")) {
+			break
+		}
+		sawData = true
+		validJSON := gjson.ValidBytes(eventData)
+		if validJSON {
+			upstreamUsage.ObserveResponsesStream(eventData)
+		} else if event.unterminated && errRead != nil {
+			// ScanLines also yields a short final line on a read error. Unlike
+			// intact JSON, plain text needs the line ending to prove completion.
+			break
+		}
+		if terminalErr, failed := xaiTerminalError(event.name, eventData, validJSON, httpResp.Header); failed {
+			return resp, terminalErr
+		}
+		if !validJSON {
+			break
+		}
+		eventData = xaiNormalizeReasoningSummaryData(eventData)
 		prepared.applyPatch.RememberDispatcherEvent(eventData)
 		eventData = namespaceRestorer.restore(eventData)
 		if prepared.webSearchAlias != "" {
@@ -110,7 +137,6 @@ func (e *XAIExecutor) Execute(ctx context.Context, auth *cliproxyauth.Auth, req 
 		events, errBridge := prepared.applyPatch.Transform(eventData)
 		if errBridge != nil {
 			errBridge = statusErr{code: http.StatusBadGateway, msg: helps.ApplyPatchUpstreamErrorMessage}
-			upstreamUsage.PublishFailure(ctx, reporter, errBridge)
 			return resp, errBridge
 		}
 		for _, eventData := range events {
@@ -119,7 +145,11 @@ func (e *XAIExecutor) Execute(ctx context.Context, auth *cliproxyauth.Auth, req 
 			switch eventType {
 			case "response.output_item.done":
 				xaiCollectOutputItemDone(eventData, outputItemsByIndex, &outputItemsFallback)
-			case "response.completed", "response.incomplete":
+			case "response.completed", "response.incomplete", "response.done":
+				if eventType == "response.done" {
+					eventType = xaiDoneEventType(eventData)
+					eventData, _ = sjson.SetBytes(eventData, "type", eventType)
+				}
 				completedData := xaiPatchCompletedOutput(eventData, outputItemsByIndex, outputItemsFallback)
 				completedData = xaiNormalizeReasoningSummaryData(completedData)
 				if eventType == "response.completed" {
@@ -131,7 +161,6 @@ func (e *XAIExecutor) Execute(ctx context.Context, auth *cliproxyauth.Auth, req 
 				out := sdktranslator.TranslateNonStream(ctx, prepared.to, prepared.responseFormat, req.Model, prepared.originalPayload, prepared.body, completedData, &param)
 				if helps.ApplyPatchTranslationError(param) != nil || len(out) == 0 {
 					errTranslation := statusErr{code: http.StatusBadGateway, msg: helps.ApplyPatchUpstreamErrorMessage}
-					upstreamUsage.PublishFailure(ctx, reporter, errTranslation)
 					return cliproxyexecutor.Response{}, errTranslation
 				}
 				if !upstreamUsage.Publish(ctx, reporter) {
@@ -142,17 +171,22 @@ func (e *XAIExecutor) Execute(ctx context.Context, auth *cliproxyauth.Auth, req 
 				if prepared.responseFormat == sdktranslator.FormatOpenAIResponse {
 					out = helps.EnsureResponsesUsageDetails(out)
 				}
-				return cliproxyexecutor.Response{Payload: out, Headers: httpResp.Header.Clone()}, nil
+				return cliproxyexecutor.Response{Payload: out, Headers: httpResp.Header.Clone(), Incomplete: eventType == "response.incomplete"}, nil
 			}
 		}
 	}
 
-	if errFinish := prepared.applyPatch.Finish(); errFinish != nil {
-		errFinish = statusErr{code: http.StatusBadGateway, msg: helps.ApplyPatchUpstreamErrorMessage}
-		upstreamUsage.PublishFailure(ctx, reporter, errFinish)
-		return resp, errFinish
+	if errCtx := ctx.Err(); errCtx != nil {
+		return resp, errCtx
 	}
-	return resp, statusErr{code: http.StatusRequestTimeout, msg: "xai stream error: stream disconnected before response.completed or response.incomplete"}
+	message := xaiIncompleteStreamMessage
+	if !sawData && errRead == nil {
+		message = xaiEmptyStreamMessage
+	}
+	if prepared.applyPatch.HasPatchActivity() && prepared.applyPatch.Finish() != nil {
+		message = helps.ApplyPatchUpstreamErrorMessage
+	}
+	return resp, statusErr{code: http.StatusBadGateway, msg: message, streamTruncated: true}
 }
 
 func (e *XAIExecutor) executeCompact(ctx context.Context, auth *cliproxyauth.Auth, req cliproxyexecutor.Request, opts cliproxyexecutor.Options) (resp cliproxyexecutor.Response, err error) {

@@ -92,14 +92,26 @@ func TestApplyPatchRepairResponsesSourceTerminalHTTP(t *testing.T) {
 					if errExecuteStream != nil {
 						t.Fatal(errExecuteStream)
 					}
-					assertTask6FailedStream(t, stream.Chunks)
+					if provider == "xai" && mode == "empty" {
+						chunk := <-stream.Chunks
+						assertXAIEmptyStream(t, chunk.Err)
+						if next, ok := <-stream.Chunks; ok {
+							t.Fatalf("unexpected output after empty stream error: %+v", next)
+						}
+					} else {
+						assertTask6FailedStream(t, stream.Chunks)
+					}
 					checkUsage()
 					// Exercise the gateway too, but do not rely on its final HTTP validator.
 					auth.ID += "-gateway"
 					checkGatewayUsage := task6CaptureFailureUsage(t, auth.ID)
 					result := task6Gateway(t, exec, auth, true)
 					output := result.Body.String()
-					if strings.Count(output, "event: response.failed") != 1 || strings.Contains(output, "event: error") || strings.Contains(output, "response.completed") || strings.Contains(output, "[DONE]") {
+					if provider == "xai" && mode == "empty" {
+						if result.Code != http.StatusBadGateway || !strings.Contains(output, xaiEmptyStreamMessage) {
+							t.Errorf("empty stream reported as a patch failure: %d %s", result.Code, output)
+						}
+					} else if strings.Count(output, "event: response.failed") != 1 || strings.Contains(output, "event: error") || strings.Contains(output, "response.completed") || strings.Contains(output, "[DONE]") {
 						t.Errorf("gateway failure contract: %d %s", result.Code, output)
 					}
 					checkGatewayUsage()
@@ -470,12 +482,18 @@ func TestApplyPatchRepairResponsesSourceTerminalNonStream(t *testing.T) {
 				if len(response.Payload) != 0 {
 					t.Errorf("failed source returned payload: %s", response.Payload)
 				}
-				assertTask6PatchError(t, errExecute)
+				wantMessage := "Invalid apply_patch tool arguments received from upstream."
+				if provider == "xai" && mode == "empty" {
+					assertXAIEmptyStream(t, errExecute)
+					wantMessage = xaiEmptyStreamMessage
+				} else {
+					assertTask6PatchError(t, errExecute)
+				}
 				checkUsage()
 				auth.ID += "-gateway"
 				checkGatewayUsage := task6CaptureFailureUsage(t, auth.ID)
 				result := task6Gateway(t, exec, auth, false)
-				if result.Code != http.StatusBadGateway || !strings.Contains(result.Body.String(), "Invalid apply_patch tool arguments received from upstream.") {
+				if result.Code != http.StatusBadGateway || !strings.Contains(result.Body.String(), wantMessage) {
 					t.Errorf("non-stream gateway did not return clean 502: %d %s", result.Code, result.Body)
 				}
 				checkGatewayUsage()
@@ -603,6 +621,14 @@ func TestApplyPatchRepairXAIWebsocketCompactionUsage(t *testing.T) {
 	}
 }
 
+func assertXAIEmptyStream(t *testing.T, err error) {
+	t.Helper()
+	status, ok := errors.AsType[statusErr](err)
+	if !ok || status.StatusCode() != http.StatusBadGateway || !status.IsStreamTruncated() || status.Error() != xaiEmptyStreamMessage {
+		t.Fatalf("expected empty stream 502 without patch failure, got %v", err)
+	}
+}
+
 func TestApplyPatchRepairOrdinaryEmptyHTTPPassthrough(t *testing.T) {
 	for _, provider := range []string{"xai", "meta", "kimi"} {
 		t.Run(provider, func(t *testing.T) {
@@ -615,6 +641,8 @@ func TestApplyPatchRepairOrdinaryEmptyHTTPPassthrough(t *testing.T) {
 				if errExecute != nil || len(response.Payload) != 0 {
 					t.Fatalf("ordinary Kimi response changed: %s %v", response.Payload, errExecute)
 				}
+			} else if provider == "xai" {
+				assertXAIEmptyStream(t, errExecute)
 			} else if status, okStatus := errExecute.(interface{ StatusCode() int }); !okStatus || status.StatusCode() != http.StatusRequestTimeout {
 				t.Fatalf("ordinary disconnect changed: %v", errExecute)
 			}

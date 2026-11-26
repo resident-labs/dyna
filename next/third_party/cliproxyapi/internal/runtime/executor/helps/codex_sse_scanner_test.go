@@ -179,6 +179,29 @@ func TestCodexSSEScannerAssemblesEventData(t *testing.T) {
 	}
 }
 
+func TestCodexSSEScannerReportsUnterminatedPhysicalLine(t *testing.T) {
+	for _, prefix := range []string{"data: ", "data: {\"type\":\r\ndata: "} {
+		for _, ending := range []string{"", "\r\n", "\n"} {
+			t.Run(fmt.Sprintf("%q/%q", prefix, ending), func(t *testing.T) {
+				data := "upstream error"
+				if strings.Contains(prefix, "{") {
+					data = `"error"}`
+				}
+				scanner := NewCodexSSEScanner(t.Context(), strings.NewReader("event: error\r\n"+prefix+data+ending), 1024)
+				if !scanner.Scan() || scanner.Unterminated() {
+					t.Fatal("terminated event name was not preserved")
+				}
+				if !scanner.Scan() || scanner.Unterminated() != (ending == "") {
+					t.Fatalf("line %q: unterminated=%t, want %t", scanner.Bytes(), scanner.Unterminated(), ending == "")
+				}
+				if scanner.Scan() || scanner.Err() != nil {
+					t.Fatalf("unexpected trailer: %q, err=%v", scanner.Bytes(), scanner.Err())
+				}
+			})
+		}
+	}
+}
+
 func TestCodexSSEScannerBoundsAnEventToTheLineLimit(t *testing.T) {
 	hook := captureCodexSSEWarnings(t)
 	// Each fragment fits the 64-byte limit; together they do not.
