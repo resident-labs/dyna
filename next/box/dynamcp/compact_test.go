@@ -16,9 +16,6 @@ import (
 // agyLimit is the stored size agy declares a tool up to: it kept github's 1802 B and dropped dyna's 1861 B. The listing stays under 1500.
 const agyLimit = 1500
 
-// discordLimit is the same for the discord tool, which only a box with Discord lists and which is the longest at 1543 B.
-const discordLimit = 1700
-
 func rpc(t *testing.T, h http.Handler, body string) json.RawMessage {
 	t.Helper()
 	w := httptest.NewRecorder()
@@ -60,12 +57,8 @@ func TestEveryAgyToolIsUnderTheDeclaredLimit(t *testing.T) {
 		}{tool.Name, tool.Description, tool.InputSchema})
 		total += len(stored)
 		t.Logf("%-14s %4d B", tool.Name, len(stored))
-		limit := agyLimit
-		if tool.Name == "discord" {
-			limit = discordLimit
-		}
-		if len(stored) > limit {
-			t.Errorf("%s is %d B stored, over %d", tool.Name, len(stored), limit)
+		if len(stored) > agyLimit {
+			t.Errorf("%s is %d B stored, over %d", tool.Name, len(stored), agyLimit)
 		}
 		if strings.Contains(string(tool.InputSchema), `"description"`) {
 			t.Errorf("%s keeps a property description", tool.Name)
@@ -205,7 +198,7 @@ func TestHelpIsAgyOnly(t *testing.T) {
 			t.Errorf("%s: the full listing has a help action", tool.Name)
 		}
 		compact := compactTool(tool)
-		if !slices.Contains(compact.InputSchema.Properties["action"].Enum, agyHelp) || !strings.Contains(compact.Description, "Call action help") {
+		if !slices.Contains(compact.InputSchema.Properties["action"].Enum, agyHelp) || !strings.Contains(compact.Description, "Action help lists fields") {
 			t.Errorf("%s: the compact tool does not offer help: %q", tool.Name, compact.Description)
 		}
 	}

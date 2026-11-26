@@ -43,7 +43,7 @@ func compactTool(t Tool) Tool {
 	action := t.InputSchema.Properties["action"]
 	action.Enum = append(slices.Clone(action.Enum), agyHelp)
 	t.InputSchema.Properties["action"] = action
-	t.Description = t.Title + ". Actions: " + strings.Join(action.Enum, ", ") + ". Call action help for what each does and its fields."
+	t.Description = t.Title + ". Actions: " + strings.Join(action.Enum[:len(action.Enum)-1], ", ") + ". Action help lists fields."
 	return t
 }
 
