@@ -83,11 +83,11 @@ type Harness struct {
 	entries int64
 
 	mu          sync.Mutex
-	handoff     string // the handoff the next prompt carries, until agy has accepted a prompt that did
-	gen         string // the generation of the handoff, pending or delivered, that the session was opened for
-	clearFrom   string // the mirror file the last /clear began (sessionMeta.ClearFrom)
-	hstatus     string // the handoff's status (handoffstate.go)
-	fbText      string // the fallback record: a history built from the mirrors (sessionMeta.Fallback)
+	handoff     string   // the handoff the next prompt carries, until agy has accepted a prompt that did
+	gen         string   // the generation of the handoff, pending or delivered, that the session was opened for
+	cleared     []string // the session files /clear left behind (sessionMeta.Cleared)
+	hstatus     string   // the handoff's status (handoffstate.go)
+	fbText      string   // the fallback record: a history built from the mirrors (sessionMeta.Fallback)
 	fbStatus    string
 	carryKind   string // which record the prompt in flight carries: "engine" or "fallback"
 	suppliedGen string
@@ -199,7 +199,7 @@ func Open(ctx context.Context, c Config) (*Harness, error) {
 		h.notice(plan.notice)
 	}
 	h.handoff, h.gen, h.hstatus = plan.text, plan.gen, plan.status
-	h.clearFrom = meta.ClearFrom
+	h.cleared = meta.Cleared
 	h.fbText, h.fbStatus = plan.fbText, plan.fbStatus
 	h.supplied, h.suppliedGen = plan.supplied, plan.suppliedGen
 	fresh := plan.fresh

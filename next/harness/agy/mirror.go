@@ -38,20 +38,42 @@ type sessionMeta struct {
 	Gen string `json:"handoffGen,omitempty"`
 	// Status is the handoff's state (handoffstate.go). A restart that finds it sending cannot tell whether agy took the history.
 	Status string `json:"handoffStatus,omitempty"`
-	// ClearFrom is the mirror file a /clear began: a handoff built from the mirrors reads this file and the ones after it, never the
-	// conversation before. The files stay for the transcript.
-	ClearFrom string `json:"clearFrom,omitempty"`
+	// Cleared names the session files a /clear left behind, from either harness: a handoff reads none of them. The files stay for the
+	// transcript. It is a set, not a position: file names carry no order across harnesses and a modification time moves.
+	Cleared []string `json:"cleared,omitempty"`
 	// Fallback is a history this harness built from its own mirrors after agy could not resume. It is a record of its own, apart from the
 	// engine's generation above: replacing the native session locally never changes what the engine's handoff was.
 	Fallback       string `json:"fallback,omitempty"`
 	FallbackStatus string `json:"fallbackStatus,omitempty"`
 }
 
-// ClearedFrom is the mirror file the last /clear began in the session directory, "" when there was none: a history of the conversation
-// starts there. It reads the file this harness keeps; the box never reads inside the profile folder.
-func ClearedFrom(dir string) string {
+// ClearedFiles are the session files in dir that a /clear left behind, whichever harness cleared. The box never reads inside the
+// profile folder: this is the file this harness keeps in the session folder.
+func ClearedFiles(dir string) []string {
 	meta, _ := readMeta(dir)
-	return meta.ClearFrom
+	return meta.Cleared
+}
+
+// MarkCleared records a /clear in dir: every session file there but keep, the one the new conversation writes, is left behind. Pi's /clear
+// calls it; agy's own marks the same set. It is for a box whose agy harness is not running, which would otherwise overwrite it.
+func MarkCleared(dir, keep string) error {
+	meta, err := readMeta(dir)
+	if err != nil {
+		return err
+	}
+	meta.Cleared = clearedWith(dir, keep, meta.Cleared)
+	return writeMeta(dir, meta)
+}
+
+// clearedWith adds to cleared every conversation file in dir but keep.
+func clearedWith(dir, keep string, cleared []string) []string {
+	entries, _ := os.ReadDir(dir)
+	for _, entry := range entries {
+		if name := entry.Name(); filepath.Ext(name) == ".jsonl" && name != keep && !slices.Contains(cleared, name) {
+			cleared = append(cleared, name)
+		}
+	}
+	return cleared
 }
 
 func readMeta(dir string) (sessionMeta, error) {
@@ -94,15 +116,11 @@ func nextMirror(dir string) (string, error) {
 	return filepath.Join(dir, fmt.Sprintf("agy-%d.jsonl", highest+1)), nil
 }
 
-// mirrorFiles is every mirror file in the session directory, oldest first: the conversations this harness has had.
+// mirrorFiles is every mirror file in the session directory that no /clear left behind, oldest first: the conversations this harness has had.
 func (h *Harness) mirrorFiles() []string {
 	h.mu.Lock()
-	from := h.clearFrom
+	cleared := h.cleared
 	h.mu.Unlock()
-	first := 0
-	if m := mirrorName.FindStringSubmatch(from); m != nil {
-		first, _ = strconv.Atoi(m[1])
-	}
 	entries, _ := os.ReadDir(h.cfg.SessionDir)
 	type numbered struct {
 		n    int
@@ -112,7 +130,7 @@ func (h *Harness) mirrorFiles() []string {
 	for _, entry := range entries {
 		if m := mirrorName.FindStringSubmatch(entry.Name()); m != nil {
 			n, _ := strconv.Atoi(m[1])
-			if n < first {
+			if slices.Contains(cleared, entry.Name()) {
 				continue
 			}
 			found = append(found, numbered{n, filepath.Join(h.cfg.SessionDir, entry.Name())})

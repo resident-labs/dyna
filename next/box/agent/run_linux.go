@@ -277,10 +277,7 @@ func Run(ctx context.Context) error {
 			}
 			session.Activity = activity.set
 			session.Finished = activity.finish
-			var piHarness boxHarness = session
-			if due {
-				piHarness = &handoffStart{boxHarness: session, history: history, gen: hello.HandoffGen, marker: handoffMarker}
-			}
+			piHarness := &handoffStart{boxHarness: session, file: session.SessionFile, sessions: sessions, history: history, gen: hello.HandoffGen, marker: handoffMarker, pending: due}
 			h, files, steered = piHarness, func() []string { return []string{session.SessionFile()} }, func(sender contract.Interrupt) { jobs.StepAside(sender); interrupts.Send(sender) }
 		}
 	}

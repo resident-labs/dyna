@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/resident-labs/dyna/contract"
+	"github.com/resident-labs/dyna/harness/agy"
 )
 
 func conversation(t *testing.T, dir, name string, age time.Duration, question string) {
@@ -95,7 +96,7 @@ func markerText(t *testing.T, path string) string {
 func TestHandoffStartRecordsTheGenerationOnlyOnceTheFirstPromptIsAccepted(t *testing.T) {
 	marker := filepath.Join(t.TempDir(), "gen")
 	rec := &startRecorder{refuse: true}
-	h := &handoffStart{boxHarness: rec, history: "HISTORY", gen: "7", marker: marker}
+	h := &handoffStart{boxHarness: rec, file: func() string { return "" }, sessions: t.TempDir(), history: "HISTORY", gen: "7", marker: marker, pending: true}
 	inputs := []contract.TurnInput{{Text: "hello"}}
 	if _, err := h.Start(t.Context(), "t", inputs, func() {}); err == nil {
 		t.Fatal("the refusal was swallowed")
@@ -127,7 +128,7 @@ func TestHandoffStartRecordsTheGenerationOnlyOnceTheFirstPromptIsAccepted(t *tes
 // the new conversation as history.
 func TestHandoffStartWithNoHistoryStillRecordsTheGeneration(t *testing.T) {
 	marker := filepath.Join(t.TempDir(), "gen")
-	h := &handoffStart{boxHarness: &startRecorder{}, gen: "3", marker: marker}
+	h := &handoffStart{boxHarness: &startRecorder{}, file: func() string { return "" }, sessions: t.TempDir(), gen: "3", marker: marker, pending: true}
 	if _, err := h.Start(t.Context(), "t", []contract.TurnInput{{Text: "hi"}}, func() {}); err != nil {
 		t.Fatal(err)
 	}
@@ -140,7 +141,7 @@ func TestHandoffStartWithNoHistoryStillRecordsTheGeneration(t *testing.T) {
 func TestClearDropsThePendingHandoff(t *testing.T) {
 	marker := filepath.Join(t.TempDir(), "gen")
 	rec := &startRecorder{}
-	h := &handoffStart{boxHarness: rec, history: "HISTORY", gen: "7", marker: marker}
+	h := &handoffStart{boxHarness: rec, file: func() string { return "" }, sessions: t.TempDir(), history: "HISTORY", gen: "7", marker: marker, pending: true}
 	if err := h.NewConversation(t.Context()); err != nil || rec.cleared != 1 {
 		t.Fatalf("cleared %d: %v", rec.cleared, err)
 	}
@@ -155,23 +156,53 @@ func TestClearDropsThePendingHandoff(t *testing.T) {
 	}
 }
 
-// The history starts at the mirror file a /clear began, which agy's state records; the files before it stay on disk.
-func TestHandoffHistoryStartsAtTheClearBoundary(t *testing.T) {
+// Pi's /clear leaves the earlier files behind in the record agy's /clear uses, so a switch to agy carries none of their text.
+func TestPiClearThenAHandoffCarriesNothingBeforeIt(t *testing.T) {
 	dir := t.TempDir()
-	conversation(t, dir, "pig.jsonl", 4*time.Hour, "pi question before the clear")
-	conversation(t, dir, "agy-1.jsonl", 3*time.Hour, "agy question before the clear")
-	conversation(t, dir, "agy-2.jsonl", 2*time.Hour, "question after the clear")
-	if err := os.WriteFile(filepath.Join(dir, "agy-session.json"), []byte(`{"clearFrom":"agy-2.jsonl"}`), 0o600); err != nil {
+	conversation(t, dir, "old-pi.jsonl", 3*time.Hour, "question before the pi clear")
+	conversation(t, dir, "new-pi.jsonl", 2*time.Hour, "question after the pi clear")
+	h := &handoffStart{boxHarness: &startRecorder{}, file: func() string { return filepath.Join(dir, "new-pi.jsonl") }, sessions: dir}
+	if err := h.NewConversation(t.Context()); err != nil {
 		t.Fatal(err)
 	}
 	got, err := handoffHistory(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(got, "question after the clear") || strings.Contains(got, "before the clear") {
+	if !strings.Contains(got, "after the pi clear") || strings.Contains(got, "before the pi clear") {
 		t.Fatalf("history:\n%s", got)
 	}
-	if _, err := os.Stat(filepath.Join(dir, "pig.jsonl")); err != nil {
+	if _, err := os.Stat(filepath.Join(dir, "old-pi.jsonl")); err != nil {
 		t.Fatal("a transcript was deleted")
+	}
+}
+
+// agy's /clear (its harness records the files it leaves behind) then a switch to Pi carries none of them, and a Pi message written
+// after the clear survives whatever its file's modification time.
+func TestAgyClearBoundaryKeepsPostClearPiMessages(t *testing.T) {
+	dir := t.TempDir()
+	conversation(t, dir, "pi-before.jsonl", 5*time.Hour, "pi question before the clear")
+	conversation(t, dir, "agy-1.jsonl", 4*time.Hour, "agy question before the clear")
+	conversation(t, dir, "agy-2.jsonl", time.Hour, "agy question after the clear")
+	// A Pi file from after the clear whose modification time is older than the mirror's last write.
+	conversation(t, dir, "pi-after.jsonl", 2*time.Hour, "pi question after the clear")
+	if err := agy.MarkCleared(dir, "agy-2.jsonl"); err != nil {
+		t.Fatal(err)
+	}
+	// MarkCleared left behind every file but agy-2; the Pi file written after the clear is a new file and not in the record.
+	if err := os.WriteFile(filepath.Join(dir, "agy-session.json"), []byte(`{"cleared":["pi-before.jsonl","agy-1.jsonl"]}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	got, err := handoffHistory(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"agy question after the clear", "pi question after the clear"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("history lacks %q:\n%s", want, got)
+		}
+	}
+	if strings.Contains(got, "before the clear") {
+		t.Fatalf("history carries text from before the clear:\n%s", got)
 	}
 }
