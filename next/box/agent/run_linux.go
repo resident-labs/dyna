@@ -252,13 +252,11 @@ func Run(ctx context.Context) error {
 		} else {
 			pigNew := hello.Fresh
 			var history string
-			due := piHandoffDue(hello, handoffMarker)
-			if due {
-				if history, err = handoffHistory(sessions); err != nil {
-					return err
-				}
-				pigNew = true
+			state, err := loadHandoff(hello, handoffMarker)
+			if err != nil {
+				return err
 			}
+			pigNew = pigNew || state.Pending
 			interrupts := dynaext.NewInterrupts()
 			session, err := pig.Open(ctx, pig.Config{
 				Dir:               workdir,
@@ -275,9 +273,18 @@ func Run(ctx context.Context) error {
 			if err != nil {
 				return err
 			}
+			// A carried history whose input Pi never recorded is carried again, on the conversation it already opened.
+			if state.Pending, err = state.owed(func(seq contract.DeliverySeq) (bool, error) { return session.Delivered(ctx, seq) }); err != nil {
+				return err
+			}
+			if state.Pending {
+				if history, err = handoffHistory(sessions); err != nil {
+					return err
+				}
+			}
 			session.Activity = activity.set
 			session.Finished = activity.finish
-			piHarness := &handoffStart{boxHarness: session, file: session.SessionFile, sessions: sessions, history: history, gen: hello.HandoffGen, marker: handoffMarker, pending: due}
+			piHarness := &handoffStart{boxHarness: session, file: session.SessionFile, sessions: sessions, history: history, marker: handoffMarker, state: state}
 			h, files, steered = piHarness, func() []string { return []string{session.SessionFile()} }, func(sender contract.Interrupt) { jobs.StepAside(sender); interrupts.Send(sender) }
 		}
 	}

@@ -2,12 +2,11 @@ package agent
 
 import (
 	"context"
-	"log"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"slices"
 	"sort"
-	"strings"
 	"sync"
 
 	"github.com/resident-labs/dyna/contract"
@@ -45,41 +44,78 @@ func handoffHistory(sessions string) (string, error) {
 	return handoff.Build(paths, 0)
 }
 
-// piHandoffDue says Pi must open a new conversation: the hello hands a conversation over and Pi has not opened one for its generation.
-func piHandoffDue(hello contract.BoxHelloResponse, marker string) bool {
-	if !hello.Handoff {
-		return false
+// handoffState is what Pi has done for the handoff the engine last handed it, kept in the box state so a restart finds it. The engine
+// gives a handoff in the hello only until the first turn output reaches it, so a later start may carry none: this record is what says
+// Pi's history is still owed.
+type handoffState struct {
+	Gen string `json:"gen"`
+	// Pending says the history was not yet carried by a prompt. It stays so until a start writes the prompt that carries it.
+	Pending bool `json:"pending,omitempty"`
+	// Carrier is the input whose prompt carried the history: Pi's ledger of delivered inputs says whether it took it. PiG answers the
+	// preflight before it writes the prompt, so no callback can.
+	Carrier contract.DeliverySeq `json:"carrier,omitempty"`
+}
+
+func (s handoffState) save(path string) error {
+	data, err := json.Marshal(s)
+	if err != nil {
+		return err
 	}
-	data, _ := os.ReadFile(marker)
-	return strings.TrimSpace(string(data)) != hello.HandoffGen
+	return os.WriteFile(path, data, 0600)
+}
+
+// loadHandoff reads the state at marker, and records a new generation from the hello as pending before anything else happens, so no
+// crash after the hello loses it.
+func loadHandoff(hello contract.BoxHelloResponse, marker string) (handoffState, error) {
+	var state handoffState
+	if data, err := os.ReadFile(marker); err == nil {
+		if err := json.Unmarshal(data, &state); err != nil {
+			return state, err
+		}
+	}
+	if hello.Handoff && hello.HandoffGen != state.Gen {
+		state = handoffState{Gen: hello.HandoffGen, Pending: true}
+		return state, state.save(marker)
+	}
+	return state, nil
+}
+
+// owed says whether the history is still owed once Pi is open: it is when no prompt carried it, or when the one that did was never
+// recorded as delivered, as after a crash between the preflight and the write.
+func (s handoffState) owed(delivered func(contract.DeliverySeq) (bool, error)) (bool, error) {
+	if s.Pending || s.Carrier == 0 {
+		return s.Pending, nil
+	}
+	took, err := delivered(s.Carrier)
+	return !took, err
 }
 
 // handoffStart wraps Pi. A /clear records the files it leaves behind where agy's own does, so a later handoff reads none of them. While a
-// handoff is pending it also gives the first prompt the history of the conversation Pi takes over, as agy does for itself: the
-// generation goes to marker only once the harness accepts that prompt, so a refused start or a restart before it delivers the history
-// again; a /clear drops the history and records the generation the same way, so it is never given after the clear.
+// handoff is pending it also gives the first prompt the history of the conversation Pi takes over, as agy does for itself. Before that
+// prompt runs, marker records the input that carries it. A /clear drops the history and records the generation alone, so it is never
+// given after the clear, and fails if that cannot be recorded.
 type handoffStart struct {
 	boxHarness
-	sessions, history, gen, marker string
-	file                           func() string // the file the harness writes now
-	pending                        bool          // a handoff is due and not yet recorded
-	mu                             sync.Mutex
+	sessions, history, marker string
+	state                     handoffState
+	file                      func() string // the file the harness writes now
+	mu                        sync.Mutex
 }
 
 func (h *handoffStart) Start(ctx context.Context, turn contract.TurnID, inputs []contract.TurnInput, accepted func()) (contract.TurnEnded, error) {
 	h.mu.Lock()
-	history, open := h.history, h.pending
-	h.mu.Unlock()
-	if history != "" && len(inputs) > 0 {
-		inputs = append([]contract.TurnInput(nil), inputs...)
-		inputs[0].Text = handoff.Prompt(history, inputs[0].Text)
-	}
-	return h.boxHarness.Start(ctx, turn, inputs, func() {
-		if open {
-			h.settle()
+	if h.state.Pending && len(inputs) > 0 {
+		next := handoffState{Gen: h.state.Gen, Carrier: inputs[0].Delivery}
+		if err := next.save(h.marker); err != nil {
+			h.mu.Unlock()
+			return contract.TurnEnded{}, err
 		}
-		accepted()
-	})
+		inputs = append([]contract.TurnInput(nil), inputs...)
+		inputs[0].Text = handoff.Prompt(h.history, inputs[0].Text)
+		h.history, h.state = "", next
+	}
+	h.mu.Unlock()
+	return h.boxHarness.Start(ctx, turn, inputs, accepted)
 }
 
 func (h *handoffStart) NewConversation(ctx context.Context) error {
@@ -89,24 +125,14 @@ func (h *handoffStart) NewConversation(ctx context.Context) error {
 	if err := agy.MarkCleared(h.sessions, filepath.Base(h.file())); err != nil {
 		return err
 	}
-	if h.pendingNow() {
-		h.settle()
-	}
-	return nil
-}
-
-func (h *handoffStart) pendingNow() bool {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	return h.pending
-}
-
-// settle drops the history and records its generation as dealt with.
-func (h *handoffStart) settle() {
-	h.mu.Lock()
-	h.history, h.pending = "", false
-	h.mu.Unlock()
-	if err := os.WriteFile(h.marker, []byte(h.gen), 0600); err != nil {
-		log.Printf("record the handoff generation: %v", err)
+	if h.state.Pending {
+		next := handoffState{Gen: h.state.Gen}
+		if err := next.save(h.marker); err != nil {
+			return err
+		}
+		h.history, h.state = "", next
 	}
+	return nil
 }
