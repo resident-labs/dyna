@@ -122,6 +122,7 @@ func (p *Poller) repository(ctx context.Context, repo contract.RepoName, pulls [
 	if err != nil {
 		return pass, err
 	}
+	degraded = probe.Degraded
 	now, viewer := p.Now(), client.Viewer()
 	items := map[int][]contract.GitHubItem{}
 	for _, item := range probe.Items {
@@ -140,7 +141,7 @@ func (p *Poller) repository(ctx context.Context, repo contract.RepoName, pulls [
 		if probe.GapFrom.IsZero() || ctx.Err() != nil {
 			return pass, err
 		}
-		degraded = fmt.Errorf("tracked PR details: %w", err)
+		degraded = errors.Join(degraded, fmt.Errorf("tracked PR details: %w", err))
 	}
 	for _, row := range pulls {
 		if !watched(row.State == contract.PrOpen, row.Number) {
@@ -163,7 +164,7 @@ func (p *Poller) repository(ctx context.Context, repo contract.RepoName, pulls [
 				if probe.GapFrom.IsZero() || ctx.Err() != nil {
 					return pass, err
 				}
-				degraded = fmt.Errorf("tracked issue recovery: %w", err)
+				degraded = errors.Join(degraded, fmt.Errorf("tracked issue recovery: %w", err))
 			}
 			if err == nil {
 				listed, state = &item, contract.IssueState(item.State)
@@ -201,7 +202,7 @@ func (p *Poller) repository(ctx context.Context, repo contract.RepoName, pulls [
 			if probe.GapFrom.IsZero() || ctx.Err() != nil {
 				return pass, err
 			}
-			degraded = fmt.Errorf("default branch checks: %w", err)
+			degraded = errors.Join(degraded, fmt.Errorf("default branch checks: %w", err))
 		}
 		for _, head := range unsettled {
 			ci, ok := reads[head.Sha]

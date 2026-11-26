@@ -694,7 +694,7 @@ func (s *Server) serveREST(w http.ResponseWriter, r *http.Request) {
 			return cmp.Or(b.updated.Compare(a.updated), cmp.Compare(b.number, a.number))
 		})
 		for _, row := range rows {
-			if pull := s.pulls[key(repo, row.number)]; pull != nil && pull.State == "OPEN" {
+			if pull := s.pulls[key(repo, row.number)]; pull != nil && (pull.State == "OPEN" || r.URL.Query().Get("state") == "all") {
 				list = append(list, s.itemNode(repo, row))
 			}
 		}

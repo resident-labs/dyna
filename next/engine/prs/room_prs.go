@@ -13,39 +13,53 @@ import (
 	"github.com/resident-labs/dyna/engine/store"
 )
 
-const feedRoomRecovery = "room_pr_recovery"
+const (
+	feedRoomRecovery = "room_pr_recovery"
+	roomPRReadBudget = 20 * time.Second // census, recovery and room-only detail reads share this budget
+)
 
 // roomPRs shares the repository feeds. Only the initial census lists every open PR;
-// a gap lists just recently updated open PRs. Detail reads enrich, but never block, the feed snapshots.
+// a gap lists just recently updated PRs. Detail reads enrich, but never block, the feed snapshots.
 func (p *Poller) roomPRs(ctx context.Context, client *Client, repo contract.RepoName, probe *Probe, recovery store.GitHubFeed, now time.Time, observed map[int]*Observed) ([]store.RoomPRPass, error, error) {
 	watches, err := p.Store.RoomPRWatches(ctx, repo)
 	if err != nil || len(watches) == 0 {
 		return nil, nil, err
 	}
+	readCtx, cancel := context.WithTimeout(ctx, roomPRReadBudget)
+	defer cancel()
 	listed := maps.Clone(probe.Seen)
-	census := slices.ContainsFunc(watches, func(w store.RoomPRWatch) bool { return w.CensusAt == 0 })
+	pendingCensus := slices.ContainsFunc(watches, func(w store.RoomPRWatch) bool { return w.CensusAt == 0 })
 	var degraded error
 	from := recovery.Cursor.At
 	if !probe.GapFrom.IsZero() && (from.IsZero() || probe.GapFrom.Before(from)) {
 		from = probe.GapFrom
 	}
-	censusOnly := map[int]bool{}
+	// A catch-up also lists recently closed PRs to reconcile known snapshots. If a
+	// room needs its first census, list all open PRs on the next pass instead.
+	census := pendingCensus && from.IsZero()
 	if census || !from.IsZero() {
-		next := fmt.Sprintf("/repos/%s/pulls?state=open&sort=updated&direction=desc&per_page=30", repo)
-		for next != "" {
-			header, data, err := client.get(ctx, next, "")
+		state := "all"
+		if census {
+			state = "open"
+		}
+		next := fmt.Sprintf("/repos/%s/pulls?state=%s&sort=updated&direction=desc&per_page=30", repo, state)
+		for page := 0; next != ""; page++ {
+			if page == maxFeedPages {
+				degraded = fmt.Errorf("PR list: exceeded %d pages", maxFeedPages)
+				break
+			}
+			header, data, err := client.get(readCtx, next, "")
 			var items []restItem
 			if err == nil {
 				err = json.Unmarshal(data, &items)
 			}
 			if err != nil {
-				degraded = fmt.Errorf("open PR list: %w", err)
+				degraded = fmt.Errorf("PR list: %w", err)
 				break
 			}
 			next = nextPage(header.Get("Link"))
 			for _, item := range items {
-				old := from.IsZero() || item.UpdatedAt.Before(from)
-				if !census && old {
+				if !census && item.UpdatedAt.Before(from) {
 					next = ""
 					break
 				}
@@ -53,7 +67,6 @@ func (p *Poller) roomPRs(ctx context.Context, client *Client, repo contract.Repo
 					f := item.feedItem()
 					f.Kind = contract.GitHubPR
 					listed[f.Number] = &f
-					censusOnly[f.Number] = old
 				}
 			}
 		}
@@ -78,7 +91,7 @@ func (p *Poller) roomPRs(ctx context.Context, client *Client, repo contract.Repo
 			}
 		}
 		for n, f := range listed {
-			if f.Kind == contract.GitHubPR && (w.CensusAt == 0 || !censusOnly[n]) {
+			if f.Kind == contract.GitHubPR && (w.CensusAt == 0 || !census || probe.Seen[n] != nil) {
 				if _, ok := w.Rows[n]; !ok && f.State == "open" {
 					numbers[n] = true
 				}
@@ -97,7 +110,7 @@ func (p *Poller) roomPRs(ctx context.Context, client *Client, repo contract.Repo
 	// Keep successful chunks and let feed snapshots through if a detail query fails.
 	slices.Sort(ns)
 	for batch := range slices.Chunk(ns, 10) {
-		extra, err := client.Read(ctx, repo, batch)
+		extra, err := client.Read(readCtx, repo, batch)
 		if err != nil {
 			degraded = errors.Join(degraded, fmt.Errorf("PR details: %w", err))
 			break
@@ -112,7 +125,7 @@ func (p *Poller) roomPRs(ctx context.Context, client *Client, repo contract.Repo
 			row, exists := w.Rows[n]
 			if !exists {
 				f := listed[n]
-				if f == nil || f.Kind != contract.GitHubPR || f.State != "open" || initialized && censusOnly[n] {
+				if f == nil || f.Kind != contract.GitHubPR || f.State != "open" || initialized && census && probe.Seen[n] == nil {
 					continue
 				}
 				opened := slices.ContainsFunc(actions[n], func(item contract.GitHubItem) bool { return item.Action == contract.GitHubOpened })
