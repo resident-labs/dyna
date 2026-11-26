@@ -16,19 +16,16 @@ import (
 // so nothing is linked into it.
 var agyContextFiles = []string{"/box/pi/AGENTS.md", "/box/work/AGENTS.md"}
 
-// agyInstructions puts each readable, non-empty file once after the hello's instructions, labelled as PiG labels a project context
-// file in its prompt. A file edited later applies at the next open of a session.
-func agyInstructions(base string, paths []string) string {
-	parts := []string{"Project-specific instructions and guidelines:"}
+// agyProjectInstructions reads each readable, non-empty file once, labelled as PiG labels a project context file in its prompt. The
+// harness sends them with the session instructions on the first prompt. A file edited later applies at the next open of a session.
+func agyProjectInstructions(paths []string) []string {
+	var out []string
 	for _, path := range paths {
 		if data, err := os.ReadFile(path); err == nil && strings.TrimSpace(string(data)) != "" {
-			parts = append(parts, `<project_instructions path="`+path+`">`+"\n"+string(data)+"\n</project_instructions>")
+			out = append(out, `<project_instructions path="`+path+`">`+"\n"+string(data)+"\n</project_instructions>")
 		}
 	}
-	if len(parts) == 1 {
-		return base
-	}
-	return base + "\n\n" + strings.Join(parts, "\n\n")
+	return out
 }
 
 // openAgy opens the session's agy harness in place of PiG: the dyna tools, and GitHub's when the engine serves them, are its MCP servers.
@@ -42,15 +39,16 @@ func openAgy(ctx context.Context, hello contract.BoxHelloResponse, workdir, sess
 		servers = append(servers, agy.MCPServer{Name: "github", URL: pig.GitHubMCPURL})
 	}
 	return agy.Open(ctx, agy.Config{
-		Binary:            hello.Agy.Binary,
-		GeminiDir:         hello.Agy.GeminiDir,
-		Dir:               workdir,
-		SessionDir:        sessions,
-		Model:             hello.Model,
-		Instructions:      agyInstructions(hello.Instructions, contextFiles),
-		ModelInstructions: hello.ModelInstructions,
-		MCPServers:        servers,
-		New:               hello.Fresh,
-		Notice:            notice,
+		Binary:              hello.Agy.Binary,
+		GeminiDir:           hello.Agy.GeminiDir,
+		Dir:                 workdir,
+		SessionDir:          sessions,
+		Model:               hello.Model,
+		Instructions:        hello.Instructions,
+		ProjectInstructions: agyProjectInstructions(contextFiles),
+		ModelInstructions:   hello.ModelInstructions,
+		MCPServers:          servers,
+		New:                 hello.Fresh,
+		Notice:              notice,
 	})
 }

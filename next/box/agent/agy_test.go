@@ -51,31 +51,41 @@ func TestAgySessionGetsTheRoomInstructionsOnce(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer h.Close()
+	turn := []contract.TurnInput{{Text: "say hi"}}
+	for _, id := range []contract.TurnID{"t1", "t2"} {
+		if _, err := h.Start(t.Context(), id, turn, func() {}); err != nil {
+			t.Fatal(err)
+		}
+	}
 	data, _ := os.ReadFile(log)
-	var appended string
+	var prompts []string
 	for _, line := range bytes.Split(data, []byte("\n")) {
 		var m struct {
 			Method string `json:"method"`
 			Params struct {
-				Meta struct {
-					Antigravity struct {
-						SystemPrompt struct {
-							Append string `json:"append"`
-						} `json:"systemPrompt"`
-					} `json:"antigravity"`
-				} `json:"_meta"`
+				Prompt []struct {
+					Text string `json:"text"`
+				} `json:"prompt"`
 			} `json:"params"`
 		}
-		if json.Unmarshal(line, &m) == nil && m.Method == "session/new" {
-			appended = m.Params.Meta.Antigravity.SystemPrompt.Append
+		if json.Unmarshal(line, &m) == nil && m.Method == "session/prompt" {
+			var text string
+			for _, b := range m.Params.Prompt {
+				text += b.Text
+			}
+			prompts = append(prompts, text)
 		}
 	}
+	if len(prompts) != 2 || strings.Contains(prompts[1], "RULE") {
+		t.Fatalf("the rules ride on the first prompt only: %q", prompts)
+	}
+	appended := prompts[0]
 	for _, want := range []string{"be Dyna", "GLOBAL RULE", "ROOM RULE", `<project_instructions path="` + global + `">`} {
 		if strings.Count(appended, want) != 1 {
 			t.Fatalf("%q appears %d times in %q", want, strings.Count(appended, want), appended)
 		}
 	}
-	if entries, _ := os.ReadDir(profile); len(entries) != 0 {
-		t.Fatalf("the profile folder was written: %v", entries)
+	if _, err := os.Stat(filepath.Join(profile, "AGENTS.md")); err == nil {
+		t.Fatal("an instruction file was written into the profile folder")
 	}
 }
