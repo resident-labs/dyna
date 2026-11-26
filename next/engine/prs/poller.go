@@ -88,6 +88,8 @@ func reopens(items []contract.GitHubItem) bool {
 
 // repository keeps feed writes and events together. After a gap, failed enrichment
 // cannot hold the cursor behind the feed's available history.
+// A non-gap item-feed or tracked-detail failure still discards that repository pass
+// so tracked changes can be retried with their original actions.
 func (p *Poller) repository(ctx context.Context, repo contract.RepoName, pulls []store.TrackedPR, issues []store.TrackedIssue, heads map[contract.RepoName]store.RepoState, feeds map[string]store.GitHubFeed) (pass store.GitHubPass, problem error) {
 	var degraded error
 	defer func() {
@@ -216,7 +218,7 @@ func (p *Poller) repository(ctx context.Context, repo contract.RepoName, pulls [
 		}
 	}
 	var roomProblem error
-	pass.RoomPRs, roomProblem, err = p.roomPRs(ctx, client, repo, &probe, feeds[feedRoomRecovery], now, observed)
+	pass.RoomPRs, roomProblem, err = p.roomPRs(ctx, client, repo, &probe, feeds, now, observed)
 	degraded = errors.Join(degraded, roomProblem)
 	if err != nil {
 		return pass, err

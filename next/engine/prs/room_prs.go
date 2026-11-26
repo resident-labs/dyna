@@ -15,12 +15,13 @@ import (
 
 const (
 	feedRoomRecovery = "room_pr_recovery"
+	feedRoomCensus   = "room_pr_census"
 	roomPRReadBudget = 20 * time.Second // census, recovery and room-only detail reads share this budget
 )
 
 // roomPRs shares the repository feeds. Only the initial census lists every open PR;
 // a gap lists just recently updated PRs. Detail reads enrich, but never block, the feed snapshots.
-func (p *Poller) roomPRs(ctx context.Context, client *Client, repo contract.RepoName, probe *Probe, recovery store.GitHubFeed, now time.Time, observed map[int]*Observed) ([]store.RoomPRPass, error, error) {
+func (p *Poller) roomPRs(ctx context.Context, client *Client, repo contract.RepoName, probe *Probe, feeds map[string]store.GitHubFeed, now time.Time, observed map[int]*Observed) ([]store.RoomPRPass, error, error) {
 	watches, err := p.Store.RoomPRWatches(ctx, repo)
 	if err != nil || len(watches) == 0 {
 		return nil, nil, err
@@ -28,24 +29,43 @@ func (p *Poller) roomPRs(ctx context.Context, client *Client, repo contract.Repo
 	readCtx, cancel := context.WithTimeout(ctx, roomPRReadBudget)
 	defer cancel()
 	listed := maps.Clone(probe.Seen)
-	pendingCensus := slices.ContainsFunc(watches, func(w store.RoomPRWatch) bool { return w.CensusAt == 0 })
+	var rooms []contract.RoomID
+	for _, w := range watches {
+		if w.CensusAt == 0 {
+			rooms = append(rooms, w.Room)
+		}
+	}
+	slices.Sort(rooms)
 	var degraded error
-	from := recovery.Cursor.At
+	progress := feeds[feedRoomRecovery].Cursor
+	from := progress.At
 	if !probe.GapFrom.IsZero() && (from.IsZero() || probe.GapFrom.Before(from)) {
 		from = probe.GapFrom
+		progress.NextPage = ""
 	}
 	// A catch-up also lists recently closed PRs to reconcile known snapshots. If a
 	// room needs its first census, list all open PRs on the next pass instead.
-	census := pendingCensus && from.IsZero()
+	census := len(rooms) > 0 && from.IsZero()
+	next := ""
 	if census || !from.IsZero() {
 		state := "all"
 		if census {
 			state = "open"
 		}
-		next := fmt.Sprintf("/repos/%s/pulls?state=%s&sort=updated&direction=desc&per_page=30", repo, state)
+		next = progress.NextPage
+		if census {
+			saved := feeds[feedRoomCensus].Cursor
+			// A newly enabled room did not receive the preceding pages.
+			if slices.Equal(rooms, saved.CensusRooms) {
+				next = saved.NextPage
+			}
+		}
+		if next == "" {
+			next = fmt.Sprintf("/repos/%s/pulls?state=%s&sort=updated&direction=desc&per_page=30", repo, state)
+		}
 		for page := 0; next != ""; page++ {
 			if page == maxFeedPages {
-				degraded = fmt.Errorf("PR list: exceeded %d pages", maxFeedPages)
+				degraded = fmt.Errorf("PR list: continuing next pass after %d pages", maxFeedPages)
 				break
 			}
 			header, data, err := client.get(readCtx, next, "")
@@ -71,13 +91,24 @@ func (p *Poller) roomPRs(ctx context.Context, client *Client, repo contract.Repo
 			}
 		}
 	}
-	censusComplete := census && degraded == nil
-	// Retain the lower bound on an incomplete recovery, independently of live feed cursors.
-	if degraded == nil {
-		from = time.Time{}
-	}
-	if !from.Equal(recovery.Cursor.At) {
-		probe.Feeds = append(probe.Feeds, store.GitHubFeed{Repo: repo, Feed: feedRoomRecovery, Cursor: store.FeedCursor{At: from}})
+	censusComplete := census && next == ""
+	// Commit the continuation with the snapshots, independently of the live feed cursors.
+	if census {
+		saved := feeds[feedRoomCensus].Cursor
+		if next == "" {
+			rooms = nil
+		}
+		if next != saved.NextPage || !slices.Equal(rooms, saved.CensusRooms) {
+			probe.Feeds = append(probe.Feeds, store.GitHubFeed{Repo: repo, Feed: feedRoomCensus, Cursor: store.FeedCursor{NextPage: next, CensusRooms: rooms}})
+		}
+	} else {
+		if next == "" {
+			from = time.Time{}
+		}
+		saved := feeds[feedRoomRecovery].Cursor
+		if next != saved.NextPage || !from.Equal(saved.At) {
+			probe.Feeds = append(probe.Feeds, store.GitHubFeed{Repo: repo, Feed: feedRoomRecovery, Cursor: store.FeedCursor{At: from, NextPage: next}})
+		}
 	}
 	actions := map[int][]contract.GitHubItem{}
 	for _, item := range probe.Items {

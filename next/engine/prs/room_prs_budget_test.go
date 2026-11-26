@@ -186,3 +186,50 @@ func TestRoomPRRecoveryReconcilesKnownClosedPR(t *testing.T) {
 		t.Fatalf("recovery reported complete but known PR 2 stayed %s; status=%q", row.State, s.PRPollStatus(repo))
 	}
 }
+func TestRoomPRCensusResumesAfterPageBudget(t *testing.T) {
+	ctx := t.Context()
+	s, err := store.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	const repo contract.RepoName = "owner/repo"
+	if err := s.CreateRoom(ctx, "room", "room", at); err != nil {
+		t.Fatal(err)
+	}
+	enabled := true
+	if err := s.AddRoomRepo(ctx, "room", repo, true, &enabled); err != nil {
+		t.Fatal(err)
+	}
+	c, server, clock := client(t)
+	server.Add(fakegithub.Pull{Repo: repo, Number: 1})
+	base := c.Transport
+	last := 0
+	c.Transport = pollTransport(func(r *http.Request) (*http.Response, error) {
+		if r.URL.Path != "/repos/owner/repo/pulls" {
+			return base.RoundTrip(r)
+		}
+		p := 1
+		fmt.Sscanf(r.URL.Query().Get("page"), "%d", &p)
+		last = max(last, p)
+		w := httptest.NewRecorder()
+		if p < 35 {
+			w.Header().Set("Link", fmt.Sprintf(`<%s?page=%d>; rel="next"`, r.URL.Path, p+1))
+		}
+		fmt.Fprint(w, `[{"number":1,"state":"open","updated_at":"2026-11-26T23:00:00Z"}]`)
+		return w.Result(), nil
+	})
+	for i := 0; i < 3; i++ {
+		p := Poller{Store: s, GitHub: c, Now: clock.Now}
+		if err := p.Pass(ctx); err != nil {
+			t.Fatal(err)
+		}
+	}
+	rows, err := s.RoomPRWatches(ctx, repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if last < 35 || rows[0].CensusAt == 0 {
+		t.Fatalf("three bounded passes (fresh pollers) reached page %d, census complete=%t, status=%s", last, rows[0].CensusAt != 0, s.PRPollStatus(repo))
+	}
+}

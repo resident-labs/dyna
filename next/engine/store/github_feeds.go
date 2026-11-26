@@ -13,11 +13,13 @@ import (
 // and Seen holds the items near it by their GitHub IDs, each with its time, because a feed can show an older item late. Start
 // is where the feed began: nothing from then or before is news. Branch and Head belong to the default branch's feed.
 type FeedCursor struct {
-	At     time.Time        `json:"at,omitzero"`
-	Start  time.Time        `json:"start,omitzero"`
-	Seen   map[string]int64 `json:"seen,omitempty"`
-	Branch string           `json:"branch,omitempty"`
-	Head   string           `json:"head,omitempty"`
+	At          time.Time         `json:"at,omitzero"`
+	Start       time.Time         `json:"start,omitzero"`
+	Seen        map[string]int64  `json:"seen,omitempty"`
+	Branch      string            `json:"branch,omitempty"`
+	Head        string            `json:"head,omitempty"`
+	NextPage    string            `json:"nextPage,omitempty"`    // PR census or gap recovery continuation.
+	CensusRooms []contract.RoomID `json:"censusRooms,omitempty"` // Rooms that received the earlier census pages.
 }
 
 // GitHubFeed is one github_feeds row. A row's ETag only moves with its cursor, in the write that holds what they found.
