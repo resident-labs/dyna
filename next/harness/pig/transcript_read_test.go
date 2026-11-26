@@ -165,7 +165,7 @@ func TestTranscriptPlacesSteerWhereItWasRead(t *testing.T) {
 func TestTranscriptRecentKeepsFinalText(t *testing.T) {
 	data := `{"type":"message","message":{"role":"user","deliveryId":"1"}}` + "\n" + `{"type":"message","id":"final","message":{"role":"assistant","content":[{"type":"text","text":"answer"}]}}` + "\n"
 	data += strings.Repeat(`{"type":"message","id":"tool","message":{"role":"assistant","content":[{"type":"toolCall","id":"call","name":"read","arguments":{}}]}}`+"\n", 300)
-	items, seen, more, err := readTranscriptMode(strings.NewReader(data), map[contract.DeliverySeq]contract.TurnID{1: "t"}, nil, "file", "", 0, 256, 16<<20, true)
+	items, seen, more, err := readTranscriptMode(strings.NewReader(data), map[contract.DeliverySeq]contract.TurnID{1: "t"}, nil, "file", "", 0, 256, 16<<20, true, false)
 	if err != nil || !more || seen != 301 || len(items) != 256 || items[0].Text != "answer" || items[0].Index != 0 {
 		t.Fatalf("seen=%d more=%v count=%d error=%v", seen, more, len(items), err)
 	}

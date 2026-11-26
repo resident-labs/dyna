@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"math"
 	"strconv"
 	"strings"
 	"time"
@@ -39,10 +40,10 @@ func ReadTranscript(r io.ReadSeeker, deliveries map[contract.DeliverySeq]contrac
 }
 
 func readTranscript(r io.ReadSeeker, deliveries map[contract.DeliverySeq]contract.TurnID, source, fullItem string, skip, limit int, maxRecord int64) ([]TranscriptItem, int, bool, error) {
-	return readTranscriptMode(r, deliveries, nil, source, fullItem, skip, limit, maxRecord, false)
+	return readTranscriptMode(r, deliveries, nil, source, fullItem, skip, limit, maxRecord, false, false)
 }
 
-func readTranscriptMode(r io.ReadSeeker, deliveries map[contract.DeliverySeq]contract.TurnID, steers map[contract.DeliverySeq]bool, source, fullItem string, skip, limit int, maxRecord int64, recent bool) ([]TranscriptItem, int, bool, error) {
+func readTranscriptMode(r io.ReadSeeker, deliveries map[contract.DeliverySeq]contract.TurnID, steers map[contract.DeliverySeq]bool, source, fullItem string, skip, limit int, maxRecord int64, recent, history bool) ([]TranscriptItem, int, bool, error) {
 	removed, err := transcriptRemovedMessages(r)
 	if err != nil {
 		return nil, 0, false, err
@@ -163,6 +164,17 @@ func readTranscriptMode(r io.ReadSeeker, deliveries map[contract.DeliverySeq]con
 			id, _ := strconv.ParseInt(m.DeliveryID, 10, 64)
 			delivery := contract.DeliverySeq(id)
 			turn = deliveries[delivery]
+			if history {
+				// A handoff reads the conversation whole, so the user's words are items and one turn covers the file.
+				turn = historyTurn
+				if text := userText(m.Content); text != "" {
+					item := TranscriptItem{TranscriptItem: contract.TranscriptItem{ID: transcriptItemID(entry.ID), Turn: turn, Kind: TranscriptUser, At: entry.Timestamp, Text: harness.Mask(text)}}
+					if keep(&item) {
+						items = append(items, &item)
+					}
+				}
+				continue
+			}
 			if turn != "" && steers[delivery] {
 				item := TranscriptItem{TranscriptItem: contract.TranscriptItem{ID: "steer:" + m.DeliveryID, Turn: turn, Kind: contract.TranscriptSteer, At: entry.Timestamp}, Delivery: delivery}
 				if keep(&item) {
@@ -223,7 +235,7 @@ func readTranscriptMode(r io.ReadSeeker, deliveries map[contract.DeliverySeq]con
 				if !keep(&item) {
 					continue
 				}
-				if item.ID != fullItem {
+				if item.ID != fullItem && !history {
 					item.More = len(item.Text) > 8192 || len(item.Arguments) > 8192 || len(item.Script) > 8192
 					if len(item.Script) > 8192 {
 						item.Script = strings.ToValidUTF8(item.Script[:8192], "")
@@ -304,6 +316,9 @@ func readTranscriptMode(r io.ReadSeeker, deliveries map[contract.DeliverySeq]con
 				item.Diff = harness.Mask(m.Details.Diff)
 			}
 			item.Ended = &entry.Timestamp
+			if history {
+				continue
+			}
 			if item.ID != fullItem && len(item.Diff) > 8192 {
 				item.Diff = strings.ToValidUTF8(item.Diff[:8192], "")
 				item.More = true
@@ -367,4 +382,37 @@ func clipToolName(name string) string {
 		return name
 	}
 	return strings.ToValidUTF8(name[:256], "")
+}
+
+// TranscriptUser is a user message. Only ReadConversation produces it, so it is not part of the wire contract: a turn lists its inputs separately.
+const TranscriptUser contract.TranscriptItemKind = "user"
+
+// historyTurn is the one turn ReadConversation puts every item in.
+const historyTurn contract.TurnID = "history"
+
+// ReadConversation decodes a whole session file for a context handoff, with the decoding every transcript reader uses: the
+// user's messages as TranscriptUser items, the assistant's text, thinking and tool calls with their results, in file order. Text
+// is masked and not clipped; the caller bounds what it keeps.
+func ReadConversation(r io.ReadSeeker, source string) ([]TranscriptItem, error) {
+	items, _, _, err := readTranscriptMode(r, nil, nil, source, "", 0, math.MaxInt, 16<<20, false, true)
+	return items, err
+}
+
+// userText is the text of a user message: Pi records a string or a list of blocks.
+func userText(content json.RawMessage) string {
+	var text string
+	if json.Unmarshal(content, &text) == nil {
+		return text
+	}
+	var blocks []struct{ Type, Text string }
+	if json.Unmarshal(content, &blocks) != nil {
+		return ""
+	}
+	var parts []string
+	for _, b := range blocks {
+		if b.Type == "text" && b.Text != "" {
+			parts = append(parts, b.Text)
+		}
+	}
+	return strings.Join(parts, "\n")
 }

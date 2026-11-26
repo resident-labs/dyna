@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -16,6 +17,7 @@ import (
 	"github.com/resident-labs/dyna/contract"
 	"github.com/resident-labs/dyna/harness"
 	"github.com/resident-labs/dyna/harness/agy/acp"
+	"github.com/resident-labs/dyna/harness/agy/handoff"
 	"github.com/resident-labs/dyna/harness/agy/sessiondb"
 )
 
@@ -28,9 +30,15 @@ const (
 	defaultWatchEvery       = 10 * time.Second
 )
 
+// slashCommand is T3's test for a message that opens a native command (ContextHandoffDelivery.ts SLASH_COMMAND): a first word with a second slash is a path.
+var slashCommand = regexp.MustCompile(`^\s*/[^\s/]+(?:\s|$)`)
+
 // askOwnerLine tells agy what to do instead of asking the user in its own way: Dyna answers agy's native questions and forms as cancelled
 // (T3 shows them to the user; Dyna has nobody to ask).
 const askOwnerLine = "You cannot ask the owner questions through Antigravity's own question prompts or forms; they are cancelled. To ask the owner something, use Dyna's question tool."
+
+// helpLine is there because agy does not show its model the tools' field descriptions: each dyna tool lists its actions and fields in its help action.
+const helpLine = "Before first using a dyna tool, call its `help` action: it lists the actions and each field."
 
 var errInactive = errors.New("agy sent no update for too long; the turn was ended")
 
@@ -110,10 +118,14 @@ func (h *Harness) Start(ctx context.Context, id contract.TurnID, inputs []contra
 	broken := h.broken
 	h.mu.Unlock()
 	if broken {
-		// The saved conversation fails every prompt (T3 Outcome:53-55, 231-241). T3 starts a fresh session with a portable
-		// handoff of the thread's context; that is a later change here, so for now the context is not carried over.
-		h.notice("agy's saved conversation can no longer be sent to the model; a blank one is opened, without the old context")
-		if err := h.NewConversationForce(ctx); err != nil {
+		// The saved conversation fails every prompt (T3 Outcome:53-55, 231-241): T3 starts a fresh session with a portable handoff of
+		// the thread's context, and so does this, from the mirror files.
+		carried, gen, local, err := h.mirrorHandoff()
+		if err != nil {
+			return contract.TurnEnded{Turn: id}, err
+		}
+		h.notice("agy's saved conversation can no longer be sent to the model; a new one is opened and the earlier conversation is handed to it")
+		if err := h.freshConversation(ctx, carried, gen, local); err != nil {
 			return contract.TurnEnded{Turn: id}, err
 		}
 	}
@@ -286,18 +298,18 @@ type told struct {
 // around it. A steer carries only the changed context entries, its text and attachments, with no instructions and no runtime
 // info (adapter.ts:10875-10899), and counts what the turn's earlier prompts offered as seen, so overlapping prompts do not
 // repeat it. It returns what to mark as told once the prompt has been answered (adapter.ts:10185-10225).
-func (h *Harness) promptBlocks(t *turn, inputs []contract.TurnInput, p *process, steer bool) ([]map[string]any, func(bool), error) {
+func (h *Harness) promptBlocks(t *turn, inputs []contract.TurnInput, p *process, steer bool) (blocks []map[string]any, commit func(bool), carried bool, err error) {
 	// The attachments are read first, so that nothing is offered until the prompt can be built.
 	var attachments []map[string]any
 	var total int64
 	for _, input := range inputs {
 		attached, err := attachmentBlocks(input.Files, p, &total)
 		if err != nil {
-			return nil, nil, err
+			return nil, nil, false, err
 		}
 		attachments = append(attachments, attached...)
 	}
-	slash := strings.HasPrefix(strings.TrimSpace(inputs[0].Text), "/")
+	slash := slashCommand.MatchString(inputs[0].Text)
 	// What the prompt offers is read, built and recorded as offered in one scope, so a prompt built meanwhile sees it and neither
 	// overwrites the other's state (T3 does this in one step of the turn's run, adapter.ts:10867-10899).
 	h.mu.Lock()
@@ -307,7 +319,6 @@ func (h *Harness) promptBlocks(t *turn, inputs []contract.TurnInput, p *process,
 	if offeredBefore != nil && offeredBefore.gen == state.gen {
 		state = *offeredBefore
 	}
-	var blocks []map[string]any
 	next := told{gen: state.gen, instructions: state.instructions, context: map[string]string{}, runtime: state.runtime}
 	for k, v := range state.context {
 		next.context[k] = v
@@ -325,12 +336,22 @@ func (h *Harness) promptBlocks(t *turn, inputs []contract.TurnInput, p *process,
 	instructions := ""
 	if !slash && !steer && !state.instructions {
 		parts := slices.DeleteFunc(append([]string{h.cfg.Instructions}, h.cfg.ProjectInstructions...), func(s string) bool { return s == "" })
-		parts = append(parts, askOwnerLine)
+		parts = append(parts, askOwnerLine, helpLine)
 		instructions = "<dyna_instructions>\n" + strings.Join(parts, "\n\n") + "\n</dyna_instructions>"
 		next.instructions = true
 	}
 	for i, input := range inputs {
 		text := input.Text
+		if i == 0 && !slash && !steer && (h.handoff != "" && h.hstatus == handoffPending || h.fbText != "" && h.fbStatus == handoffPending) {
+			// T3 puts the history ahead of the user's text in the same message (ContextHandoffDelivery.ts withInlineContext); a slash command is
+			// not given it, as T3 defers the context to the turn after (isSlashCommandMessage).
+			if h.handoff != "" && h.hstatus == handoffPending {
+				text, h.hstatus, h.carryKind = handoff.Prompt(h.handoff, text), handoffSending, "engine"
+			} else {
+				text, h.fbStatus, h.carryKind = handoff.Prompt(h.fbText, text), handoffSending, "fallback"
+			}
+			carried = true
+		}
 		if i == 0 && instructions != "" {
 			text = instructions + "\n\n<user_request>\n" + text + "\n</user_request>"
 		}
@@ -353,7 +374,7 @@ func (h *Harness) promptBlocks(t *turn, inputs []contract.TurnInput, p *process,
 	t.seq++
 	seq := t.seq
 	// commit runs with Harness.mu held, in the same scope that settles the prompt, before anything wakes the turn.
-	commit := func(failed bool) {
+	commit = func(failed bool) {
 		if h.told.gen != next.gen {
 			return
 		}
@@ -382,7 +403,7 @@ func (h *Harness) promptBlocks(t *turn, inputs []contract.TurnInput, p *process,
 			h.told.runtime = next.runtime
 		}
 	}
-	return blocks, commit, nil
+	return blocks, commit, carried, nil
 }
 
 // resetTold makes the next prompt carry everything again: agy's process restarted, or its conversation was compacted or is new
@@ -404,7 +425,7 @@ func (h *Harness) begin(t *turn, inputs []contract.TurnInput, started func(), st
 	h.mu.Lock()
 	p, sid := h.p, h.sessionID
 	h.mu.Unlock()
-	blocks, commit, err := h.promptBlocks(t, inputs, p, steer)
+	blocks, commit, carried, err := h.promptBlocks(t, inputs, p, steer)
 	if err != nil {
 		h.mu.Lock()
 		t.open--
@@ -412,6 +433,24 @@ func (h *Harness) begin(t *turn, inputs []contract.TurnInput, started func(), st
 		h.mu.Unlock()
 		t.signal()
 		return err
+	}
+	if carried {
+		// The history is marked as being sent before the wire write, so a crash after it is told from one before it (T3 persists the
+		// delivery as pending around the injection, ContextHandoffDelivery.ts). A mark that cannot be saved stops the send.
+		if err := h.writeState(); err != nil {
+			h.mu.Lock()
+			if h.carryKind == "fallback" {
+				h.fbStatus = handoffPending
+			} else {
+				h.hstatus = handoffPending
+			}
+			h.carryKind = ""
+			t.open--
+			t.settle()
+			h.mu.Unlock()
+			t.signal()
+			return err
+		}
 	}
 	h.mu.Lock()
 	t.recording++
@@ -424,6 +463,9 @@ func (h *Harness) begin(t *turn, inputs []contract.TurnInput, started func(), st
 	pending, err := p.client.Start("session/prompt", map[string]any{"sessionId": sid, "prompt": blocks})
 	if err != nil {
 		h.recorded(t)
+		if carried {
+			h.handoffResult(err)
+		}
 		h.mu.Lock()
 		t.open--
 		t.settle()
@@ -453,6 +495,9 @@ func (h *Harness) begin(t *turn, inputs []contract.TurnInput, started func(), st
 			} `json:"usage"`
 		}
 		err := pending.Wait(context.Background(), &raw)
+		if carried {
+			h.handoffResult(err)
+		}
 		// Unlocked: the log is read from disk.
 		var step *sessiondb.Step
 		if err == nil && log != nil {
@@ -1145,25 +1190,65 @@ func (h *Harness) NewConversation(ctx context.Context) error {
 	h.mu.Lock()
 	p := h.p
 	h.mu.Unlock()
-	path := h.mirrorPath()
-	if info, err := os.Stat(path); err != nil || info.Size() == 0 {
-		return nil
+	// /clear drops a handoff that was not delivered, whatever the mirror holds; the generation stays, so the same one replayed does not
+	// bring it back.
+	h.mu.Lock()
+	gen, pending := h.gen, h.handoff != "" || h.fbText != ""
+	h.mu.Unlock()
+	if gen != "" || pending {
+		if err := h.handoffMove(handoffCleared); err != nil {
+			return err
+		}
 	}
-	return h.newSession(ctx, p)
+	if info, err := os.Stat(h.mirrorPath()); err == nil && info.Size() > 0 {
+		if err := h.newSession(ctx, p, "", gen, false); err != nil {
+			return err
+		}
+	}
+	return h.markCleared()
 }
 
 // NewConversationForce opens a new session even when the conversation has entries.
 func (h *Harness) NewConversationForce(ctx context.Context) error {
+	h.mu.Lock()
+	gen := h.gen
+	h.mu.Unlock()
+	return h.freshConversation(ctx, "", gen, false)
+}
+
+// freshConversation opens a new session that starts from the handoff, if there is one.
+func (h *Harness) freshConversation(ctx context.Context, carried, gen string, local bool) error {
 	if err := h.ensure(ctx); err != nil {
 		return err
 	}
 	h.mu.Lock()
 	p := h.p
 	h.mu.Unlock()
-	return h.newSession(ctx, p)
+	return h.newSession(ctx, p, carried, gen, local)
 }
 
-func (h *Harness) newSession(ctx context.Context, p *process) error {
+func (h *Harness) newSession(ctx context.Context, p *process, carried, gen string, local bool) error {
+	h.mu.Lock()
+	h.carryKind = ""
+	if local {
+		// A history built from the mirrors goes to the fallback record; the engine's generation and status stay.
+		h.fbText, h.fbStatus = carried, handoffAccepted
+		if carried != "" {
+			h.fbStatus = handoffPending
+		}
+	} else {
+		h.fbText, h.fbStatus = "", ""
+		h.handoff, h.gen = carried, gen
+		switch {
+		case carried != "":
+			h.hstatus = handoffPending
+		case gen != "" && h.hstatus != handoffCleared:
+			h.hstatus = handoffAccepted
+		case gen == "":
+			h.hstatus = ""
+		}
+	}
+	h.mu.Unlock()
 	if err := h.openSession(ctx, p, ""); err != nil {
 		return err
 	}

@@ -2,6 +2,7 @@ package agy
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -11,11 +12,13 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strconv"
 	"sync"
 	"time"
 
 	"github.com/resident-labs/dyna/contract"
+	"github.com/resident-labs/dyna/harness/agy/acp"
 )
 
 // The mirror is a Pi-format session file, <SessionDir>/agy-<n>.jsonl, that the harness writes from agy's updates, so the
@@ -29,6 +32,19 @@ var mirrorName = regexp.MustCompile(`^agy-(\d+)\.jsonl$`)
 type sessionMeta struct {
 	SessionID string `json:"sessionId"`
 	Mirror    string `json:"mirror"`
+	// Handoff is the earlier conversation a fresh session has yet to be given: it stays until agy has accepted the prompt that carried it.
+	Handoff string `json:"handoff,omitempty"`
+	// Gen is the generation of the handoff the session was opened for, pending or delivered.
+	Gen string `json:"handoffGen,omitempty"`
+	// Status is the handoff's state (handoffstate.go). A restart that finds it sending cannot tell whether agy took the history.
+	Status string `json:"handoffStatus,omitempty"`
+	// ClearFrom is the mirror file a /clear began: a handoff built from the mirrors reads this file and the ones after it, never the
+	// conversation before. The files stay for the transcript.
+	ClearFrom string `json:"clearFrom,omitempty"`
+	// Fallback is a history this harness built from its own mirrors after agy could not resume. It is a record of its own, apart from the
+	// engine's generation above: replacing the native session locally never changes what the engine's handoff was.
+	Fallback       string `json:"fallback,omitempty"`
+	FallbackStatus string `json:"fallbackStatus,omitempty"`
 }
 
 func readMeta(dir string) (sessionMeta, error) {
@@ -71,6 +87,38 @@ func nextMirror(dir string) (string, error) {
 	return filepath.Join(dir, fmt.Sprintf("agy-%d.jsonl", highest+1)), nil
 }
 
+// mirrorFiles is every mirror file in the session directory, oldest first: the conversations this harness has had.
+func (h *Harness) mirrorFiles() []string {
+	h.mu.Lock()
+	from := h.clearFrom
+	h.mu.Unlock()
+	first := 0
+	if m := mirrorName.FindStringSubmatch(from); m != nil {
+		first, _ = strconv.Atoi(m[1])
+	}
+	entries, _ := os.ReadDir(h.cfg.SessionDir)
+	type numbered struct {
+		n    int
+		path string
+	}
+	var found []numbered
+	for _, entry := range entries {
+		if m := mirrorName.FindStringSubmatch(entry.Name()); m != nil {
+			n, _ := strconv.Atoi(m[1])
+			if n < first {
+				continue
+			}
+			found = append(found, numbered{n, filepath.Join(h.cfg.SessionDir, entry.Name())})
+		}
+	}
+	slices.SortFunc(found, func(a, b numbered) int { return a.n - b.n })
+	paths := make([]string, len(found))
+	for i, f := range found {
+		paths[i] = f.path
+	}
+	return paths
+}
+
 // record appends one Pi message entry to the mirror.
 func (h *Harness) record(message map[string]any) error {
 	h.fm.Lock()
@@ -102,13 +150,15 @@ func (h *Harness) recordEnding(reason, message string) {
 	}
 }
 
+// recordInputs writes what agy was sent.
 func (h *Harness) recordInputs(inputs []contract.TurnInput) error {
 	for _, input := range inputs {
-		err := h.record(map[string]any{
+		entry := map[string]any{
 			"role":       "user",
 			"deliveryId": strconv.FormatInt(int64(input.Delivery), 10),
 			"content":    []map[string]any{{"type": "text", "text": input.Text}},
-		})
+		}
+		err := h.record(entry)
 		if err != nil {
 			return err
 		}
@@ -169,4 +219,53 @@ func (h *Harness) Delivered(_ context.Context, id contract.DeliverySeq) (bool, e
 	}
 	_, found := d.seen[strconv.FormatInt(int64(id), 10)]
 	return found, nil
+}
+
+// handoffDelivered reports whether the mirror records that agy took the handoff of this generation: a line of its own, written once
+// the prompt that carried it was answered, which the transcript readers pass over.
+func handoffDelivered(path, gen, kind string) bool {
+	file, err := os.Open(path)
+	if err != nil {
+		return false
+	}
+	defer file.Close()
+	reader := bufio.NewReaderSize(file, 1<<20)
+	for {
+		line, err := reader.ReadBytes('\n')
+		if bytes.Contains(line, []byte(`"type":"handoff"`)) {
+			var entry struct{ Type, Gen, Kind string }
+			if json.Unmarshal(line, &entry) == nil && entry.Type == "handoff" && entry.Gen == gen && entry.Kind == kind {
+				return true
+			}
+		}
+		if err != nil {
+			return false
+		}
+	}
+}
+
+// handoffResult settles a handoff by what agy answered the prompt that carried it (T3 ContextHandoffDelivery.ts persists the delivery as
+// pending around the injection and restores it when the provider refused the prompt before consuming it):
+//   - agy took it (a result, or an error of its own): the handoff is delivered, and the mirror says so;
+//   - agy refused the prompt as invalid (-32600 to -32602), so it never consumed it: the handoff is pending again, for the next prompt;
+//   - no answer (the process went, the connection broke): whether agy took it cannot be known. T3 replaces the native thread
+//     (ContextHandoffDeliveryUncertainError), and so does this: the next Start opens a fresh session and hands the history over again.
+//     The old session may have had it too, which costs tokens; it is never lost.
+func (h *Harness) handoffResult(err error) {
+	var rpc *acp.Error
+	rejected := errors.As(err, &rpc)
+	switch {
+	case err != nil && !rejected:
+		h.mu.Lock()
+		h.broken = true // the conversation is replaced; the history stays sending, and is given to the replacement
+		h.mu.Unlock()
+	case rejected && rpc.Code >= -32602 && rpc.Code <= -32600:
+		if err := h.handoffMove(handoffPending); err != nil {
+			log.Printf("agy: restore the handoff: %v", err)
+		}
+	default:
+		if err := h.handoffMove(handoffAccepted); err != nil {
+			log.Printf("agy: record the handoff as delivered: %v", err)
+		}
+	}
 }

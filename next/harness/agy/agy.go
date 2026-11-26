@@ -25,6 +25,7 @@ import (
 	"github.com/resident-labs/dyna/contract"
 	"github.com/resident-labs/dyna/harness"
 	"github.com/resident-labs/dyna/harness/agy/acp"
+	"github.com/resident-labs/dyna/harness/agy/handoff"
 )
 
 // MCPServer is a tool server given to agy. With a URL it is sent as an HTTP server (agy accepts one although it
@@ -53,6 +54,13 @@ type Config struct {
 	New                             bool          // a fresh conversation instead of resuming the stored one
 	CancelTimeout                   time.Duration // wait for the prompt's response after session/cancel, then kill; default 15s as T3 (ARUN:92)
 	Notice                          func(string)  // out-of-turn warnings
+	// Handoff is the earlier conversation as handoff.Build renders it. It starts a fresh agy session (New, or one agy could not resume)
+	// and rides once on that session's first prompt (handoff.Prompt, T3 ContextHandoffDelivery.ts withInlineContext). It is ignored when the
+	// stored session resumes. It is kept in agy-session.json until agy has accepted the prompt, so a restart delivers it too.
+	Handoff string
+	// HandoffGen names this handoff. The same generation seen again is the session already opened for it, not a second one; a new generation
+	// starts a fresh session with the new history. It defaults to a hash of Handoff.
+	HandoffGen string
 }
 
 // Harness drives one agy process and its conversation.
@@ -74,25 +82,34 @@ type Harness struct {
 	nonce   int64
 	entries int64
 
-	mu         sync.Mutex
-	p          *process
-	sessionID  string
-	turn       *turn
-	held       []contract.TurnInput // follow-ups waiting for the prompt response
-	sections   []contract.ContextSection
-	told       told            // what the process was told; it starts empty with each process (T3 adapter.ts promptInstructionStates)
-	broken     bool            // agy's saved conversation fails every prompt (INVALID_THINKING_SIGNATURE); the next Start opens a new one
-	detached   bool            // a turn ended with agy still running a tool call or a reply: Abort then cancels it (quirk 3)
-	restart    bool            // a prompt ended in a failure found in the session log: the next use starts a new process (T3 runtimeRestartRequired)
-	quarantine bool            // Stop was sent with no turn running: what agy does on its own is dropped until the next turn or process (T3 stoppedRunQuarantine, adapter.ts:9484, cleared 8902, 10627)
-	blocked    bool            // the last turn ended in a limit or an account refusal: Compact sends no prompt (root ruling 5)
-	idle       *turn           // what agy did with no turn running, until it is written to the mirror
-	compacted  map[string]bool // compactions already seen, by id
-	modelText  string
-	context    int64 // input and cached tokens of the last prompt
-	used       int64 // agy's usage_update
-	commands   map[string]bool
-	closed     bool
+	mu          sync.Mutex
+	handoff     string // the handoff the next prompt carries, until agy has accepted a prompt that did
+	gen         string // the generation of the handoff, pending or delivered, that the session was opened for
+	clearFrom   string // the mirror file the last /clear began (sessionMeta.ClearFrom)
+	hstatus     string // the handoff's status (handoffstate.go)
+	fbText      string // the fallback record: a history built from the mirrors (sessionMeta.Fallback)
+	fbStatus    string
+	carryKind   string // which record the prompt in flight carries: "engine" or "fallback"
+	suppliedGen string
+	supplied    string // Config.Handoff, kept for a resume that fails, until a prompt carried a handoff
+	p           *process
+	sessionID   string
+	turn        *turn
+	held        []contract.TurnInput // follow-ups waiting for the prompt response
+	sections    []contract.ContextSection
+	told        told            // what the process was told; it starts empty with each process (T3 adapter.ts promptInstructionStates)
+	broken      bool            // agy's saved conversation fails every prompt (INVALID_THINKING_SIGNATURE); the next Start opens a new one
+	detached    bool            // a turn ended with agy still running a tool call or a reply: Abort then cancels it (quirk 3)
+	restart     bool            // a prompt ended in a failure found in the session log: the next use starts a new process (T3 runtimeRestartRequired)
+	quarantine  bool            // Stop was sent with no turn running: what agy does on its own is dropped until the next turn or process (T3 stoppedRunQuarantine, adapter.ts:9484, cleared 8902, 10627)
+	blocked     bool            // the last turn ended in a limit or an account refusal: Compact sends no prompt (root ruling 5)
+	idle        *turn           // what agy did with no turn running, until it is written to the mirror
+	compacted   map[string]bool // compactions already seen, by id
+	modelText   string
+	context     int64 // input and cached tokens of the last prompt
+	used        int64 // agy's usage_update
+	commands    map[string]bool
+	closed      bool
 
 	delivered deliveries
 }
@@ -176,7 +193,17 @@ func Open(ctx context.Context, c Config) (*Harness, error) {
 	}
 	h := &Harness{cfg: c, done: make(chan struct{}), modelText: c.ModelInstructions, nonce: time.Now().UnixNano(),
 		promptInactivity: defaultPromptInactivity, holdMax: defaultHoldMax, watchEvery: defaultWatchEvery}
-	if !c.New {
+	mirror := filepath.Join(c.SessionDir, meta.Mirror)
+	plan := planOpen(c, meta, meta.Mirror != "" && handoffDelivered(mirror, meta.Gen, "engine"), meta.Mirror != "" && handoffDelivered(mirror, "", "fallback"))
+	if plan.notice != "" {
+		h.notice(plan.notice)
+	}
+	h.handoff, h.gen, h.hstatus = plan.text, plan.gen, plan.status
+	h.clearFrom = meta.ClearFrom
+	h.fbText, h.fbStatus = plan.fbText, plan.fbStatus
+	h.supplied, h.suppliedGen = plan.supplied, plan.suppliedGen
+	fresh := plan.fresh
+	if !fresh {
 		h.sessionID, h.mirror = meta.SessionID, filepath.Join(c.SessionDir, meta.Mirror)
 	}
 	if h.sessionID == "" || meta.Mirror == "" {
@@ -412,7 +439,53 @@ func (h *Harness) setup(ctx context.Context, p *process) error {
 			err = h.openSession(ctx, p, h.sessionID)
 		}
 	}
+	if errors.Is(err, errResumeRejected) {
+		return h.resumeFailed(ctx, p)
+	}
 	return err
+}
+
+// errResumeRejected is agy refusing to resume the stored conversation: it has no such session any more, or cannot resume at all.
+// Neither a process that exited nor a sign-in error is this.
+var errResumeRejected = errors.New("agy could not resume its conversation")
+
+// resumeFailed starts a fresh session in place of the one agy cannot resume, and hands the earlier conversation to it, built from
+// this harness's own mirror files, as T3 does for a thread its provider cannot resume natively (portable-handoffs.md). A handoff the
+// caller supplied is the one used.
+func (h *Harness) resumeFailed(ctx context.Context, p *process) error {
+	carried, gen, local, err := h.mirrorHandoff()
+	if err != nil {
+		return err
+	}
+	h.notice("agy's saved conversation could not be resumed; a new one is opened and the earlier conversation is handed to it")
+	return h.newSession(ctx, p, carried, gen, local)
+}
+
+// mirrorHandoff is the handoff a replacement session starts from: one still waiting to be delivered, else the conversation as the
+// mirror files record it.
+func (h *Harness) mirrorHandoff() (text, gen string, local bool, err error) {
+	h.mu.Lock()
+	pending, supplied := h.handoff, h.supplied
+	gen, suppliedGen := h.gen, h.suppliedGen
+	fb := h.fbText
+	h.mu.Unlock()
+	if pending != "" {
+		return pending, gen, false, nil
+	}
+	if supplied != "" {
+		return supplied, suppliedGen, false, nil
+	}
+	// A history built here is a record of its own: the engine's generation and what became of its handoff stay as they were.
+	if fb != "" {
+		return fb, "", true, nil
+	}
+	text, err = handoff.Build(h.mirrorFiles(), 0)
+	if errors.Is(err, handoff.ErrBudget) {
+		// T3 fails the turn here; a conversation with nothing to start from is better than none, and the notice says so.
+		h.notice("the earlier conversation does not fit a handoff; the new session starts without it")
+		return "", "", true, nil
+	}
+	return text, "", true, err
 }
 
 // authenticate signs in with oauth-personal, the only method Dyna uses. An agent with no sign-in is ASUP:167-177.
@@ -506,11 +579,18 @@ func (h *Harness) openSession(ctx context.Context, p *process, resume string) er
 	id := resume
 	if resume != "" {
 		if !p.resume {
-			return errors.New("agy does not advertise session/resume, so its conversation cannot be resumed")
+			return fmt.Errorf("%w: agy does not advertise session/resume", errResumeRejected)
 		}
 		params["sessionId"] = resume
 		if err := p.client.Call(ctx, "session/resume", params, &res); err != nil {
-			return h.exitError("session/resume", err, p)
+			failed := h.exitError("session/resume", err, p)
+			var rpc *acp.Error
+			// Only a conversation agy does not have is replaced. A refusal that is an account, limit or verification failure is the failure
+			// it is, and ends the open once, as T3's does.
+			if errors.As(err, &rpc) && !errors.Is(failed, ErrSignInRequired) && classify(rpc.Message, time.Now(), true) == nil {
+				return fmt.Errorf("%w: %w", errResumeRejected, failed)
+			}
+			return failed
 		}
 	} else {
 		if err := p.client.Call(ctx, "session/new", params, &res); err != nil {
@@ -533,7 +613,7 @@ func (h *Harness) openSession(ctx context.Context, p *process, resume string) er
 	h.fm.Lock()
 	h.mirror = mirror
 	h.fm.Unlock()
-	if err := writeMeta(h.cfg.SessionDir, sessionMeta{SessionID: id, Mirror: filepath.Base(mirror)}); err != nil {
+	if err := h.writeState(); err != nil {
 		return err
 	}
 	// Dyna answers permissions itself, as T3's full-access mode does, which keeps agy in `default` (T3 antigravitySessionMode,

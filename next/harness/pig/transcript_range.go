@@ -41,7 +41,7 @@ func (r TranscriptReader) Read(path string, start int64, end *int64, deliveries 
 		return nil, 0, false, err
 	}
 	defer file.Close()
-	return readTranscriptMode(section, deliveries, r.Steers, path, item, skip, limit, 16<<20, false)
+	return readTranscriptMode(section, deliveries, r.Steers, path, item, skip, limit, 16<<20, false, false)
 }
 
 // ReadRecent retains a bounded recent window and the last assistant text.
@@ -51,5 +51,5 @@ func (r TranscriptReader) ReadRecent(path string, start int64, end *int64, deliv
 		return nil, 0, false, err
 	}
 	defer file.Close()
-	return readTranscriptMode(section, deliveries, r.Steers, path, "", 0, limit, 16<<20, true)
+	return readTranscriptMode(section, deliveries, r.Steers, path, "", 0, limit, 16<<20, true, false)
 }
