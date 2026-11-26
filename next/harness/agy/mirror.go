@@ -33,6 +33,8 @@ type sessionMeta struct {
 	Mirror    string `json:"mirror"`
 	// Handoff is the earlier conversation a fresh session has yet to be given: it stays until agy has accepted the prompt that carried it.
 	Handoff string `json:"handoff,omitempty"`
+	// Gen is the generation of the handoff the session was opened for, pending or delivered.
+	Gen string `json:"handoffGen,omitempty"`
 }
 
 func readMeta(dir string) (sessionMeta, error) {
@@ -104,7 +106,7 @@ func mirrorEmpty(path string) bool {
 }
 
 // handoffDelivered reports whether the mirror records a prompt that carried the handoff, which agy accepted.
-func handoffDelivered(path string) bool {
+func handoffDelivered(path, gen string) bool {
 	file, err := os.Open(path)
 	if err != nil {
 		return false
@@ -117,11 +119,12 @@ func handoffDelivered(path string) bool {
 			var entry struct {
 				Type    string
 				Message struct {
-					Role    string
-					Handoff bool
+					Role       string
+					Handoff    bool
+					HandoffGen string
 				}
 			}
-			if json.Unmarshal(line, &entry) == nil && entry.Type == "message" && entry.Message.Role == "user" && entry.Message.Handoff {
+			if json.Unmarshal(line, &entry) == nil && entry.Type == "message" && entry.Message.Role == "user" && entry.Message.Handoff && entry.Message.HandoffGen == gen {
 				return true
 			}
 		}
@@ -164,6 +167,9 @@ func (h *Harness) recordEnding(reason, message string) {
 
 // recordInputs writes what agy was sent. The first input is marked when its prompt carried the handoff: the text recorded is the user's own.
 func (h *Harness) recordInputs(inputs []contract.TurnInput, handoff bool) error {
+	h.mu.Lock()
+	gen := h.gen
+	h.mu.Unlock()
 	for i, input := range inputs {
 		entry := map[string]any{
 			"role":       "user",
@@ -171,7 +177,7 @@ func (h *Harness) recordInputs(inputs []contract.TurnInput, handoff bool) error 
 			"content":    []map[string]any{{"type": "text", "text": input.Text}},
 		}
 		if handoff && i == 0 {
-			entry["handoff"] = true
+			entry["handoff"], entry["handoffGen"] = true, gen
 		}
 		err := h.record(entry)
 		if err != nil {
@@ -241,12 +247,12 @@ func (h *Harness) handoffAccepted() {
 	h.mu.Lock()
 	h.handoff = ""
 	h.supplied = ""
-	id := h.sessionID
+	id, gen := h.sessionID, h.gen
 	h.mu.Unlock()
 	h.fm.Lock()
 	mirror := h.mirror
 	h.fm.Unlock()
-	if err := writeMeta(h.cfg.SessionDir, sessionMeta{SessionID: id, Mirror: filepath.Base(mirror)}); err != nil {
+	if err := writeMeta(h.cfg.SessionDir, sessionMeta{SessionID: id, Mirror: filepath.Base(mirror), Gen: gen}); err != nil {
 		log.Printf("agy: record the handoff as delivered: %v", err)
 	}
 }

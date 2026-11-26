@@ -141,3 +141,15 @@ func TestPrompt(t *testing.T) {
 		t.Fatal(got)
 	}
 }
+
+func TestHistoryThatCannotFitTheFloorIsAnError(t *testing.T) {
+	// The first and last IDs are 256 bytes each, so the context line alone costs more than the smallest budget.
+	long := strings.Repeat("i", 250)
+	path := write(t, "ids.jsonl", user(long+"1", "1", "q"), assistant(long+"2", "a"))
+	if got, err := Build([]string{path}, MinBudget); err != ErrBudget || got != "" {
+		t.Fatalf("got %q, %v", got, err)
+	}
+	if _, err := Build([]string{path}, 0); err != nil {
+		t.Fatalf("a normal budget: %v", err)
+	}
+}

@@ -199,3 +199,68 @@ func TestSignInErrorOnResumeIsNotAHandoff(t *testing.T) {
 		t.Fatal("a sign-in failure opened a session")
 	}
 }
+
+func TestANewGenerationStartsAFreshSessionWithTheNewHistory(t *testing.T) {
+	h, r, c := open(t, nil, func(c *Config) { c.Handoff, c.HandoffGen = "FIRST HISTORY", "1" })
+	start(t, h, "t1", input(1, "say hello"))
+	h.Close()
+	// The same generation replayed is that session: no second one.
+	h2, err := Open(context.Background(), c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	h2.Close()
+	if n := len(r.calls(t, "session/new")); n != 1 {
+		t.Fatalf("the same generation opened session %d", n)
+	}
+	// A new one starts a fresh native session with its own history.
+	c.Handoff, c.HandoffGen = "SECOND HISTORY", "2"
+	h3, err := Open(context.Background(), c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer h3.Close()
+	start(t, h3, "t2", input(2, "say again"))
+	got := lastPrompt(t, r)
+	if n := len(r.calls(t, "session/new")); n != 2 || !strings.Contains(got, "SECOND HISTORY\n\nUser message:\nsay again") {
+		t.Fatalf("sessions %d, prompt = %s", n, got)
+	}
+	meta, _ := readMeta(c.SessionDir)
+	if meta.Gen != "2" || meta.Handoff != "" {
+		t.Fatalf("meta = %+v", meta)
+	}
+}
+
+func TestClearDropsAHandoffNotYetDeliveredAndTheSameGenerationDoesNotBringItBack(t *testing.T) {
+	h, r, c := open(t, nil, func(c *Config) { c.Handoff, c.HandoffGen = "EARLIER CONTEXT", "7" })
+	if err := h.NewConversation(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	start(t, h, "t1", input(1, "say hello"))
+	if strings.Contains(lastPrompt(t, r), "EARLIER CONTEXT") {
+		t.Fatal("/clear left the handoff pending")
+	}
+	h.Close()
+	h2, err := Open(context.Background(), c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer h2.Close()
+	start(t, h2, "t2", input(2, "say again"))
+	if strings.Contains(lastPrompt(t, r), "EARLIER CONTEXT") {
+		t.Fatal("the same generation brought the handoff back")
+	}
+}
+
+func TestAPathIsNotASlashCommand(t *testing.T) {
+	h, r, _ := open(t, nil, func(c *Config) { c.Handoff = "EARLIER CONTEXT" })
+	start(t, h, "t1", input(1, "/box/work/dyna is the repo"))
+	if !strings.Contains(lastPrompt(t, r), "EARLIER CONTEXT\n\nUser message:\n/box/work/dyna is the repo") {
+		t.Fatalf("prompt = %s", lastPrompt(t, r))
+	}
+	for text, want := range map[string]bool{"/help": true, "  /compact now": true, "/box/work": false, "hello /x": false, "/": false} {
+		if slashCommand.MatchString(text) != want {
+			t.Errorf("slash(%q) != %v", text, want)
+		}
+	}
+}

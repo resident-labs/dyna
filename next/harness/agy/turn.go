@@ -7,6 +7,8 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -28,6 +30,9 @@ const (
 	defaultHoldMax          = 30 * time.Minute
 	defaultWatchEvery       = 10 * time.Second
 )
+
+// slashCommand is T3's test for a message that opens a native command (ContextHandoffDelivery.ts SLASH_COMMAND): a first word with a second slash is a path.
+var slashCommand = regexp.MustCompile(`^\s*/[^\s/]+(?:\s|$)`)
 
 // askOwnerLine tells agy what to do instead of asking the user in its own way: Dyna answers agy's native questions and forms as cancelled
 // (T3 shows them to the user; Dyna has nobody to ask).
@@ -117,12 +122,12 @@ func (h *Harness) Start(ctx context.Context, id contract.TurnID, inputs []contra
 	if broken {
 		// The saved conversation fails every prompt (T3 Outcome:53-55, 231-241): T3 starts a fresh session with a portable handoff of
 		// the thread's context, and so does this, from the mirror files.
-		carried, err := h.mirrorHandoff()
+		carried, gen, err := h.mirrorHandoff()
 		if err != nil {
 			return contract.TurnEnded{Turn: id}, err
 		}
 		h.notice("agy's saved conversation can no longer be sent to the model; a new one is opened and the earlier conversation is handed to it")
-		if err := h.freshConversation(ctx, carried); err != nil {
+		if err := h.freshConversation(ctx, carried, gen); err != nil {
 			return contract.TurnEnded{Turn: id}, err
 		}
 	}
@@ -306,7 +311,7 @@ func (h *Harness) promptBlocks(t *turn, inputs []contract.TurnInput, p *process,
 		}
 		attachments = append(attachments, attached...)
 	}
-	slash := strings.HasPrefix(strings.TrimSpace(inputs[0].Text), "/")
+	slash := slashCommand.MatchString(inputs[0].Text)
 	// What the prompt offers is read, built and recorded as offered in one scope, so a prompt built meanwhile sees it and neither
 	// overwrites the other's state (T3 does this in one step of the turn's run, adapter.ts:10867-10899).
 	h.mu.Lock()
@@ -1166,32 +1171,45 @@ func (h *Harness) NewConversation(ctx context.Context) error {
 	h.mu.Lock()
 	p := h.p
 	h.mu.Unlock()
+	// /clear drops a handoff that has not been delivered; the generation stays, so the same one replayed does not bring it back.
+	h.mu.Lock()
+	gen := h.gen
+	dropped := h.handoff != ""
+	h.handoff, h.supplied = "", ""
+	id := h.sessionID
+	h.mu.Unlock()
 	path := h.mirrorPath()
 	if info, err := os.Stat(path); err != nil || info.Size() == 0 {
+		if dropped {
+			return writeMeta(h.cfg.SessionDir, sessionMeta{SessionID: id, Mirror: filepath.Base(path), Gen: gen})
+		}
 		return nil
 	}
-	return h.newSession(ctx, p, "")
+	return h.newSession(ctx, p, "", gen)
 }
 
 // NewConversationForce opens a new session even when the conversation has entries.
 func (h *Harness) NewConversationForce(ctx context.Context) error {
-	return h.freshConversation(ctx, "")
+	h.mu.Lock()
+	gen := h.gen
+	h.mu.Unlock()
+	return h.freshConversation(ctx, "", gen)
 }
 
 // freshConversation opens a new session that starts from the handoff, if there is one.
-func (h *Harness) freshConversation(ctx context.Context, carried string) error {
+func (h *Harness) freshConversation(ctx context.Context, carried, gen string) error {
 	if err := h.ensure(ctx); err != nil {
 		return err
 	}
 	h.mu.Lock()
 	p := h.p
 	h.mu.Unlock()
-	return h.newSession(ctx, p, carried)
+	return h.newSession(ctx, p, carried, gen)
 }
 
-func (h *Harness) newSession(ctx context.Context, p *process, carried string) error {
+func (h *Harness) newSession(ctx context.Context, p *process, carried, gen string) error {
 	h.mu.Lock()
-	h.handoff = carried
+	h.handoff, h.gen = carried, gen
 	h.mu.Unlock()
 	if err := h.openSession(ctx, p, ""); err != nil {
 		return err

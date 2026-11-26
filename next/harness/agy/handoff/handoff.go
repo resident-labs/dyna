@@ -29,6 +29,10 @@ const (
 	Continue = "Continue where you left off."
 )
 
+// ErrBudget is T3's ContextHandoffBudgetError: even the coverage line and the items T3 always tries to keep do not fit the budget
+// (a first or last ID of 256 bytes makes the context line alone cost over the 1,024 byte floor), so no handoff is made.
+var ErrBudget = errors.New("the earlier conversation does not fit a handoff within its budget")
+
 // maxListedOmitted is T3's MAX_LISTED_OMITTED_ITEMS.
 const maxListedOmitted = 20
 
@@ -69,6 +73,10 @@ func Build(files []string, budget int) (string, error) {
 		return "", nil
 	}
 	selected, context := selectHistory(messages, coverage(messages), budget)
+	// T3 checks the cost of what it selected against the budget last and fails when it is over (ContextHandoffDelivery.ts).
+	if historyCost(selected, context) > budget {
+		return "", ErrBudget
+	}
 	return renderHistory(selected, context), nil
 }
 
