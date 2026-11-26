@@ -62,6 +62,9 @@ func (s *Service) startSession(ctx context.Context, caller contract.Principal, r
 		return contract.SessionStartResponse{}, problem
 	}
 	req.Host = host
+	if problem := s.agyRoom(ctx, req.Profile); problem != nil {
+		return contract.SessionStartResponse{}, problem
+	}
 	if req.Host != "" {
 		if req.SameHost {
 			return contract.SessionStartResponse{}, invalid("host and sameHost cannot be used together")

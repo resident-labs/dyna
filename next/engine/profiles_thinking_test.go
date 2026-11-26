@@ -3,6 +3,7 @@ package engine
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/resident-labs/dyna/contract"
@@ -23,19 +24,14 @@ func TestLoadProfilesThinkingMax(t *testing.T) {
 	}
 }
 
-func TestLoadProfilesKeepsAntigravityModelRoute(t *testing.T) {
+func TestLoadProfilesRefusesTheAntigravityProxyRoute(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "profiles.json")
 	data := `{"neon":{"provider":"anthropic","model":"antigravity/gemini-4-neon-xhigh","allowedModels":["antigravity/gemini-4-neon-xhigh"],"thinking":"xhigh"}}`
 	if err := os.WriteFile(path, []byte(data), 0600); err != nil {
 		t.Fatal(err)
 	}
-	profiles, err := LoadProfiles(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	choice, allowed, err := profiles.Model("neon")
-	if err != nil || choice.Provider != contract.ModelProviderAnthropic || choice.Thinking != contract.ThinkingXHigh || choice.ID != "antigravity/gemini-4-neon-xhigh" || len(allowed) != 1 || allowed[0] != choice.ID {
-		t.Fatalf("profile model = %+v, allowed %v: %v", choice, allowed, err)
+	if _, err := LoadProfiles(path); err == nil || !strings.Contains(err.Error(), "harness agy") {
+		t.Fatalf("err = %v", err)
 	}
 }
 

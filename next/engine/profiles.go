@@ -97,6 +97,11 @@ func validateProfiles(profiles map[contract.ProfileName]profile) error {
 		}
 		switch p.Harness {
 		case contract.HarnessPig:
+			for _, id := range append(slices.Clone(p.AllowedModels), p.Model) {
+				if strings.HasPrefix(id, "antigravity/") {
+					return fmt.Errorf("profile %q: the antigravity route through the proxy is gone; Gemini runs on a profile with harness agy", name)
+				}
+			}
 			switch p.Provider {
 			case contract.ModelProviderAnthropic, contract.ModelProviderOpenAI:
 			default:
@@ -486,4 +491,22 @@ var agyMount = contract.BoxAgy{Binary: box.AgyBinary, GeminiDir: contract.AgyGem
 // AgyProfile says a profile runs on the agy harness.
 func (s *Service) AgyProfile(name contract.ProfileName) bool {
 	return s.harnessOf(name) == contract.HarnessAgy
+}
+
+// agyRoom refuses a new session on an agy profile that already has its max-concurrent open sessions: Google's one signed-in
+// account runs a bounded number of agy processes at once, and the design starts that at 2.
+func (s *Service) agyRoom(ctx context.Context, name contract.ProfileName) *contract.Error {
+	for _, p := range s.profiles.List() {
+		if p.Name != name || p.Harness != contract.HarnessAgy || p.MaxConcurrent == 0 {
+			continue
+		}
+		counts, err := s.store.ProfileUsage(ctx)
+		if err != nil {
+			return failure(err)
+		}
+		if counts[name] >= p.MaxConcurrent {
+			return &contract.Error{Code: contract.ErrConflict, Message: fmt.Sprintf("profile %s allows %d open sessions at once, and %d are open; close one, or ask the owner to raise its max-concurrent", name, p.MaxConcurrent, counts[name])}
+		}
+	}
+	return nil
 }

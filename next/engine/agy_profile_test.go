@@ -190,3 +190,16 @@ func TestBoxHelloCarriesTheHarness(t *testing.T) {
 		t.Fatalf("agy hello: %q %+v", hello.Harness, hello.Agy)
 	}
 }
+
+func TestAgyProfileLimitsOpenSessions(t *testing.T) {
+	s, room, _, owner := agySetup(t)
+	ctx := t.Context()
+	for _, name := range []string{"one", "two"} {
+		if _, e := s.SessionStart(ctx, owner, contract.SessionStartRequest{Room: room, Name: name, Profile: "gem"}); e != nil {
+			t.Fatal(e)
+		}
+	}
+	if _, e := s.SessionStart(ctx, owner, contract.SessionStartRequest{Room: room, Name: "three", Profile: "gem"}); e == nil || e.Code != contract.ErrConflict || !strings.Contains(e.Message, "allows 2 open sessions at once") {
+		t.Fatalf("a third agy session: %v", e)
+	}
+}
