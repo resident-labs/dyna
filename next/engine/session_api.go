@@ -194,7 +194,7 @@ func (s *Service) startSession(ctx context.Context, caller contract.Principal, r
 		return contract.SessionStartResponse{}, failure(err)
 	}
 	var response contract.SessionStartResponse
-	problem = s.withProfile(req.Profile, func() *contract.Error {
+	problem = s.withProfile(req.Profile, func(_ func(contract.ProfileName) contract.Harness) *contract.Error {
 		var err error
 		session.AccountProfiles, session.AccountLimit = s.agyAccount(req.Profile)
 		response, err = s.store.StartSession(ctx, session, parent, sizeName, req.Goal, event, initial, "", req.SameHost, req.Host, req.ClientID, s.maxDepth)
@@ -283,11 +283,15 @@ func (s *Service) Connected(id contract.SessionID) bool {
 	return connected
 }
 
-// Stale reports whether a session's box runs an older box agent than the engine or was marked to restart. Boxes report on every
-// connection, so the first is rebuilt as they reconnect after an engine restart. A mark is only in memory and is forgotten.
+// Stale reports whether a session's box runs an older box agent than the engine or was marked to restart, or started before its session changed harness. Boxes report on every connection, so the first is rebuilt as
+// they reconnect after an engine restart. A mark is only in memory and is forgotten; the handoff fence is stored.
 func (s *Service) Stale(id contract.SessionID) bool {
 	handle, ok := s.live.LookupSession(id)
-	return ok && handle.Stale()
+	if !ok {
+		return false
+	}
+	fence, err := s.store.HandoffFence(context.Background(), id)
+	return handle.Stale() || err == nil && fence > 0
 }
 
 // resolveSession resolves a session ID or a name in the caller's room.
@@ -615,26 +619,43 @@ func (s *Service) SessionRefresh(ctx context.Context, caller contract.Principal,
 		if req.Session != "" && target != req.Session || !self && !tree.CanManage(caller, target) {
 			continue
 		}
-		mark, err := id("refresh_", s.now())
-		if err != nil {
-			return response, failure(err)
-		}
-		handle, problem := s.lockSession(ctx, target)
-		if problem != nil {
+		if problem := s.markRefresh(ctx, target, wake); problem != nil {
 			if problem.Code == contract.ErrNotFound {
 				continue // It closed just now, so it needs nothing.
 			}
 			return response, problem
 		}
-		handle.MarkRefresh(mark, wake)
-		if channel := handle.Channel(); channel != nil {
-			channel.Wake()
-		}
-		handle.Unlock()
 		response.Marked = append(response.Marked, target)
 	}
 	s.reconciler.Kick()
 	return response, nil
+}
+
+// markRefresh asks a session's box to restart once nothing runs in it, and with wake to come straight back.
+func (s *Service) markRefresh(ctx context.Context, target contract.SessionID, wake bool) *contract.Error {
+	mark, err := id("refresh_", s.now())
+	if err != nil {
+		return failure(err)
+	}
+	handle, problem := s.lockSession(ctx, target)
+	if problem != nil {
+		return problem
+	}
+	handle.MarkRefresh(mark, wake)
+	if channel := handle.Channel(); channel != nil {
+		channel.Wake()
+	}
+	handle.Unlock()
+	return nil
+}
+
+// refreshBox restarts a session's box once its turn ends, so that it comes up on the container its new harness calls for. It does
+// not wake the session: a wake already scheduled, or an input that follows, starts the box again.
+func (s *Service) refreshBox(ctx context.Context, target store.Session) {
+	if problem := s.markRefresh(ctx, target.ID, false); problem != nil && problem.Code != contract.ErrNotFound {
+		log.Printf("session %s: box restart: %v", target.ID, problem)
+	}
+	s.reconciler.Kick()
 }
 
 // BoxStopped starts a box marked to refresh straight back up. Its wake waits for the stop because Dispatch steers a
@@ -747,15 +768,35 @@ func (s *Service) SessionSetProfile(ctx context.Context, caller contract.Princip
 	if _, _, err := s.profiles.Model(req.Profile); err != nil {
 		return response, invalid("unknown profile")
 	}
-	if was, now := s.profiles.Harness(target.Profile), s.profiles.Harness(req.Profile); was != now {
-		return response, &contract.Error{Code: contract.ErrConflict, Message: fmt.Sprintf("session %s runs on %s and profile %s on %s, and a live session cannot move between pig and agy; start a new session on %s, and give it what it needs in its brief", target.Name, was, req.Profile, now, req.Profile)}
-	}
 	event, err := s.event(target.Room, caller, contract.SessionProfileChanged{Session: target.ID, Profile: req.Profile})
 	if err != nil {
 		return response, failure(err)
 	}
-	problem = s.withProfile(req.Profile, func() *contract.Error {
-		if err := s.store.SetSessionProfile(ctx, target.ID, req.Profile, event); err != nil {
+	switching := false
+	// The harnesses are compared, the target checked and the write committed under one hold of the profile registry, so an edit of
+	// either profile cannot land between the decision and the write.
+	problem = s.withProfile(req.Profile, func(harnessOf func(contract.ProfileName) contract.Harness) *contract.Error {
+		var harness *store.HarnessSwitch
+		if switching = harnessOf(target.Profile) != harnessOf(req.Profile); switching {
+			if problem := s.checkHarnessSwitch(ctx, target, req.Profile, harnessOf(req.Profile)); problem != nil {
+				return problem
+			}
+			harness = &store.HarnessSwitch{RequireHandoff: true}
+			harness.Profiles, harness.Limit = s.agyAccount(req.Profile)
+		}
+		if err := s.store.SetSessionProfile(ctx, target.ID, target.Profile, req.Profile, event, harness); err != nil {
+			if errors.Is(err, store.ErrProfileFull) {
+				return &contract.Error{Code: contract.ErrConflict, Message: fmt.Sprintf("the agy account allows %d open sessions at once across every agy profile, and they are open; close one, or ask the owner to raise max-concurrent on the agy profiles", harness.Limit)}
+			}
+			if harness != nil && errors.Is(err, store.ErrSessionClosing) {
+				return &contract.Error{Code: contract.ErrConflict, Message: "session is closing"}
+			}
+			if errors.Is(err, store.ErrProfileChanged) {
+				return &contract.Error{Code: contract.ErrConflict, Message: fmt.Sprintf("session %s changed profile while this request was being made; read its profile again and decide from that", target.Name)}
+			}
+			if errors.Is(err, store.ErrNoHandoff) {
+				return &contract.Error{Code: contract.ErrConflict, Message: fmt.Sprintf("session %s runs in a box that cannot hand its conversation to another harness yet; try again after its box has restarted, or start a new session on profile %s", target.Name, req.Profile)}
+			}
 			if errors.Is(err, store.ErrTreeForbidden) {
 				return &contract.Error{Code: contract.ErrForbidden, Message: fmt.Sprintf("session %s is not under you; you manage only sessions below you, so ask your parent", target.Name)}
 			}
@@ -765,6 +806,9 @@ func (s *Service) SessionSetProfile(ctx context.Context, caller contract.Princip
 	})
 	if problem == nil {
 		s.sessionsMoved(ctx, []store.Session{target}, req.Profile)
+		if switching {
+			s.refreshBox(ctx, target)
+		}
 	}
 	return response, problem
 }

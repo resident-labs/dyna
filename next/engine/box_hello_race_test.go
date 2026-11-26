@@ -30,7 +30,7 @@ func TestHelloSurvivesTheBoxStartingBetweenItsReadAndItsWrite(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := s.store.BeginSessionStartup(ctx, stale, event); err != nil {
+	if _, err := s.store.BeginSessionStartup(ctx, stale, 0, event); err != nil {
 		t.Fatalf("hello with a stale read of %s while the box is %s: %v", stale.State, current.State, err)
 	}
 	after, err := s.store.Box(ctx, session.Box)

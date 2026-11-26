@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"log"
+	"strconv"
 	"strings"
 	"unicode/utf8"
 
@@ -13,6 +14,8 @@ import (
 	"github.com/resident-labs/dyna/engine/store"
 )
 
+var errStaleLaunch = &contract.Error{Code: contract.ErrConflict, Message: "this box was made before its session changed harness and is being replaced"}
+
 func (s *Service) BoxHello(ctx context.Context, caller contract.Principal, req contract.BoxHelloRequest) (contract.BoxHelloResponse, *contract.Error) {
 	if caller.Kind != contract.PrincipalSession {
 		return contract.BoxHelloResponse{}, forbidden()
@@ -20,6 +23,19 @@ func (s *Service) BoxHello(ctx context.Context, caller contract.Principal, req c
 	session, err := s.store.Session(ctx, caller.Session)
 	if err != nil {
 		return contract.BoxHelloResponse{}, failure(err)
+	}
+	// A container made before the session's handoff became due has the old harness's layout: it lacks the mounts and the label the new
+	// harness needs, so it is told nothing, given no startup time and replaced. A box already up with a turn running is left to finish
+	// it: the stored fence stops it between turns.
+	if session.HandoffGen > 0 && req.LaunchGen != session.HandoffGen {
+		stopped, err := s.store.StopStartingBox(ctx, session.Box)
+		if err != nil {
+			return contract.BoxHelloResponse{}, failure(err)
+		}
+		if stopped {
+			s.reconciler.Kick()
+			return contract.BoxHelloResponse{}, errStaleLaunch
+		}
 	}
 	// This goes before the box is ready, or a mark from its last run could stop it again.
 	if handle, ok := s.lookupSession(session.ID); ok {
@@ -35,8 +51,13 @@ func (s *Service) BoxHello(ctx context.Context, caller contract.Principal, req c
 		if eventErr != nil {
 			return contract.BoxHelloResponse{}, failure(eventErr)
 		}
-		if err := s.store.BeginSessionStartup(ctx, current, event); err != nil {
+		obsolete, err := s.store.BeginSessionStartup(ctx, current, req.LaunchGen, event)
+		if err != nil {
 			return contract.BoxHelloResponse{}, failure(err)
+		}
+		if obsolete {
+			s.reconciler.Kick()
+			return contract.BoxHelloResponse{}, errStaleLaunch
 		}
 	} else if current.State == contract.BoxCreating || current.State == contract.BoxStarting || current.State == contract.BoxLost {
 		_, err = s.transition(ctx, session.Room, current, contract.BoxReady, "", "")
@@ -160,7 +181,10 @@ func (s *Service) BoxHello(ctx context.Context, caller contract.Principal, req c
 	if harness == contract.HarnessAgy {
 		agy = &agyMount
 	}
-	return contract.BoxHelloResponse{Harness: harness, Agy: agy, Discord: discordProblem == nil, Room: session.Room, GitName: gitName, GitEmail: gitEmail, GitSigningKey: signingKey, Session: session.ID, Box: session.Box, Model: model, ModelInstructions: prompt.ModelInstructions(model), TextOnlyModels: s.profiles.TextOnlyModels(), CompactTokens: s.profiles.CompactionTokens(session.Profile), Repos: repos, Transcripts: files, Instructions: prompt.Session(vars), WorkerInstructions: prompt.Core, Root: vars.Role == prompt.Root, Advisor: vars.Advisor, Workflow: workflow, GitHub: githubAvailable, Fresh: session.ClearedAt > 0}, nil
+	if err := s.store.NoteBoxHello(ctx, session.Box, req.LaunchGen, harness, req.CanHandoff); err != nil {
+		return contract.BoxHelloResponse{}, failure(err)
+	}
+	return contract.BoxHelloResponse{Harness: harness, Agy: agy, Discord: discordProblem == nil, Room: session.Room, GitName: gitName, GitEmail: gitEmail, GitSigningKey: signingKey, Session: session.ID, Box: session.Box, Model: model, ModelInstructions: prompt.ModelInstructions(model), TextOnlyModels: s.profiles.TextOnlyModels(), CompactTokens: s.profiles.CompactionTokens(session.Profile), Repos: repos, Transcripts: files, Instructions: prompt.Session(vars), WorkerInstructions: prompt.Core, Root: vars.Role == prompt.Root, Advisor: vars.Advisor, Workflow: workflow, GitHub: githubAvailable, Fresh: session.ClearedAt > 0, Handoff: session.Handoff, HandoffGen: handoffGen(session)}, nil
 }
 
 func (s *Service) DeliveryDone(ctx context.Context, caller contract.Principal, req contract.DeliveryDoneRequest) (contract.DeliveryDoneResponse, *contract.Error) {
@@ -205,7 +229,16 @@ func (s *Service) TurnOutput(ctx context.Context, caller contract.Principal, req
 		req.Outcome, req.Cause, req.Error = contract.TurnStopped, contract.CauseClosed, ""
 	}
 	req.Usage.Model = req.Model
-	req.OneWake = s.profiles.Harness(session.Profile) == contract.HarnessAgy
+	// The harness that served the turn is that of the box it was dispatched on, not the session's now: the session may have changed
+	// harness, or its profile been edited, while it ran.
+	served, err := s.store.TurnHarness(ctx, session.ID, req.Turn)
+	if err != nil {
+		return contract.TurnOutputResponse{}, failure(err)
+	}
+	if served == "" {
+		served = s.profiles.Harness(session.Profile)
+	}
+	req.OneWake = served == contract.HarnessAgy
 	run, err := s.store.SessionWorkflow(ctx, session.ID)
 	if err != nil && !errors.Is(err, store.ErrNotFound) {
 		return contract.TurnOutputResponse{}, failure(err)
@@ -333,4 +366,12 @@ func (s *Service) ConversationRead(ctx context.Context, caller contract.Principa
 	}
 	s.live.Publish(req.Room, event, false)
 	return contract.ConversationReadResponse{}, nil
+}
+
+// handoffGen names a session's pending handoff for the box, empty when there is none.
+func handoffGen(session store.Session) string {
+	if !session.Handoff {
+		return ""
+	}
+	return strconv.FormatInt(session.HandoffGen, 10)
 }

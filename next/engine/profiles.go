@@ -268,12 +268,6 @@ func (p *ProfileConfig) Model(name contract.ProfileName) (contract.ModelChoice, 
 	return profile.modelChoice(), slices.Clone(profile.AllowedModels), nil
 }
 
-func (p *ProfileConfig) update(name contract.ProfileName, value *profile, create bool) *contract.Error {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	return p.updateLocked(name, value, create)
-}
-
 func (p *ProfileConfig) updateLocked(name contract.ProfileName, value *profile, create bool) *contract.Error {
 	if _, exists := p.entries[name]; create && exists {
 		return &contract.Error{Code: contract.ErrProfileExists, Message: "profile already exists"}
@@ -337,20 +331,20 @@ func (s *Service) ProfileSet(ctx context.Context, who contract.Principal, req co
 	if slices.ContainsFunc(append(slices.Clone(v.AllowedModels), v.Model), func(id string) bool { return strings.HasPrefix(id, "antigravity/") }) {
 		return contract.ProfileSetResponse{}, invalid("antigravity/ models no longer run through the proxy; make a profile with --harness agy and --provider google instead")
 	}
-	if !req.Create {
-		for _, old := range p.List() {
-			if old.Name != v.Name || old.Harness == v.Harness {
-				continue
-			}
-			if used, err := s.store.ProfileInUse(ctx, v.Name); err != nil {
-				return contract.ProfileSetResponse{}, failure(err)
-			} else if used {
-				return contract.ProfileSetResponse{}, &contract.Error{Code: contract.ErrConflict, Message: fmt.Sprintf("profile %s runs on %s and open sessions use it, and a session cannot move between pig and agy; make a new profile on %s for new sessions, or close those sessions first", v.Name, old.Harness, v.Harness)}
-			}
-		}
-	}
 	images := v.Images == nil || *v.Images
-	err := p.update(v.Name, &profile{Description: v.Description, Taste: v.Taste, Diagnostics: v.Diagnostics, Intelligence: v.Intelligence, Cost: v.Cost, Provider: v.Provider, Model: v.Model, Images: images, AllowedModels: slices.Clone(v.AllowedModels), Thinking: v.Thinking, CompactTokens: v.CompactTokens, MaxConcurrent: v.MaxConcurrent, Harness: v.Harness}, req.Create)
+	// A change of harness is refused while sessions use the profile, checked under the registry's write lock: an assignment holds the
+	// read lock from its decision to its commit, so none can land on the old harness meanwhile.
+	err := p.Set(v.Name, &profile{Description: v.Description, Taste: v.Taste, Diagnostics: v.Diagnostics, Intelligence: v.Intelligence, Cost: v.Cost, Provider: v.Provider, Model: v.Model, Images: images, AllowedModels: slices.Clone(v.AllowedModels), Thinking: v.Thinking, CompactTokens: v.CompactTokens, MaxConcurrent: v.MaxConcurrent, Harness: v.Harness}, req.Create, func(old profile) *contract.Error {
+		if old.Harness == v.Harness {
+			return nil
+		}
+		if used, err := s.store.ProfileInUse(ctx, v.Name); err != nil {
+			return failure(err)
+		} else if used {
+			return &contract.Error{Code: contract.ErrConflict, Message: fmt.Sprintf("profile %s runs on %s and open sessions use it, and a session cannot move between pig and agy; make a new profile on %s for new sessions, or close those sessions first", v.Name, old.Harness, v.Harness)}
+		}
+		return nil
+	})
 	if err == nil {
 		s.wakeWorkflowsOnProfile(ctx, v.Name)
 		if !req.Create {
@@ -363,14 +357,32 @@ func (s *Service) ProfileSet(ctx context.Context, who contract.Principal, req co
 	return contract.ProfileSetResponse{}, err
 }
 
+// Set writes a profile after check, which sees the profile it replaces, under the write lock. check is not called for a new profile.
+func (p *ProfileConfig) Set(name contract.ProfileName, value *profile, create bool, check func(old profile) *contract.Error) *contract.Error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if old, ok := p.entries[name]; ok && !create {
+		if problem := check(old); problem != nil {
+			return problem
+		}
+	}
+	return p.updateLocked(name, value, create)
+}
+
 // WithProfile protects a profile from removal while fn commits a session write.
-func (p *ProfileConfig) WithProfile(name contract.ProfileName, fn func() *contract.Error) *contract.Error {
+func (p *ProfileConfig) WithProfile(name contract.ProfileName, fn func(harness func(contract.ProfileName) contract.Harness) *contract.Error) *contract.Error {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
 	if _, ok := p.entries[name]; !ok {
 		return invalid("unknown profile")
 	}
-	return fn()
+	// fn reads harnesses through the held lock: taking it again would block behind a queued edit, which waits for fn.
+	return fn(func(name contract.ProfileName) contract.Harness {
+		if profile, ok := p.entries[name]; ok {
+			return profile.Harness
+		}
+		return contract.HarnessPig
+	})
 }
 
 // Remove serializes the in-use check and removal against profile assignments.
@@ -408,14 +420,14 @@ func (p *ProfileConfig) Replace(name, replacement contract.ProfileName, move fun
 	return p.updateLocked(name, nil, false)
 }
 
-func (s *Service) withProfile(name contract.ProfileName, fn func() *contract.Error) *contract.Error {
+func (s *Service) withProfile(name contract.ProfileName, fn func(harness func(contract.ProfileName) contract.Harness) *contract.Error) *contract.Error {
 	if p, ok := s.profiles.(*ProfileConfig); ok {
 		return p.WithProfile(name, fn)
 	}
 	if _, _, err := s.profiles.Model(name); err != nil {
 		return invalid("unknown profile")
 	}
-	return fn()
+	return fn(s.profiles.Harness)
 }
 
 func (s *Service) ProfileRemove(ctx context.Context, who contract.Principal, req contract.ProfileRemoveRequest) (contract.ProfileRemoveResponse, *contract.Error) {
@@ -525,4 +537,27 @@ func (p *ProfileConfig) agyAccountLocked(name contract.ProfileName) ([]contract.
 		}
 	}
 	return names, limit
+}
+
+// checkHarnessSwitch refuses a live session's move between pig and agy that cannot be made, with the next step. The session keeps
+// its volume, so its earlier files carry over to the new harness as a handoff; what cannot move is the host, and a workflow's crew.
+func (s *Service) checkHarnessSwitch(ctx context.Context, target store.Session, profile contract.ProfileName, to contract.Harness) *contract.Error {
+	if _, err := s.store.SessionWorkflow(ctx, target.ID); err == nil {
+		return invalid(fmt.Sprintf("session %s is a workflow's crew, and a crew runs only on PiG profiles; a profile whose harness is pig is the only one it can use", target.Name))
+	} else if !errors.Is(err, store.ErrNotFound) {
+		return failure(err)
+	}
+	current, err := s.store.Box(ctx, target.Box)
+	if err != nil {
+		return failure(err)
+	}
+	if to == contract.HarnessAgy && current.Host != agyHost {
+		return &contract.Error{Code: contract.ErrConflict, Message: fmt.Sprintf("session %s runs on host %q and agy runs only on host %s, where the owner signed in to Google; its files cannot move there, so start a new session on profile %s", target.Name, current.Host, agyHost, profile)}
+	}
+	if can, err := s.store.BoxCanHandoff(ctx, target.Box); err != nil {
+		return failure(err)
+	} else if !can {
+		return &contract.Error{Code: contract.ErrConflict, Message: fmt.Sprintf("session %s runs in a box that cannot hand its conversation to another harness yet; the engine and box binaries differ until the box restarts, so try again after its box has restarted, or start a new session on profile %s", target.Name, profile)}
+	}
+	return nil
 }

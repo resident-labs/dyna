@@ -9,6 +9,8 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"os"
+	"strconv"
 	"sync"
 	"syscall"
 	"time"
@@ -288,7 +290,7 @@ func (c *Client) call(ctx context.Context, method contract.Method, body []byte) 
 }
 
 func (c *Client) Hello(ctx context.Context) (contract.BoxHelloResponse, error) {
-	body, err := json.Marshal(contract.BoxHelloRequest{WaitForChannel: true})
+	body, err := json.Marshal(contract.BoxHelloRequest{WaitForChannel: true, LaunchGen: launchGen()})
 	if err != nil {
 		return contract.BoxHelloResponse{}, err
 	}
@@ -435,4 +437,10 @@ func (c *Client) WorkflowEvents(ctx context.Context, req contract.WorkflowEvents
 func (c *Client) WorkflowEventDone(ctx context.Context, req contract.WorkflowEventDoneRequest) error {
 	_, err := request[contract.WorkflowEventDoneRequest, contract.WorkflowEventDoneResponse](ctx, c, contract.MethodWorkflowEventDone, req)
 	return err
+}
+
+// launchGen is the handoff generation the container was made for, which the engine puts in its environment; 0 when it has none.
+func launchGen() int64 {
+	gen, _ := strconv.ParseInt(os.Getenv("DYNA_LAUNCH_GEN"), 10, 64)
+	return gen
 }

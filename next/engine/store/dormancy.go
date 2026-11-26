@@ -23,9 +23,11 @@ func BoxUpdateNoticeID(box contract.BoxID, update string) string {
 // boxUpdateNotice finds that notice among deliveries. It is not work: it holds no close and does not pass to the parent.
 const boxUpdateNotice = `EXISTS (SELECT 1 FROM events e WHERE e.seq=d.seq AND e.client_id LIKE 'box-update:%')`
 
+// CanDispatch says a session's box is up and may be given a turn. A box whose container was made before the session's handoff became due, as
+// when it changed harness, is not: its launch is the old one, so it takes no turn until it restarts.
 func (s *Store) CanDispatch(ctx context.Context, id contract.SessionID) (bool, error) {
 	var ok bool
-	err := s.Read().QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM sessions s JOIN boxes b ON b.session=s.id WHERE s.id=? AND s.closed_at IS NULL AND s.state='open' AND b.want='run' AND b.state='ready')`, id).Scan(&ok)
+	err := s.Read().QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM sessions s JOIN boxes b ON b.session=s.id WHERE s.id=? AND s.closed_at IS NULL AND s.state='open' AND b.want='run' AND b.state='ready' AND NOT (s.handoff>0 AND b.launch_gen!=s.handoff))`, id).Scan(&ok)
 	return ok, err
 }
 
@@ -42,6 +44,21 @@ func (s *Store) RunningSessions(ctx context.Context, room contract.RoomID) ([]co
 // StopQuiet requests stops for candidates that nothing needs and that have been quiet since the cutoff.
 func (s *Store) StopQuiet(ctx context.Context, ids []contract.SessionID, cutoff time.Time) ([]contract.SessionID, error) {
 	return s.stopFree(ctx, ids, false, quiet, cutoff.UnixMilli())
+}
+
+// StopStartingBox asks for the stop of a box that is still starting, which no turn runs in, and says whether it did.
+func (s *Store) StopStartingBox(ctx context.Context, box contract.BoxID) (bool, error) {
+	var stopped bool
+	err := s.Write(ctx, func(tx *sql.Tx) error {
+		res, err := tx.ExecContext(ctx, "UPDATE boxes SET want='stop' WHERE id=? AND want='run' AND state IN ('creating','starting')", box)
+		if err != nil {
+			return err
+		}
+		n, err := res.RowsAffected()
+		stopped = n > 0
+		return err
+	})
+	return stopped, err
 }
 
 // StopStale requests stops for boxes on an old binary, or marked to restart, as soon as nothing runs in them, with no wait.
@@ -231,4 +248,31 @@ func (s *Store) ForgetShellJobs(ctx context.Context, id contract.SessionID) erro
 		_, err := tx.ExecContext(ctx, "UPDATE sessions SET shell_jobs=0 WHERE id=? AND shell_jobs>0", id)
 		return err
 	})
+}
+
+// NoteBoxHello records what a box said when it started: the handoff generation its container was made for, the harness it was
+// told to run, and whether it can hand a conversation over.
+func (s *Store) NoteBoxHello(ctx context.Context, box contract.BoxID, launchGen int64, harness contract.Harness, canHandoff bool) error {
+	return s.Write(ctx, func(tx *sql.Tx) error {
+		_, err := tx.ExecContext(ctx, "UPDATE boxes SET launch_gen=?,harness=?,can_handoff=? WHERE id=?", launchGen, harness, canHandoff, box)
+		return err
+	})
+}
+
+// BoxCanHandoff says the session's box reported at its last hello that it can hand a conversation over.
+func (s *Store) BoxCanHandoff(ctx context.Context, box contract.BoxID) (bool, error) {
+	var ok bool
+	err := s.Read().QueryRowContext(ctx, "SELECT can_handoff FROM boxes WHERE id=?", box).Scan(&ok)
+	return ok, err
+}
+
+// HandoffFence is the generation of the handoff a session's box was not made for, 0 when there is none: the box that is up was
+// launched for the harness the session left, so it takes no turn and is stale. It is stored, so a restarted engine finds it again.
+func (s *Store) HandoffFence(ctx context.Context, session contract.SessionID) (int64, error) {
+	var gen int64
+	err := s.Read().QueryRowContext(ctx, "SELECT CASE WHEN s.handoff>0 AND b.launch_gen!=s.handoff THEN s.handoff ELSE 0 END FROM sessions s JOIN boxes b ON b.session=s.id WHERE s.id=?", session).Scan(&gen)
+	if errors.Is(err, sql.ErrNoRows) {
+		return 0, nil
+	}
+	return gen, err
 }

@@ -94,24 +94,6 @@ func TestAgySessionRunsOnHermeslabOnly(t *testing.T) {
 	}
 }
 
-func TestSessionCannotMoveBetweenPigAndAgy(t *testing.T) {
-	s, room, worker, owner := agySetup(t)
-	ctx := t.Context()
-	if _, e := s.SessionSetProfile(ctx, owner, contract.SessionSetProfileRequest{Session: worker, Profile: "gem"}); e == nil || e.Code != contract.ErrConflict || !strings.Contains(e.Message, "start a new session on gem") {
-		t.Fatalf("pig to agy: %v", e)
-	}
-	if _, e := s.SessionSetProfile(ctx, owner, contract.SessionSetProfileRequest{Session: worker, Profile: "other"}); e != nil {
-		t.Fatalf("pig to pig: %v", e)
-	}
-	agy, e := s.SessionStart(ctx, owner, contract.SessionStartRequest{Room: room, Name: "gemini", Profile: "gem"})
-	if e != nil {
-		t.Fatal(e)
-	}
-	if _, e := s.SessionSetProfile(ctx, owner, contract.SessionSetProfileRequest{Session: agy.Session, Profile: "test"}); e == nil || e.Code != contract.ErrConflict {
-		t.Fatalf("agy to pig: %v", e)
-	}
-}
-
 func TestProfileEditsKeepSessionsOnTheirHarness(t *testing.T) {
 	s, room, _, owner := agySetup(t)
 	ctx := t.Context()

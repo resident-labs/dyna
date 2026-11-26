@@ -766,6 +766,12 @@ type EventsListResponse struct {
 // Older agents omit it and retain the ready-on-hello handshake.
 type BoxHelloRequest struct {
 	WaitForChannel bool `json:"waitForChannel,omitempty"`
+	// CanHandoff says the box starts a new native conversation from a handoff of the session's earlier files when the hello carries
+	// one. Until a box says so, the engine neither switches its session between pig and agy nor moves it between agy accounts.
+	CanHandoff bool `json:"canHandoff,omitempty"`
+	// LaunchGen is the handoff generation its container was made for, from the container's environment, 0 for a container made with
+	// none. A box made before a session's pending handoff reports an older one, and takes no turn.
+	LaunchGen int64 `json:"launchGen,omitempty"`
 }
 type ModelProvider string
 
@@ -855,6 +861,12 @@ type BoxHelloResponse struct {
 	Agy     *BoxAgy `json:"agy,omitempty"`
 	// Fresh says the session's conversation was cleared since its last turn, so the box starts a new session file instead of resuming.
 	Fresh bool `json:"fresh,omitempty"`
+	// Handoff says the session's native conversation must start again from a history of its earlier session files, as when it
+	// changed harness. The engine sets it until the first turn that starts after the change has ended.
+	Handoff bool `json:"handoff,omitempty"`
+	// HandoffGen names that handoff: the same text every hello until it is delivered, and a different one for the next change of
+	// harness, so a box tells a repeat from a new handoff. Empty when Handoff is false.
+	HandoffGen string `json:"handoffGen,omitempty"`
 }
 
 // MaxModelRetryAfterSeconds bounds hints for transient provider failures.
