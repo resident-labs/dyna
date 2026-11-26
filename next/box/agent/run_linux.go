@@ -250,13 +250,15 @@ func Run(ctx context.Context) error {
 			}
 			h, files = session, func() []string { return []string{session.SessionFile()} }
 		} else {
-			pigNew := hello.Fresh
 			var history string
 			state, err := loadHandoff(hello, handoffMarker)
 			if err != nil {
 				return err
 			}
-			pigNew = pigNew || state.Pending
+			pigNew, resume, state, err := state.openPlan(sessions, hello.Fresh)
+			if err != nil {
+				return err
+			}
 			interrupts := dynaext.NewInterrupts()
 			session, err := pig.Open(ctx, pig.Config{
 				Dir:               workdir,
@@ -267,6 +269,7 @@ func Run(ctx context.Context) error {
 				Instructions:      hello.Instructions,
 				ModelInstructions: hello.ModelInstructions,
 				New:               pigNew,
+				Resume:            resume,
 				Extensions:        []extension.InlineExtension{dynaext.Extension(dynaext.Config{Dir: workdir, Shell: jobs, Dyna: dynaTools, Interrupts: interrupts})},
 				Notice:            func(text string) { go notice(text) },
 			})

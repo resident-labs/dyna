@@ -150,7 +150,7 @@ func TestHandoffStartFailsWhenItCannotRecordTheCarrier(t *testing.T) {
 	marker := filepath.Join(t.TempDir(), "state.json")
 	rec := &startRecorder{}
 	h := pending(t, rec, marker, "HISTORY")
-	h.marker = filepath.Join(t.TempDir(), "missing", "state.json")
+	h.marker = t.TempDir() // a folder: the record cannot replace it
 	if _, err := h.Start(t.Context(), "t", []contract.TurnInput{{Delivery: 1, Text: "hi"}}, func() {}); err == nil || len(rec.texts) != 0 {
 		t.Fatalf("err %v, prompts %q", err, rec.texts)
 	}
@@ -182,7 +182,7 @@ func TestClearDropsThePendingHandoff(t *testing.T) {
 func TestClearFailsWhenItCannotRecordTheGeneration(t *testing.T) {
 	marker := filepath.Join(t.TempDir(), "state.json")
 	h := pending(t, &startRecorder{}, marker, "HISTORY")
-	h.marker = filepath.Join(t.TempDir(), "missing", "state.json")
+	h.marker = t.TempDir() // a folder: the record cannot replace it
 	if err := h.NewConversation(t.Context()); err == nil {
 		t.Fatal("the /clear reported success without recording it")
 	}
@@ -313,5 +313,74 @@ func TestHandoffOwedFollowsTheCarriersDelivery(t *testing.T) {
 		if got, err := c.state.owed(delivered); err != nil || got != c.owed {
 			t.Errorf("%s: owed %v, %v", c.name, got, err)
 		}
+	}
+}
+
+// A carrier whose file Pi never wrote opens a fresh conversation, never the newest older file (which a /clear left behind), and one
+// whose file exists resumes exactly that file.
+func TestOpenPlanNeverFallsBackToAnOlderFile(t *testing.T) {
+	sessions := t.TempDir()
+	conversation(t, sessions, "old.jsonl", time.Hour, "PRE_CLEAR")
+	conversation(t, sessions, "target.jsonl", 2*time.Hour, "carrier file")
+	for _, c := range []struct {
+		name       string
+		state      handoffState
+		fresh      bool
+		wantNew    bool
+		wantResume string
+		wantOwed   bool
+		wantCarry  contract.DeliverySeq
+	}{
+		{"file never written", handoffState{Gen: "7", Carrier: 3, File: "never.jsonl"}, false, true, "", true, 0},
+		{"record without a file", handoffState{Gen: "7", Carrier: 3}, false, true, "", true, 0},
+		{"file written", handoffState{Gen: "7", Carrier: 3, File: "target.jsonl"}, false, false, filepath.Join(sessions, "target.jsonl"), false, 3},
+		{"fresh after a delivered handoff", handoffState{Gen: "7", Carrier: 3, File: "target.jsonl"}, true, true, "", false, 0},
+		{"nothing carried", handoffState{Gen: "7"}, false, false, "", false, 0},
+	} {
+		newConversation, resume, plan, err := c.state.openPlan(sessions, c.fresh)
+		if err != nil || newConversation != c.wantNew || resume != c.wantResume || plan.Carrier != c.wantCarry {
+			t.Errorf("%s: new=%v resume=%q plan=%+v: %v", c.name, newConversation, resume, plan, err)
+			continue
+		}
+		// The ledger of a conversation that never saw the carrier owes the history; one that holds it does not.
+		owed, err := plan.owed(func(seq contract.DeliverySeq) (bool, error) { return seq == 3 && resume != "", nil })
+		if err != nil || owed != c.wantOwed {
+			t.Errorf("%s: owed %v: %v", c.name, owed, err)
+		}
+	}
+}
+
+// The recovery record is written with a rename after creating its folder, so a box that never set up a repository can record it.
+func TestHandoffStateCreatesItsFolderAndSurvivesAReload(t *testing.T) {
+	marker := filepath.Join(t.TempDir(), "state", "handoff-gen")
+	if state, err := loadHandoff(hello("7"), marker); err != nil || !state.Pending {
+		t.Fatalf("%+v: %v", state, err)
+	}
+	if state, err := loadHandoff(hello(""), marker); err != nil || !state.Pending || state.Gen != "7" {
+		t.Fatalf("%+v: %v", state, err)
+	}
+}
+
+// A marker that cannot be read for a reason other than being absent is an error, not "no handoff".
+func TestLoadHandoffReportsAnUnexpectedReadError(t *testing.T) {
+	marker := filepath.Join(t.TempDir(), "state")
+	if err := os.Mkdir(marker, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if state, err := loadHandoff(hello(""), marker); err == nil {
+		t.Fatalf("a marker that cannot be read became %+v", state)
+	}
+}
+
+// The carrier's file is recorded when the history is sent, so a restart can find it.
+func TestHandoffStartRecordsTheCarrierFile(t *testing.T) {
+	marker := filepath.Join(t.TempDir(), "state.json")
+	h := pending(t, &startRecorder{}, marker, "HISTORY")
+	h.file = func() string { return "/box/pi/sessions/new.jsonl" }
+	if _, err := h.Start(t.Context(), "t", []contract.TurnInput{{Delivery: 9, Text: "hi"}}, func() {}); err != nil {
+		t.Fatal(err)
+	}
+	if state := savedState(t, marker); state.File != "new.jsonl" || state.Carrier != 9 {
+		t.Fatalf("state %+v", state)
 	}
 }

@@ -145,3 +145,36 @@ func TestNewConversationOnFreshSessionIsNoOp(t *testing.T) {
 		t.Fatalf("session file changed on empty session: %s -> %s", first, h.SessionFile())
 	}
 }
+
+// Resume continues the named session file in place of the newest one in the folder.
+func TestOpenResumesTheNamedFileNotTheNewest(t *testing.T) {
+	model := pigtest.NewModel([]pigtest.Block{{Text: "first"}}, []pigtest.Block{{Text: "second"}})
+	c := config(t, model, "")
+	c.New = true
+	first, err := Open(t.Context(), c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := first.Start(t.Context(), "a", []contract.TurnInput{{Delivery: 1, Text: "in the first file"}}, func() {}); err != nil {
+		t.Fatal(err)
+	}
+	firstPath := first.SessionFile()
+	first.Close()
+	second, err := Open(t.Context(), c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := second.Start(t.Context(), "b", []contract.TurnInput{{Delivery: 2, Text: "in the second file"}}, func() {}); err != nil {
+		t.Fatal(err)
+	}
+	second.Close()
+	c.New, c.Resume = false, firstPath
+	resumed, err := Open(t.Context(), c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resumed.Close()
+	if resumed.SessionFile() != firstPath {
+		t.Fatalf("resumed %s, want %s", resumed.SessionFile(), firstPath)
+	}
+}

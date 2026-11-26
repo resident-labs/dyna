@@ -365,13 +365,14 @@ func TestHarnessReadUnderTheHeldLockCompletesWithAnEditQueued(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	finished := make(chan contract.Harness, 1)
+	finished, edited := make(chan contract.Harness, 1), make(chan struct{})
 	go func() {
 		config.WithProfile("gem", func(harnessOf func(contract.ProfileName) contract.Harness) *contract.Error {
 			queued := make(chan struct{})
 			go func() {
 				close(queued)
 				config.Set("other", &profile{Provider: "openai", Model: "m", AllowedModels: []string{"m"}, Thinking: "low", Harness: contract.HarnessPig}, false, func(profile) *contract.Error { return nil })
+				close(edited)
 			}()
 			<-queued
 			time.Sleep(100 * time.Millisecond)
@@ -387,6 +388,8 @@ func TestHarnessReadUnderTheHeldLockCompletesWithAnEditQueued(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		t.Fatal("deadlock: a harness read under the held lock blocked behind a queued edit")
 	}
+	// The edit writes the profile file in the test's folder, so it must be done before the folder goes.
+	<-edited
 }
 
 // The launch generation is compared in the write that would extend the startup, so a switch that commits after the hello read the

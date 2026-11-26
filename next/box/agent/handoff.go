@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"slices"
@@ -57,6 +58,9 @@ type handoffState struct {
 	// Carrier is the input whose prompt carried the history: Pi's ledger of delivered inputs says whether it took it. PiG answers the
 	// preflight before it writes the prompt, so no callback can.
 	Carrier contract.DeliverySeq `json:"carrier,omitempty"`
+	// File is the Pi session file that input was sent on. A restart that does not find the carrier in it opens a fresh conversation, never
+	// the newest older file, which holds what a /clear dropped.
+	File string `json:"file,omitempty"`
 }
 
 func (s handoffState) save(path string) error {
@@ -64,14 +68,18 @@ func (s handoffState) save(path string) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(path, data, 0600)
+	return writeSetupState(path, string(data))
 }
 
 // loadHandoff reads the state at marker, and records a new generation from the hello as pending before anything else happens, so no
 // crash after the hello loses it.
 func loadHandoff(hello contract.BoxHelloResponse, marker string) (handoffState, error) {
 	var state handoffState
-	if data, err := os.ReadFile(marker); err == nil {
+	data, err := os.ReadFile(marker)
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return state, err
+	}
+	if err == nil {
 		if err := json.Unmarshal(data, &state); err != nil {
 			return state, err
 		}
@@ -81,6 +89,33 @@ func loadHandoff(hello contract.BoxHelloResponse, marker string) (handoffState, 
 		return state, state.save(marker)
 	}
 	return state, nil
+}
+
+// openPlan decides how Pi opens given what the record says: a fresh conversation (a new handoff, or the hello says fresh), the carrying
+// file when a history was sent on one that exists, and otherwise a fresh conversation again. Never the newest file by default: after a
+// /clear that is one the clear left behind. resume is "" when the plan is a fresh conversation or the record carries nothing.
+func (s handoffState) openPlan(sessions string, fresh bool) (newConversation bool, resume string, plan handoffState, err error) {
+	plan = s
+	newConversation = fresh || s.Pending
+	if newConversation {
+		// A carrier belongs to an older file: the new conversation's ledger cannot hold it.
+		plan.Carrier, plan.File = 0, ""
+		return true, "", plan, nil
+	}
+	if s.Carrier == 0 {
+		return false, "", plan, nil
+	}
+	if s.File != "" {
+		path := filepath.Join(sessions, s.File)
+		if _, err := os.Stat(path); err == nil {
+			return false, path, plan, nil
+		} else if !errors.Is(err, os.ErrNotExist) {
+			return false, "", plan, err
+		}
+	}
+	// Pi never wrote the file the carrier was sent on, so nothing was delivered.
+	plan.Pending, plan.Carrier, plan.File = true, 0, ""
+	return true, "", plan, nil
 }
 
 // owed says whether the history is still owed once Pi is open: it is when no prompt carried it, or when the one that did was never
@@ -127,7 +162,7 @@ func (h *handoffStart) Start(ctx context.Context, turn contract.TurnID, inputs [
 		}
 	}
 	if h.state.Pending && len(inputs) > 0 {
-		next := handoffState{Gen: h.state.Gen, Carrier: inputs[0].Delivery}
+		next := handoffState{Gen: h.state.Gen, Carrier: inputs[0].Delivery, File: filepath.Base(h.file())}
 		if err := next.save(h.marker); err != nil {
 			h.mu.Unlock()
 			return contract.TurnEnded{}, err
