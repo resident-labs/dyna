@@ -166,7 +166,7 @@ func TestAgyProfileShownInContext(t *testing.T) {
 			text = sec.Text
 		}
 	}
-	if !strings.Contains(text, "gem:") || !strings.Contains(text, "agy: Google's agent with its own tools plus Dyna's, on host hermeslab only") || strings.Contains(text, "other: taste 0, diagnostics 0, intelligence 0, cost 0; agy") {
+	if !strings.Contains(text, "gem:") || !strings.Contains(text, "harness agy: Google's agent with its own tools plus Dyna's, hermeslab only") || strings.Contains(text, "other: taste 0, diagnostics 0, intelligence 0, cost 0; agy") {
 		t.Fatalf("profiles section %q", text)
 	}
 }
@@ -233,5 +233,25 @@ func TestAgyLimitHoldsUnderConcurrentStarts(t *testing.T) {
 	wg.Wait()
 	if started.Load() != 2 {
 		t.Fatalf("%d sessions started on a profile that allows 2", started.Load())
+	}
+}
+
+func TestDiscordRouteRefusesAnAgySession(t *testing.T) {
+	f := discordFixture(t)
+	config, err := loadAgyProfiles(t, agyProfilesJSON)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.s.profiles = config
+	owner := contract.Principal{Kind: contract.PrincipalOwner}
+	if err := f.s.store.AddHost(f.ctx, box.Host{Name: "hermeslab", State: box.HostReady, CPUs: 32, MemBytes: 64 * box.GiB, DiskBytes: 100 * box.GiB, CheckedAt: f.s.now()}); err != nil {
+		t.Fatal(err)
+	}
+	if _, e := f.s.SessionStart(f.ctx, owner, contract.SessionStartRequest{Room: f.room, Name: "gemini", Profile: "gem"}); e != nil {
+		t.Fatal(e)
+	}
+	_, e := f.s.RoomDiscord(f.ctx, owner, contract.RoomDiscordRequest{Room: f.room, Server: "100", Session: "gemini"})
+	if e == nil || !strings.Contains(e.Message, "name a session on a pig profile") {
+		t.Fatalf("%v", e)
 	}
 }

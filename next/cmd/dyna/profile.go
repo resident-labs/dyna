@@ -126,7 +126,7 @@ func profileCommand(getClient func() client) *cobra.Command {
 	set.Flags().IntVar(&intelligence, "intelligence", 0, "rating 0..10")
 	set.Flags().IntVar(&cost, "cost", 0, "rating 0..10")
 	set.Flags().IntVar(&compactTokens, "compact-tokens", 0, "compaction trigger in tokens; 0 is Pi's default")
-	set.Flags().StringVar(&harness, "harness", "", "pig (the default) or agy: Google's agent, provider google, run on host hermeslab only")
+	set.Flags().StringVar(&harness, "harness", "", "pig (the default) or agy (provider google)")
 	set.Flags().IntVar(&maxConcurrent, "max-concurrent", 0, "most workflow workers at once; 0 is unlimited")
 	var replacement string
 	remove := &cobra.Command{Use: "remove NAME [--replacement NAME]", Short: "Remove a profile", Long: "Remove a profile. One that open sessions use is refused, unless --replacement names another profile, which takes those sessions first.", Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
