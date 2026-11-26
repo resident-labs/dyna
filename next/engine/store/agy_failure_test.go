@@ -94,8 +94,8 @@ func TestAgyQuotaFailureWakesOnceAtTheReset(t *testing.T) {
 		t.Fatalf("a pig session stopped compacting: %v %v", due, err)
 	}
 	resetAt := now.Add(time.Duration(reset) * time.Second).UnixMilli()
-	if retryAt < resetAt || retryAt > resetAt+int64(time.Minute/time.Millisecond) {
-		t.Fatalf("retry at %d, want the reset %d plus a little jitter", retryAt, resetAt)
+	if retryAt != resetAt {
+		t.Fatalf("retry at %d, want exactly the reset %d", retryAt, resetAt)
 	}
 	wakes := func() int {
 		var n int
@@ -107,10 +107,10 @@ func TestAgyQuotaFailureWakesOnceAtTheReset(t *testing.T) {
 	if err := s.WakeModelRetries(ctx, now.Add(time.Duration(reset-3600)*time.Second)); err != nil || wakes() != 0 {
 		t.Fatalf("woken before the reset: %d %v", wakes(), err)
 	}
-	if err := s.WakeModelRetries(ctx, now.Add(time.Duration(reset+120)*time.Second)); err != nil || wakes() != 1 {
+	if err := s.WakeModelRetries(ctx, now.Add(time.Duration(reset)*time.Second)); err != nil || wakes() != 1 {
 		t.Fatalf("not woken once at the reset: %d %v", wakes(), err)
 	}
-	if err := s.WakeModelRetries(ctx, now.Add(time.Duration(reset+240)*time.Second)); err != nil || wakes() != 1 {
+	if err := s.WakeModelRetries(ctx, now.Add(time.Duration(reset+120)*time.Second)); err != nil || wakes() != 1 {
 		t.Fatalf("woken twice: %d %v", wakes(), err)
 	}
 }
@@ -127,6 +127,7 @@ func TestAgyQuotaRetryIsOutsideTheLadder(t *testing.T) {
 		want    string
 	}{
 		{"agy, reset, after eight attempts", 3600, true, 8, "at the reset"},
+		{"agy, a short reset", 7, true, 0, "at 7s"},
 		{"agy, no reset", 0, true, 0, "none"},
 		{"pig, no reset, ladder", 0, false, 0, "ladder"},
 		{"pig, reset, after eight attempts", 3600, false, 8, "none"},
@@ -164,8 +165,12 @@ func TestAgyQuotaRetryIsOutsideTheLadder(t *testing.T) {
 			at := time.UnixMilli(retryAt).Sub(now)
 			switch c.want {
 			case "at the reset":
-				if at < time.Hour || at > time.Hour+30*time.Second {
-					t.Fatalf("retry in %v, want the reset plus a little jitter", at)
+				if at != time.Hour {
+					t.Fatalf("retry in %v, want exactly the reset", at)
+				}
+			case "at 7s":
+				if at != 7*time.Second {
+					t.Fatalf("retry in %v, want exactly 7s, with no floor", at)
 				}
 			case "ladder":
 				if at < 5*time.Minute {

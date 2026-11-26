@@ -16,7 +16,7 @@ func TestModelRetryCancellation(t *testing.T) {
 			channel := contract.ReplyChannel{Kind: contract.ReplyNone}
 			s, _ := endTurnFixture(t, []contract.ReplyChannel{channel}, contract.PostCreated{Text: "already sent tool post", Home: endTurnDM})
 			if phase == "running" || phase == "stop races failure" {
-				if stopping, err := s.RequestTurnStop(ctx, "child", now); err != nil || !stopping {
+				if stopping, _, err := s.RequestTurnStop(ctx, "child", now); err != nil || !stopping {
 					t.Fatalf("stop running: %v %v", stopping, err)
 				}
 			}
@@ -43,7 +43,7 @@ func TestModelRetryCancellation(t *testing.T) {
 				}
 			}
 			if phase == "backoff" || phase == "queued" {
-				if stopping, err := s.RequestTurnStop(ctx, "child", due); err != nil || !stopping {
+				if stopping, _, err := s.RequestTurnStop(ctx, "child", due); err != nil || !stopping {
 					t.Fatalf("stop %s: %v %v", phase, stopping, err)
 				}
 			}

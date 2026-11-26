@@ -275,8 +275,8 @@ func TestDiscordRouteRefusesAnAgySession(t *testing.T) {
 	}
 }
 
-// A stop reaches an agy harness whether or not a turn runs, and whether or not it also cancelled a quota retry (which alone makes
-// stopping true): work the last turn left behind runs on.
+// With no turn running, a stop reaches an agy harness as a turn-less stop, and the response says something stopped: work the last
+// turn left behind runs on. A running turn gets the named stop from the stream instead.
 func TestStopReachesAnAgyHarnessWithNoTurn(t *testing.T) {
 	s, room, _, owner := agySetup(t)
 	ctx := t.Context()

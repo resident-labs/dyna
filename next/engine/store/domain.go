@@ -390,11 +390,10 @@ func (s *Store) EndTurn(ctx context.Context, session contract.SessionID, output 
 				retryAt = -1
 			}
 			if output.OneWake && !cancelled {
-				// One wake per failed turn, at the stated reset and a little after, whatever came before; no reset, no retry.
+				// One wake per failed turn, at the stated reset exactly, whatever came before; no reset, no retry.
 				retryAt, deferred = 0, output.ModelRetryAfterSeconds > 0
 				if deferred {
-					base := time.Duration(output.ModelRetryAfterSeconds) * time.Second
-					retryAt = event.Time.Add(base + time.Duration(randv2.Int64N(int64(min(base/10, 30*time.Second))))).UnixMilli()
+					retryAt = event.Time.Add(time.Duration(output.ModelRetryAfterSeconds) * time.Second).UnixMilli()
 				}
 			} else if retries < 8 && !cancelled {
 				delay := 5 * time.Minute * time.Duration(1<<retries)
