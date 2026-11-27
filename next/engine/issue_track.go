@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"slices"
 	"strings"
 
 	"github.com/resident-labs/dyna/contract"
@@ -102,17 +101,11 @@ func (s *Service) IssueTrack(ctx context.Context, caller contract.Principal, req
 	if err != nil {
 		return contract.IssueTrackResponse{}, &contract.Error{Code: contract.ErrUnavailable, Message: "GitHub did not answer: " + err.Error()}
 	}
-	if caller.Kind == contract.PrincipalSession {
-		repos, err := s.store.RoomRepos(ctx, owner.Room)
-		if err != nil {
-			return contract.IssueTrackResponse{}, failure(err)
-		}
-		if !slices.ContainsFunc(repos, func(item contract.RoomRepo) bool { return item.Repo == repo }) {
+	row := store.TrackedIssue{IssueSummary: contract.IssueSummary{Repo: repo, Number: req.Number, URL: seen.URL, Title: seen.Title, Author: seen.Author, Session: owner.ID, State: contract.IssueState(seen.State)}, Meta: seen.Meta}
+	if err := s.store.TrackIssue(ctx, row, caller.Kind == contract.PrincipalSession); err != nil {
+		if errors.Is(err, store.ErrRepoNotFound) {
 			return contract.IssueTrackResponse{}, &contract.Error{Code: contract.ErrForbidden, Message: fmt.Sprintf("repository %s is not in this room; the owner can track it", repo)}
 		}
-	}
-	row := store.TrackedIssue{IssueSummary: contract.IssueSummary{Repo: repo, Number: req.Number, URL: seen.URL, Title: seen.Title, Author: seen.Author, Session: owner.ID, State: contract.IssueState(seen.State)}, Meta: seen.Meta}
-	if err := s.store.TrackIssue(ctx, row); err != nil {
 		return contract.IssueTrackResponse{}, failure(err)
 	}
 	stored, e := s.trackedIssue(ctx, caller, repo, req.Number)

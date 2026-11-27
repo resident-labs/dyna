@@ -5,6 +5,8 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"strings"
 
 	"github.com/resident-labs/dyna/contract"
 	"github.com/resident-labs/dyna/room"
@@ -127,6 +129,9 @@ func (s *Store) AddRoomRepo(ctx context.Context, id contract.RoomID, name contra
 		if _, err := tx.ExecContext(ctx, "INSERT INTO repos(repo,default_room) VALUES(?,?) ON CONFLICT(repo) DO NOTHING", name, defaultRoom); err != nil {
 			return err
 		}
+		if _, err := tx.ExecContext(ctx, "INSERT INTO repo_registrations(repo,generation) VALUES(?,lower(hex(randomblob(16)))) ON CONFLICT(repo) DO NOTHING", name); err != nil {
+			return err
+		}
 		if _, err := tx.ExecContext(ctx, "UPDATE room_repos SET is_default=0 WHERE room=?", id); err != nil {
 			return err
 		}
@@ -147,4 +152,92 @@ func (s *Store) AddRoomRepo(ctx context.Context, id contract.RoomID, name contra
 		}
 		return nil
 	})
+}
+
+// ErrRoomRepoInUse refuses to remove a room's default or a repository it still uses.
+var ErrRoomRepoInUse = errors.New("cannot remove repository")
+
+// RemoveRoomRepo removes just this room's link. The remaining rooms retain shared polling and CI.
+func (s *Store) RemoveRoomRepo(ctx context.Context, room contract.RoomID, repo contract.RepoName) error {
+	return s.Write(ctx, func(tx *sql.Tx) error {
+		if err := roomOpen(ctx, tx, room); err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				return ErrRoomNotFound
+			}
+			return err
+		}
+		var isDefault bool
+		if err := tx.QueryRowContext(ctx, `SELECT is_default FROM room_repos WHERE room=? AND repo=?`, room, repo).Scan(&isDefault); err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				return fmt.Errorf("%w: %s is not listed in this room", ErrRepoNotFound, repo)
+			}
+			return err
+		}
+		if isDefault {
+			return fmt.Errorf("%w %s: it is the room default; make another repository the default first", ErrRoomRepoInUse, repo)
+		}
+		blockers, err := listIDs[string](ctx, tx, `SELECT 'session ' || name || ' (' || id || ')' FROM sessions WHERE room=?1 AND repo=?2 COLLATE NOCASE AND closed_at IS NULL
+   UNION ALL SELECT 'PR #' || p.number || ' (' || p.repo || ')' FROM pr_owners p JOIN sessions s ON s.id=p.session WHERE s.room=?1 AND (p.repo=?2 COLLATE NOCASE OR p.head_repo=?2 COLLATE NOCASE) AND p.state='open'
+   UNION ALL SELECT 'issue #' || i.number FROM issue_owners i JOIN sessions s ON s.id=i.session WHERE s.room=?1 AND i.repo=?2 COLLATE NOCASE AND i.state='open'
+   ORDER BY 1`, room, repo)
+		if err != nil {
+			return err
+		}
+		if len(blockers) > 0 {
+			return fmt.Errorf("%w %s: still used by %s", ErrRoomRepoInUse, repo, strings.Join(blockers, ", "))
+		}
+		var next sql.NullString
+		var ci bool
+		if err := tx.QueryRowContext(ctx, `SELECT (SELECT MIN(room) FROM room_repos WHERE repo=?2 AND room<>?1), ci FROM repos WHERE repo=?2`, room, repo).Scan(&next, &ci); err != nil {
+			return err
+		}
+		if !next.Valid && ci {
+			return fmt.Errorf("%w %s: Dyna CI is on; wait for running jobs to finish, turn it off with dyna room repo ci %s --off, then remove it", ErrRoomRepoInUse, repo, repo)
+		}
+		// Remaining tracking rows of this room are closed. Leaving them would keep the poller watching for reopens.
+		for _, query := range []string{
+			`DELETE FROM pr_owners WHERE repo=?2 COLLATE NOCASE AND session IN (SELECT id FROM sessions WHERE room=?1)`,
+			`DELETE FROM issue_owners WHERE repo=?2 COLLATE NOCASE AND session IN (SELECT id FROM sessions WHERE room=?1)`,
+			`DELETE FROM room_repos WHERE room=?1 AND repo=?2`, // Cascades to room_pr_observed.
+		} {
+			if _, err := tx.ExecContext(ctx, query, room, repo); err != nil {
+				return err
+			}
+		}
+		// Unlinking drops this room's snapshots. A re-added link cannot use a continuation
+		// that assumed it had received earlier pages, or a pass read for the old link.
+		if _, err := tx.ExecContext(ctx, `DELETE FROM github_feeds WHERE repo=? AND feed=?`, repo, RoomPRCensusFeed); err != nil {
+			return err
+		}
+		if next.Valid {
+			if _, err := tx.ExecContext(ctx, `UPDATE repo_registrations SET generation=lower(hex(randomblob(16))) WHERE repo=?`, repo); err != nil {
+				return err
+			}
+			_, err := tx.ExecContext(ctx, `UPDATE repos SET default_room=? WHERE repo=? AND default_room=?`, next.String, repo, room)
+			return err
+		}
+		// A different room can track this repository without listing it; keep its live cursors.
+		for _, query := range []string{
+			`DELETE FROM github_feeds WHERE repo=?1 AND NOT EXISTS (SELECT 1 FROM pr_owners WHERE repo=?1) AND NOT EXISTS (SELECT 1 FROM issue_owners WHERE repo=?1)`,
+			`DELETE FROM repo_heads WHERE repo=?`,
+			`DELETE FROM repos WHERE repo=?`,
+		} {
+			if _, err := tx.ExecContext(ctx, query, repo); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+}
+
+// requireTrackerRepo checks a session's authorization in the same transaction as the tracking write.
+func requireTrackerRepo(ctx context.Context, tx *sql.Tx, session contract.SessionID, repo, head contract.RepoName) error {
+	var listed bool
+	if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM room_repos r JOIN sessions s ON s.room=r.room WHERE s.id=? AND r.repo IN (?,?))`, session, repo, head).Scan(&listed); err != nil {
+		return err
+	}
+	if !listed {
+		return ErrRepoNotFound
+	}
+	return nil
 }

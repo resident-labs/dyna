@@ -78,6 +78,7 @@ type fakeClient struct {
 	room           contract.RoomCreateRequest
 	limits         contract.RoomSetLimitsRequest
 	repoAdd        contract.RoomRepoAddRequest
+	repoRemove     contract.RoomRepoRemoveRequest
 	repoCI         contract.RepoCISetRequest
 	repoList       contract.RoomReposRequest
 	start          contract.SessionStartRequest
@@ -249,6 +250,10 @@ func (f *fakeClient) RepoCISet(_ context.Context, q contract.RepoCISetRequest) (
 func (f *fakeClient) RoomRepoAdd(_ context.Context, q contract.RoomRepoAddRequest) (contract.RoomRepoAddResponse, error) {
 	f.repoAdd = q
 	return contract.RoomRepoAddResponse{}, nil
+}
+func (f *fakeClient) RoomRepoRemove(_ context.Context, q contract.RoomRepoRemoveRequest) (contract.RoomRepoRemoveResponse, error) {
+	f.repoRemove = q
+	return contract.RoomRepoRemoveResponse{}, nil
 }
 func (f *fakeClient) RoomRepos(_ context.Context, q contract.RoomReposRequest) (contract.RoomReposResponse, error) {
 	f.repoList = q
@@ -455,6 +460,10 @@ func TestRoomRepos(t *testing.T) {
 	}
 	if _, err := execCLI(f, "room", "repo", "add", "r", "owner/a", "--pr-events", "yes"); err == nil || !strings.Contains(err.Error(), "on or off") {
 		t.Fatalf("invalid PR events flag: %v", err)
+	}
+	runCLI(t, f, "room", "repo", "remove", "r", "owner/b")
+	if f.repoRemove.Room != "r" || f.repoRemove.Repo != "owner/b" {
+		t.Fatalf("%+v", f.repoRemove)
 	}
 	out := runCLI(t, f, "room", "repo", "list", "r")
 	if f.repoList.Room != "r" || out != "owner/a (default)\nowner/b\n" {

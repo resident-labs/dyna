@@ -15,7 +15,6 @@ import (
 
 const (
 	feedRoomRecovery = "room_pr_recovery"
-	feedRoomCensus   = "room_pr_census"
 	roomPRReadBudget = 20 * time.Second // census, recovery and room-only detail reads share this budget
 )
 
@@ -54,7 +53,7 @@ func (p *Poller) roomPRs(ctx context.Context, client *Client, repo contract.Repo
 		}
 		next = progress.NextPage
 		if census {
-			saved := feeds[feedRoomCensus].Cursor
+			saved := feeds[store.RoomPRCensusFeed].Cursor
 			// A newly enabled room did not receive the preceding pages.
 			if slices.Equal(rooms, saved.CensusRooms) {
 				next = saved.NextPage
@@ -94,12 +93,12 @@ func (p *Poller) roomPRs(ctx context.Context, client *Client, repo contract.Repo
 	censusComplete := census && next == ""
 	// Commit the continuation with the snapshots, independently of the live feed cursors.
 	if census {
-		saved := feeds[feedRoomCensus].Cursor
+		saved := feeds[store.RoomPRCensusFeed].Cursor
 		if next == "" {
 			rooms = nil
 		}
 		if next != saved.NextPage || !slices.Equal(rooms, saved.CensusRooms) {
-			probe.Feeds = append(probe.Feeds, store.GitHubFeed{Repo: repo, Feed: feedRoomCensus, Cursor: store.FeedCursor{NextPage: next, CensusRooms: rooms}})
+			probe.Feeds = append(probe.Feeds, store.GitHubFeed{Repo: repo, Feed: store.RoomPRCensusFeed, Cursor: store.FeedCursor{NextPage: next, CensusRooms: rooms}})
 		}
 	} else {
 		if next == "" {

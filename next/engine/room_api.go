@@ -34,11 +34,15 @@ func (s *Service) RoomCreate(ctx context.Context, caller contract.Principal, req
 	return contract.RoomCreateResponse{Room: room}, nil
 }
 
-func (s *Service) RoomRepoAdd(ctx context.Context, caller contract.Principal, req contract.RoomRepoAddRequest) (contract.RoomRepoAddResponse, *contract.Error) {
-	owner, name, ok := strings.Cut(string(req.Repo), "/")
+func validRoomRepo(repo contract.RepoName) bool {
+	owner, name, ok := strings.Cut(string(repo), "/")
 	ownerOK, _ := regexp.MatchString(`^[A-Za-z0-9][A-Za-z0-9-]{0,38}$`, owner)
 	nameOK, _ := regexp.MatchString(`^[A-Za-z0-9_.-]+$`, name)
-	if !ok || !ownerOK || !nameOK || name == "." || name == ".." {
+	return ok && ownerOK && nameOK && name != "." && name != ".."
+}
+
+func (s *Service) RoomRepoAdd(ctx context.Context, caller contract.Principal, req contract.RoomRepoAddRequest) (contract.RoomRepoAddResponse, *contract.Error) {
+	if !validRoomRepo(req.Repo) {
 		return contract.RoomRepoAddResponse{}, invalid("repository must be owner/name")
 	}
 	if err := s.store.AddRoomRepo(ctx, req.Room, req.Repo, req.Default, req.PREvents); err != nil {
@@ -48,6 +52,22 @@ func (s *Service) RoomRepoAdd(ctx context.Context, caller contract.Principal, re
 		return contract.RoomRepoAddResponse{}, failure(err)
 	}
 	return contract.RoomRepoAddResponse{}, nil
+}
+
+func (s *Service) RoomRepoRemove(ctx context.Context, caller contract.Principal, req contract.RoomRepoRemoveRequest) (contract.RoomRepoRemoveResponse, *contract.Error) {
+	if !validRoomRepo(req.Repo) {
+		return contract.RoomRepoRemoveResponse{}, invalid("repository must be owner/name")
+	}
+	err := s.store.RemoveRoomRepo(ctx, req.Room, req.Repo)
+	switch {
+	case errors.Is(err, store.ErrRoomNotFound), errors.Is(err, store.ErrRepoNotFound):
+		return contract.RoomRepoRemoveResponse{}, invalid(err.Error())
+	case errors.Is(err, store.ErrRoomRepoInUse):
+		return contract.RoomRepoRemoveResponse{}, &contract.Error{Code: contract.ErrConflict, Message: err.Error()}
+	case err != nil:
+		return contract.RoomRepoRemoveResponse{}, failure(err)
+	}
+	return contract.RoomRepoRemoveResponse{}, nil
 }
 
 // RepoCISet chooses where a repository's CI runs. Only the owner reaches it.

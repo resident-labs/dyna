@@ -58,3 +58,11 @@ func (a *Accounts) Client(token, login string) *Client {
 	}
 	return c
 }
+
+func (a *Accounts) forgetRepo(repo contract.RepoName) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	for _, c := range a.clients {
+		c.forgetRepo(repo)
+	}
+}

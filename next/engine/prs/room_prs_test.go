@@ -249,7 +249,7 @@ func TestRoomPRGapKeepsLiveEventsAndRetriesRecovery(t *testing.T) {
 	if listAttempts != 3 || detailAttempts != 3 || !after["events"].Cursor.At.After(before) || after[feedRoomRecovery].Cursor.At.IsZero() {
 		t.Fatalf("list attempts=%d, detail attempts=%d, events at=%s (was %s), recovery=%s", listAttempts, detailAttempts, after["events"].Cursor.At, before, after[feedRoomRecovery].Cursor.At)
 	}
-	if status := s.PRPollStatus(repo); status != "degraded: PR list: GitHub HTTP 504; PR details: GitHub HTTP 504" {
+	if status := s.PRPollStatus(ctx, repo); status != "degraded: PR list: GitHub HTTP 504; PR details: GitHub HTTP 504" {
 		t.Fatalf("status=%q", status)
 	}
 	latest := func(n int, kind contract.PrChangeKind) {
@@ -273,7 +273,7 @@ func TestRoomPRGapKeepsLiveEventsAndRetriesRecovery(t *testing.T) {
 	server.Edit(repo, 2, func(pr *fakegithub.Pull) { pr.Head = "new-head" })
 	pass()
 	latest(2, contract.PrChangePushed)
-	if status := s.PRPollStatus(repo); status != "" || !feeds()[feedRoomRecovery].Cursor.At.IsZero() || listAttempts != 4 {
+	if status := s.PRPollStatus(ctx, repo); status != "" || !feeds()[feedRoomRecovery].Cursor.At.IsZero() || listAttempts != 4 {
 		t.Fatalf("recovery did not clear: status=%q, list attempts=%d", status, listAttempts)
 	}
 }

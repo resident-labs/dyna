@@ -448,6 +448,7 @@ func (a *API) handler(c Caller) http.Handler {
 	call(mux, contract.MethodOwnerTimezone, c, a.service.OwnerTimezone)
 	call(mux, contract.MethodRoomSet, c, a.service.RoomSet)
 	call(mux, contract.MethodRoomRepoAdd, c, a.service.RoomRepoAdd)
+	call(mux, contract.MethodRoomRepoRemove, c, a.service.RoomRepoRemove)
 	call(mux, contract.MethodRoomRepos, c, a.service.RoomRepos)
 	call(mux, contract.MethodRepoCISet, c, a.service.RepoCISet)
 	call(mux, contract.MethodSessionStart, c, a.service.SessionStart)

@@ -97,12 +97,18 @@ func (s *Store) Issue(ctx context.Context, repo contract.RepoName, number int) (
 }
 
 // TrackIssue adds an issue with a baseline, so what it already shows wakes nobody. A closed row can be tracked again.
-func (s *Store) TrackIssue(ctx context.Context, issue TrackedIssue) error {
+// TrackIssue may require that the session's room still lists the repository. The owner may track an unlisted repository.
+func (s *Store) TrackIssue(ctx context.Context, issue TrackedIssue, requireListed ...bool) error {
 	meta, err := encodeMeta(issue.Meta)
 	if err != nil {
 		return err
 	}
 	return s.Write(ctx, func(tx *sql.Tx) error {
+		if len(requireListed) > 0 && requireListed[0] {
+			if err := requireTrackerRepo(ctx, tx, issue.Session, issue.Repo, ""); err != nil {
+				return err
+			}
+		}
 		result, err := tx.ExecContext(ctx, `INSERT INTO issue_owners(repo,number,session,url,title,author,state,meta) VALUES(?,?,?,?,?,?,?,?)
 ON CONFLICT(repo,number) DO UPDATE SET session=excluded.session,url=excluded.url,title=excluded.title,author=excluded.author,state=excluded.state,
 own_wake_at=0,meta=excluded.meta,meta_wake_at=0,baseline=1 WHERE state<>'open'`,

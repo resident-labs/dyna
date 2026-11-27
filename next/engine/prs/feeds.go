@@ -271,6 +271,14 @@ func (c *Client) restingFor(key string) bool {
 	return c.Now().Before(c.resting[key])
 }
 
+// forgetRepo discards poll intervals from a previous registration.
+func (c *Client) forgetRepo(repo contract.RepoName) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	prefix := string(repo) + " "
+	maps.DeleteFunc(c.resting, func(key string, _ time.Time) bool { return strings.HasPrefix(key, prefix) })
+}
+
 // walk reads one feed down to its cursor. The first page carries the ETag, and a 304 there ends the walk at no cost. A feed
 // with no stored row starts at its head: what it already lists is not news, so a deploy replays nothing.
 func (c *Client) walk(ctx context.Context, repo contract.RepoName, feed listFeed, row store.GitHubFeed, viewer string) (feedRead, error) {
