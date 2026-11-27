@@ -29,7 +29,8 @@ type Poller struct {
 	Accounts *Accounts
 	Now      func() time.Time
 
-	last map[contract.RepoName]time.Time // when each repository was last read
+	last          map[contract.RepoName]time.Time // when each repository was last read
+	registrations map[contract.RepoName]string    // identities observed by the previous pass
 }
 
 // Run runs a pass on each tick until ctx ends.
@@ -105,7 +106,7 @@ func (p *Poller) repository(ctx context.Context, repo contract.RepoName, pulls [
 		case problem != nil:
 			return // A quota pause is expected; it does not clear a previous failure.
 		}
-		if p.Store.SetPRPollStatus(repo, status) {
+		if p.Store.SetPRPollStatus(repo, heads[repo].Registration, status) {
 			log.Printf("github %s PR events: %s", repo, status)
 		}
 	}()
@@ -259,6 +260,22 @@ func (p *Poller) Pass(ctx context.Context) error {
 		repos[row.Repo] = true
 		issuesIn[row.Repo] = append(issuesIn[row.Repo], row)
 	}
+	for repo, old := range p.registrations {
+		if repos[repo] && heads[repo].Registration == old {
+			continue
+		}
+		delete(p.last, repo)
+		p.Store.SetPRPollStatus(repo, old, "")
+		if p.Accounts != nil {
+			p.Accounts.forgetRepo(repo)
+		} else {
+			p.GitHub.forgetRepo(repo)
+		}
+	}
+	p.registrations = make(map[contract.RepoName]string, len(repos))
+	for repo := range repos {
+		p.registrations[repo] = heads[repo].Registration
+	}
 	due := p.due(ctx, repos)
 	if len(due) == 0 {
 		return nil
@@ -271,12 +288,13 @@ func (p *Poller) Pass(ctx context.Context) error {
 			return err
 		}
 	}
-	var pass store.GitHubPass
+	pass := store.GitHubPass{Registrations: make(map[contract.RepoName]string, len(due))}
 	for _, repo := range due {
 		found, err := p.repository(ctx, repo, pullsIn[repo], issuesIn[repo], heads, feeds[repo])
 		if err != nil {
 			continue
 		}
+		pass.Registrations[repo] = heads[repo].Registration
 		pass.RoomPRs = append(pass.RoomPRs, found.RoomPRs...)
 		pass.PRs = append(pass.PRs, found.PRs...)
 		pass.Issues = append(pass.Issues, found.Issues...)

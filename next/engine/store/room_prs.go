@@ -98,21 +98,29 @@ func (s *Store) applyRoomPRs(ctx context.Context, tx *sql.Tx, passes []RoomPRPas
 	return nil
 }
 
+type prPollStatus struct{ registration, text string }
+
 // PRPollStatus is the current failure, if any, in polling this repository.
-func (s *Store) PRPollStatus(repo contract.RepoName) string {
+func (s *Store) PRPollStatus(ctx context.Context, repo contract.RepoName) string {
 	status, ok := s.prPollStatus.Load(repo)
 	if !ok {
 		return ""
 	}
-	return status.(string)
+	previous := status.(prPollStatus)
+	var registration string
+	if err := s.Read().QueryRowContext(ctx, `SELECT generation FROM repo_registrations WHERE repo=?`, repo).Scan(&registration); err != nil || previous.registration != registration {
+		return ""
+	}
+	return previous.text
 }
 
 // SetPRPollStatus returns true when there is a new failure to log.
-func (s *Store) SetPRPollStatus(repo contract.RepoName, status string) bool {
+func (s *Store) SetPRPollStatus(repo contract.RepoName, registration, status string) bool {
 	if status == "" {
 		s.prPollStatus.Delete(repo)
 		return false
 	}
-	old, _ := s.prPollStatus.Swap(repo, status)
-	return old != status
+	next := prPollStatus{registration, status}
+	old, _ := s.prPollStatus.Swap(repo, next)
+	return old != next
 }

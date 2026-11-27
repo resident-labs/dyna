@@ -242,7 +242,7 @@ var methodTable = []MethodEntry{
 		act("room", "add_repo", typ[contract.RoomRepoAddRequest](), "Add a repository or update its settings. prEvents (CLI --pr-events on|off) enables room-wide github.pr.changed events for all open PRs, including untracked ones; off by default. PRs already open when you turn it on fire at their next change, not at once. Later changes include ready and draft kinds. It does not assign a session or wake the room root without a subscription.", "room repo add"),
 	),
 	method(contract.MethodRoomRepoRemove, contract.ScopeAdmin, OwnerAccess,
-		act("room", "remove_repo", typ[contract.RoomRepoRemoveRequest](), "Remove a repository from a room. Refuses the room default or a repository used by open sessions, PRs or issues. Other rooms keep their links.", "room repo remove"),
+		act("room", "remove_repo", typ[contract.RoomRepoRemoveRequest](), "Remove a repository from a room. Refuses the room default or a repository used by open sessions, PRs or issues. Other rooms keep their links. On the last link, turn off Dyna CI after running jobs finish.", "room repo remove"),
 	),
 	method(contract.MethodRoomRepos, contract.ScopeRead, UserAccess,
 		act("room", "repos", typ[contract.RoomReposRequest](), "List repositories in room.", "room repo list"),

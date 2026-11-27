@@ -129,6 +129,9 @@ func (s *Store) AddRoomRepo(ctx context.Context, id contract.RoomID, name contra
 		if _, err := tx.ExecContext(ctx, "INSERT INTO repos(repo,default_room) VALUES(?,?) ON CONFLICT(repo) DO NOTHING", name, defaultRoom); err != nil {
 			return err
 		}
+		if _, err := tx.ExecContext(ctx, "INSERT INTO repo_registrations(repo,generation) VALUES(?,lower(hex(randomblob(16)))) ON CONFLICT(repo) DO NOTHING", name); err != nil {
+			return err
+		}
 		if _, err := tx.ExecContext(ctx, "UPDATE room_repos SET is_default=0 WHERE room=?", id); err != nil {
 			return err
 		}
@@ -183,6 +186,14 @@ func (s *Store) RemoveRoomRepo(ctx context.Context, room contract.RoomID, repo c
 		if len(blockers) > 0 {
 			return fmt.Errorf("%w %s: still used by %s", ErrRoomRepoInUse, repo, strings.Join(blockers, ", "))
 		}
+		var next sql.NullString
+		var ci bool
+		if err := tx.QueryRowContext(ctx, `SELECT (SELECT MIN(room) FROM room_repos WHERE repo=?2 AND room<>?1), ci FROM repos WHERE repo=?2`, room, repo).Scan(&next, &ci); err != nil {
+			return err
+		}
+		if !next.Valid && ci {
+			return fmt.Errorf("%w %s: Dyna CI is on; wait for running jobs to finish, turn it off with dyna room repo ci %s --off, then remove it", ErrRoomRepoInUse, repo, repo)
+		}
 		// Remaining tracking rows of this room are closed. Leaving them would keep the poller watching for reopens.
 		for _, query := range []string{
 			`DELETE FROM pr_owners WHERE repo=?2 COLLATE NOCASE AND session IN (SELECT id FROM sessions WHERE room=?1)`,
@@ -193,17 +204,13 @@ func (s *Store) RemoveRoomRepo(ctx context.Context, room contract.RoomID, repo c
 				return err
 			}
 		}
-		var next sql.NullString
-		if err := tx.QueryRowContext(ctx, `SELECT MIN(room) FROM room_repos WHERE repo=?`, repo).Scan(&next); err != nil {
-			return err
-		}
 		if next.Valid {
 			_, err := tx.ExecContext(ctx, `UPDATE repos SET default_room=? WHERE repo=? AND default_room=?`, next.String, repo, room)
 			return err
 		}
-		// CI reconciliation stops runners when the repository disappears from CIRepos.
+		// A different room can track this repository without listing it; keep its live cursors.
 		for _, query := range []string{
-			`DELETE FROM github_feeds WHERE repo=?`,
+			`DELETE FROM github_feeds WHERE repo=?1 AND NOT EXISTS (SELECT 1 FROM pr_owners WHERE repo=?1) AND NOT EXISTS (SELECT 1 FROM issue_owners WHERE repo=?1)`,
 			`DELETE FROM repo_heads WHERE repo=?`,
 			`DELETE FROM repos WHERE repo=?`,
 		} {
@@ -213,4 +220,16 @@ func (s *Store) RemoveRoomRepo(ctx context.Context, room contract.RoomID, repo c
 		}
 		return nil
 	})
+}
+
+// requireTrackerRepo checks a session's authorization in the same transaction as the tracking write.
+func requireTrackerRepo(ctx context.Context, tx *sql.Tx, session contract.SessionID, repo, head contract.RepoName) error {
+	var listed bool
+	if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM room_repos r JOIN sessions s ON s.room=r.room WHERE s.id=? AND r.repo IN (?,?))`, session, repo, head).Scan(&listed); err != nil {
+		return err
+	}
+	if !listed {
+		return ErrRepoNotFound
+	}
+	return nil
 }

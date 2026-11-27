@@ -154,8 +154,22 @@ func TestRemoveRoomRepoPreservesSharedStateUntilLastLink(t *testing.T) {
 	if err := s.UntrackIssue(ctx, repo, 5); err != nil {
 		t.Fatal(err)
 	}
+	if err := s.RemoveRoomRepo(ctx, "b", repo); !errors.Is(err, ErrRoomRepoInUse) || !strings.Contains(err.Error(), "dyna room repo ci owner/shared --off") {
+		t.Fatalf("CI refusal: %v", err)
+	}
+	if err := s.SetRepoCI(ctx, repo, false, 0); err != nil {
+		t.Fatal(err)
+	}
 	if err := s.RemoveRoomRepo(ctx, "b", repo); err != nil {
 		t.Fatal(err)
+	}
+	issue := TrackedIssue{IssueSummary: contract.IssueSummary{Repo: repo, Number: 5, Session: "sb", State: contract.IssueOpen}}
+	if err := s.TrackIssue(ctx, issue, true); !errors.Is(err, ErrRepoNotFound) {
+		t.Fatalf("stale issue track: %v", err)
+	}
+	pr.Session = "sb"
+	if err := s.TrackPR(ctx, pr, true); !errors.Is(err, ErrRepoNotFound) {
+		t.Fatalf("stale PR track: %v", err)
 	}
 	// A start that picked this repo before unlinking must not record a stale session.
 	if _, err := s.StartSession(ctx, Session{Room: "b", Repo: repo}, "", contract.BoxSizeAgent, "", contract.Event{}, contract.Event{}, "", false, "", "", 0); !errors.Is(err, ErrRepoNotFound) {
@@ -172,5 +186,78 @@ func TestRemoveRoomRepoPreservesSharedStateUntilLastLink(t *testing.T) {
 	}
 	if heads, err := s.RepoHeads(ctx, now); err != nil || len(heads) != 1 || heads["owner/default"].Head != "" {
 		t.Fatalf("heads: %+v %v", heads, err)
+	}
+}
+func TestRemoveRoomRepoPreservesFeedForForeignTracker(t *testing.T) {
+	s, err := Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	ctx := t.Context()
+	now := time.Now()
+	const auditRepo contract.RepoName = "owner/work"
+	if err := s.CreateRoom(ctx, "room", "room", now); err != nil {
+		t.Fatal(err)
+	}
+	for _, repo := range []contract.RepoName{"owner/default", auditRepo} {
+		if err := s.AddRoomRepo(ctx, "room", repo, false); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if e := s.CreateRoom(ctx, "other", "other", now); e != nil {
+		t.Fatal(e)
+	}
+	if _, e := s.writer.ExecContext(ctx, `INSERT INTO sessions(id,room,name,profile,state,goal,created_at,repo) VALUES('other-worker','other','worker','p','open','',0,'')`); e != nil {
+		t.Fatal(e)
+	}
+	if e := s.TrackIssue(ctx, TrackedIssue{IssueSummary: contract.IssueSummary{Repo: auditRepo, Number: 5, Session: "other-worker", State: contract.IssueOpen}}); e != nil {
+		t.Fatal(e)
+	}
+	if e := s.ApplyPRPoll(ctx, GitHubPass{Feeds: []GitHubFeed{{Repo: auditRepo, Feed: "events", ETag: "still-needed"}}}, now); e != nil {
+		t.Fatal(e)
+	}
+	if e := s.RemoveRoomRepo(ctx, "room", auditRepo); e != nil {
+		t.Fatal(e)
+	}
+	if _, e := s.Issue(ctx, auditRepo, 5); e != nil {
+		t.Fatal(e)
+	}
+	feeds, e := s.GitHubFeeds(ctx)
+	if e != nil {
+		t.Fatal(e)
+	}
+	if got := feeds[auditRepo]["events"].ETag; got != "still-needed" {
+		t.Fatalf("other room's tracker survives but its live feed was reset: %q", got)
+	}
+}
+
+func TestRepositoryRegistrationMigration(t *testing.T) {
+	ctx := t.Context()
+	dir := t.TempDir()
+	s, err := Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.CreateRoom(ctx, "r", "r", time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.AddRoomRepo(ctx, "r", "owner/repo", false); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.writer.ExecContext(ctx, `DROP TABLE repo_registrations; UPDATE meta SET value='131' WHERE key='schema_version'`); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Close(); err != nil {
+		t.Fatal(err)
+	}
+	s, err = Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	heads, err := s.RepoHeads(ctx, time.Now())
+	if err != nil || heads["owner/repo"].Registration == "" {
+		t.Fatalf("missing migrated registration: %+v %v", heads, err)
 	}
 }

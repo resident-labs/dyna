@@ -66,7 +66,7 @@ func TestRoomPRMainFailureDoesNotPinEventsCursor(t *testing.T) {
 	})
 	pass()
 	if got := feeds()["events"].Cursor.At; !got.After(before) {
-		t.Fatalf("healthy events feed gap never committed: before=%s after=%s; status=%s", before, got, s.PRPollStatus(repo))
+		t.Fatalf("healthy events feed gap never committed: before=%s after=%s; status=%s", before, got, s.PRPollStatus(ctx, repo))
 	}
 }
 
@@ -183,7 +183,7 @@ func TestRoomPRRecoveryReconcilesKnownClosedPR(t *testing.T) {
 		t.Fatal(err)
 	}
 	if row := watches[0].Rows[2]; row.State != contract.PrClosed {
-		t.Fatalf("recovery reported complete but known PR 2 stayed %s; status=%q", row.State, s.PRPollStatus(repo))
+		t.Fatalf("recovery reported complete but known PR 2 stayed %s; status=%q", row.State, s.PRPollStatus(ctx, repo))
 	}
 }
 func TestRoomPRCensusResumesAfterPageBudget(t *testing.T) {
@@ -230,6 +230,6 @@ func TestRoomPRCensusResumesAfterPageBudget(t *testing.T) {
 		t.Fatal(err)
 	}
 	if last < 35 || rows[0].CensusAt == 0 {
-		t.Fatalf("three bounded passes (fresh pollers) reached page %d, census complete=%t, status=%s", last, rows[0].CensusAt != 0, s.PRPollStatus(repo))
+		t.Fatalf("three bounded passes (fresh pollers) reached page %d, census complete=%t, status=%s", last, rows[0].CensusAt != 0, s.PRPollStatus(ctx, repo))
 	}
 }

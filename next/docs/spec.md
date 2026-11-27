@@ -146,6 +146,7 @@ This table lists the current tables in `engine/store/schema.sql`, the authority 
 | `discord_messages` |
 | `discord_owned` |
 | `repos` |
+| `repo_registrations` |
 | `repo_heads` |
 | `room_repos` |
 | `room_pr_observed` |

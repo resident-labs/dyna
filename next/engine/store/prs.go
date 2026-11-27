@@ -97,13 +97,14 @@ type ListedHead struct {
 
 // RepoState is what is stored of a repository's default branch (spec 7.7): its head, which is empty until a poll reads one, and the heads in its recent list whose CI is not settled, oldest first.
 type RepoState struct {
-	Head      string
-	Unsettled []ListedHead
+	Registration string // changes when a repository is removed and added again
+	Head         string
+	Unsettled    []ListedHead
 }
 
 // RepoHeads lists every repository a room lists, with its stored state. A head past the list's bounds at now is not unsettled, as it is dropped.
 func (s *Store) RepoHeads(ctx context.Context, now time.Time) (map[contract.RepoName]RepoState, error) {
-	rows, err := s.Read().QueryContext(ctx, "SELECT repo,main_head FROM repos")
+	rows, err := s.Read().QueryContext(ctx, "SELECT r.repo,r.main_head,COALESCE(g.generation,'') FROM repos r LEFT JOIN repo_registrations g ON g.repo=r.repo")
 	if err != nil {
 		return nil, err
 	}
@@ -112,7 +113,7 @@ func (s *Store) RepoHeads(ctx context.Context, now time.Time) (map[contract.Repo
 	for rows.Next() {
 		var repo contract.RepoName
 		var state RepoState
-		if err := rows.Scan(&repo, &state.Head); err != nil {
+		if err := rows.Scan(&repo, &state.Head, &state.Registration); err != nil {
 			return nil, err
 		}
 		heads[repo] = state
@@ -202,12 +203,18 @@ func (s *Store) RecordPROpen(ctx context.Context, repo contract.RepoName, number
 // TrackPR adds a PR with a baseline, so what it already shows wakes nobody. A same-repository head can
 // recover a push right only from a branch recorded for this session or its descendants (including closed ones).
 // A merged or closed row can be tracked again.
-func (s *Store) TrackPR(ctx context.Context, pr TrackedPR) error {
+// TrackPR may require that the session's room still lists the repository. The owner may track an unlisted repository.
+func (s *Store) TrackPR(ctx context.Context, pr TrackedPR, requireListed ...bool) error {
 	meta, err := encodeMeta(pr.Meta)
 	if err != nil {
 		return err
 	}
 	return s.Write(ctx, func(tx *sql.Tx) error {
+		if len(requireListed) > 0 && requireListed[0] {
+			if err := requireTrackerRepo(ctx, tx, pr.Session, pr.Repo, pr.HeadRepo); err != nil {
+				return err
+			}
+		}
 		recorded, exists, err := prClaimRepo(ctx, tx, pr.Repo, pr.Number)
 		if err != nil {
 			return err
@@ -368,13 +375,14 @@ func (s *Store) moveRepoHead(ctx context.Context, tx *sql.Tx, head RepoHead, at 
 
 // GitHubPass is what one pass found, across every repository it read.
 type GitHubPass struct {
-	RoomPRs []RoomPRPass
-	PRs     []PRUpdate
-	Issues  []IssueUpdate
-	Heads   []RepoHead
-	MainCIs []MainCI
-	Feeds   []GitHubFeed          // cursors that moved
-	Items   []contract.GitHubItem // what no session tracks
+	Registrations map[contract.RepoName]string // repository identities captured before polling; empty identity means unlisted
+	RoomPRs       []RoomPRPass
+	PRs           []PRUpdate
+	Issues        []IssueUpdate
+	Heads         []RepoHead
+	MainCIs       []MainCI
+	Feeds         []GitHubFeed          // cursors that moved
+	Items         []contract.GitHubItem // what no session tracks
 }
 
 // ApplyPRPoll writes one pass and its events in one transaction with the cursors that found them, so a restart can neither
@@ -384,6 +392,25 @@ type GitHubPass struct {
 // drops out.
 func (s *Store) ApplyPRPoll(ctx context.Context, pass GitHubPass, at time.Time) error {
 	return s.Write(ctx, func(tx *sql.Tx) error {
+		stale := map[contract.RepoName]bool{}
+		for repo, was := range pass.Registrations {
+			var now string
+			if err := tx.QueryRowContext(ctx, `SELECT COALESCE((SELECT generation FROM repo_registrations WHERE repo=?),'')`, repo).Scan(&now); err != nil {
+				return err
+			}
+			if now != was {
+				stale[repo] = true
+			}
+		}
+		if len(stale) > 0 {
+			pass.RoomPRs = slices.DeleteFunc(pass.RoomPRs, func(row RoomPRPass) bool { return stale[row.Repo] })
+			pass.PRs = slices.DeleteFunc(pass.PRs, func(row PRUpdate) bool { return stale[row.PR.Repo] })
+			pass.Issues = slices.DeleteFunc(pass.Issues, func(row IssueUpdate) bool { return stale[row.Issue.Repo] })
+			pass.Heads = slices.DeleteFunc(pass.Heads, func(row RepoHead) bool { return stale[row.Repo] })
+			pass.MainCIs = slices.DeleteFunc(pass.MainCIs, func(row MainCI) bool { return stale[row.Repo] })
+			pass.Feeds = slices.DeleteFunc(pass.Feeds, func(row GitHubFeed) bool { return stale[row.Repo] })
+			pass.Items = slices.DeleteFunc(pass.Items, func(row contract.GitHubItem) bool { return stale[row.Repo] })
+		}
 		for i := range pass.RoomPRs {
 			changes := pass.RoomPRs[i].Changes[:0]
 			for _, change := range pass.RoomPRs[i].Changes {
