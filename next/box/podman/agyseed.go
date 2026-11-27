@@ -28,16 +28,31 @@ if [ -e "$1/accounts/main" ] || [ -L "$1/accounts/main" ]; then echo dyna-agy-ac
 echo "dyna-agy-arch $(uname -s -m)"
 `
 
-// agyPackScript writes a tar of the members named after $1 (paths below $1) to stdout, leaving out the conversation databases and the
-// logs by path, and then a second tar that holds only an empty .dyna-complete: an archive without it was cut short, which tar alone
-// cannot tell at a member boundary. Its stderr is dropped so that only the archive is on stdout. Nothing of the archive is written to a file.
+// agyPackScript writes a tar of the members named after $1 (paths below $1) to stdout, leaving out by path what agy writes in a running
+// session: the conversations and their per-conversation brain (nearly all of an account folder's size), the logs, and the annotations (per
+// session artifacts). The sign-in, the config and the mcp, cache and implicit state stay. A file that changes while tar reads it (tar
+// status 1) ends the pack with status 19 and not as a good archive. Then a second tar holds only an empty .dyna-complete: an archive
+// without it was cut short, which tar alone cannot tell at a member boundary. Its stderr is dropped so that only the archive is on stdout. Nothing of the archive is written to a file.
 const agyPackScript = `set -eu
 cd -- "$1"
 shift
+acp=accounts/main/antigravity-acp
+excludes=""
+for d in brain conversations log annotations; do excludes="$excludes --exclude=$acp/$d"; done
 marker=$(mktemp)
 trap 'rm -f -- "$marker"' EXIT
-tar -c -f - --exclude=accounts/main/antigravity-acp/conversations --exclude=accounts/main/antigravity-acp/log -- "$@" 2>/dev/null
+st=0
+tar -c -f - $excludes -- "$@" 2>/dev/null || st=$?
+if [ "$st" = 1 ]; then exit 19; fi
+if [ "$st" != 0 ]; then exit "$st"; fi
 tar -c -f - --transform='s,.*,.dyna-complete,' -- "$marker" 2>/dev/null`
+
+// agyPackExitChanged is the pack script's exit status for a file that changed while it was read: the archive is cut, so the target takes
+// nothing, and a retry is safe.
+const agyPackExitChanged = 19
+
+// ErrAgyChanged says a running agy session changed a file while it was packed.
+var ErrAgyChanged = errors.New("a running agy session changed a file while the account was packed; retry, or close the agy sessions on the source host first")
 
 // agyUnpackExitSeeded is the unpack script's exit status for a host that has an account folder: nothing was changed.
 const agyUnpackExitSeeded = 17
@@ -164,6 +179,10 @@ func (h *Host) PackAgy(ctx context.Context, layout box.Layout, binary, account b
 	if err := h.stream(ctx, nil, w, append([]string{"bash", "-c", agyPackScript, "dyna-agy-pack", agyDir(layout)}, members...)...); err != nil {
 		if ctx.Err() != nil {
 			return ctx.Err()
+		}
+		var exit *exec.ExitError
+		if errors.As(err, &exit) && exit.ExitCode() == agyPackExitChanged {
+			return ErrAgyChanged
 		}
 		return errors.New("could not pack the agy files on the source host")
 	}

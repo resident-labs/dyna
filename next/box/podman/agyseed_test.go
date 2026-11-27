@@ -36,11 +36,18 @@ func agyFolder(t *testing.T) string {
 	write(t, dir+"/accounts/main/token.json", "TOKEN-ONE", 0o600)
 	write(t, dir+"/accounts/main/antigravity-acp/conversations/s.db", "CONVERSATION", 0o600)
 	write(t, dir+"/accounts/main/antigravity-acp/log/agy.log", "LOG", 0o600)
+	write(t, dir+"/accounts/main/antigravity-acp/brain/c1/.system_generated/steps/o.txt", "BRAIN", 0o600)
+	write(t, dir+"/accounts/main/antigravity-acp/mcp/github/x", "MCP", 0o600)
+	write(t, dir+"/accounts/main/antigravity-acp/cache/x", "CACHE", 0o600)
+	write(t, dir+"/accounts/main/antigravity-acp/implicit/x", "IMPLICIT", 0o600)
+	write(t, dir+"/accounts/main/antigravity-acp/annotations/x", "ANNOT", 0o600)
+	write(t, dir+"/accounts/main/antigravity-acp/builtin/skills/s", "BUILTIN", 0o600)
+	write(t, dir+"/accounts/main/config/projects/p", "CONFIG", 0o600)
 	write(t, dir+"/accounts/main/antigravity-acp/settings.json", "SETTINGS", 0o600)
 	return dir
 }
 
-func TestAgyPackLeavesOutConversationsAndLogsByPath(t *testing.T) {
+func TestAgyPackLeavesOutWhatSessionsWriteAndKeepsTheSignInAndConfig(t *testing.T) {
 	src := agyFolder(t)
 	pack, err := shell(t, nil, agyPackScript, src, "antigravity", "accounts/main")
 	if err != nil {
@@ -53,12 +60,12 @@ func TestAgyPackLeavesOutConversationsAndLogsByPath(t *testing.T) {
 		t.Fatal(err)
 	}
 	names := string(out)
-	for _, want := range []string{"antigravity", "accounts/main/token.json", "accounts/main/antigravity-acp/settings.json"} {
+	for _, want := range []string{"antigravity", "accounts/main/token.json", "accounts/main/antigravity-acp/settings.json", "builtin/skills/s", "config/projects/p", "mcp/github/x", "cache/x", "implicit/x"} {
 		if !strings.Contains(names, want) {
 			t.Errorf("the pack lacks %s: %s", want, names)
 		}
 	}
-	for _, never := range []string{"conversations", "s.db", "agy.log", "/log"} {
+	for _, never := range []string{"conversations", "s.db", "agy.log", "/log", "brain", "BRAIN", "annotations", "ANNOT"} {
 		if strings.Contains(names, never) {
 			t.Errorf("the pack holds %s: %s", never, names)
 		}
@@ -519,5 +526,29 @@ func TestAgyAProgramThatAppearsBeforeItsRenameIsNotTakenForOurs(t *testing.T) {
 		if (err == nil) != (test.status == 0) {
 			t.Fatalf("%s: account published = %v", name, err == nil)
 		}
+	}
+}
+
+// A file that changes while tar reads it ends the pack with the changed status, not as a good archive, and the target of a pipe from it
+// installs nothing. The stub tar changes a file under a kept folder (mcp) and says so with tar's own status 1.
+func TestAgyPackOfAFileThatChangesIsNotAGoodArchive(t *testing.T) {
+	src := agyFolder(t)
+	bin := t.TempDir()
+	write(t, bin+"/tar", "#!/bin/bash\ncase \"$*\" in *dyna-complete*) exec /usr/bin/tar \"$@\" ;; esac\n/usr/bin/tar \"$@\"; echo MORE >> "+src+"/accounts/main/antigravity-acp/mcp/github/x; exit 1\n", 0o755)
+	cmd := exec.Command("bash", "-c", agyPackScript, "dyna", src, "antigravity", "accounts/main")
+	cmd.Env = append(os.Environ(), "PATH="+bin+":"+os.Getenv("PATH"))
+	out, err := cmd.Output()
+	if exitCode(err) != agyPackExitChanged {
+		t.Fatalf("err = %v", err)
+	}
+	if strings.Contains(string(out), ".dyna-complete") {
+		t.Fatal("a changed file still got the completion marker")
+	}
+	dst := t.TempDir() + "/agy"
+	if err := shellIn(t, t.TempDir(), bytes.NewReader(out), agyUnpackScript, dst, "-"); err == nil {
+		t.Fatal("the target took a cut archive")
+	}
+	if _, err := os.Lstat(dst + "/accounts/main"); err == nil {
+		t.Fatal("an account was published")
 	}
 }

@@ -25,6 +25,7 @@ type agyHostFake struct {
 	state      string
 	pack       string
 	failPack   bool
+	packErr    error    // what the pack ends with when it is not failPack
 	packs      []string // the members the pack script was asked for
 	unpacked   [][]byte
 	unpackCmds []string
@@ -64,6 +65,9 @@ func (f *agyHostFake) RunStream(_ context.Context, in io.Reader, out io.Writer, 
 		}
 		if f.failPack {
 			return errors.New("exit status 3")
+		}
+		if f.packErr != nil {
+			return f.packErr
 		}
 		return nil
 	case strings.Contains(command, "dyna-agy-unpack"):
@@ -190,5 +194,16 @@ func TestSeedAgyAnUnusableProgramSaysWhatToRemove(t *testing.T) {
 	err := seedRig(t, source, target).SeedAgy(t.Context(), "other")
 	if !errors.As(err, new(ProgramError)) || !strings.Contains(err.Error(), "/data/agy/antigravity") || !strings.Contains(err.Error(), "remove it") {
 		t.Fatalf("err = %v", err)
+	}
+}
+
+// The seed's failure for a file that changed names the cause and says it can be retried; it carries no file name.
+func TestSeedAgyAChangedFileSaysWhy(t *testing.T) {
+	changed := exec.Command("bash", "-c", "exit 19").Run()
+	source := &agyHostFake{state: signedIn, pack: "PARTIAL", packErr: changed}
+	target := &agyHostFake{state: "dyna-agy-arch Linux x86_64\n"}
+	err := seedRig(t, source, target).SeedAgy(t.Context(), "other")
+	if !errors.Is(err, podman.ErrAgyChanged) || !strings.Contains(err.Error(), "retry") || len(target.unpacked) != 0 {
+		t.Fatalf("err = %v, unpacked %q", err, target.unpacked)
 	}
 }

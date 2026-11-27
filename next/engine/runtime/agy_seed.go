@@ -5,6 +5,9 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
+	"sync/atomic"
+	"time"
 
 	"github.com/resident-labs/dyna/box/podman"
 	"github.com/resident-labs/dyna/contract"
@@ -33,6 +36,11 @@ type ProgramError struct {
 func (e ProgramError) Error() string {
 	return fmt.Sprintf("the agy program at %s on host %s is not an executable file, or went missing during the seed; remove it on that host and seed again", e.Path, e.Host)
 }
+
+// countWriter counts the bytes that pass, and keeps none of them.
+type countWriter struct{ n atomic.Int64 }
+
+func (c *countWriter) Write(p []byte) (int, error) { c.n.Add(int64(len(p))); return len(p), nil }
 
 // SeedAgy is the owner's `dyna agy seed`: it copies the signed-in agy account folder, and the program when the host has none, from
 // engine.AgySource to the target, as an opaque archive streamed between the two hosts' drivers, with no spool and no copy in memory. A host
@@ -70,17 +78,20 @@ func (b *Boxes) SeedAgy(ctx context.Context, name contract.HostName) error {
 	if program {
 		sum = have.BinarySum
 	}
+	began := time.Now()
 	// The archive passes from one host's tar to the other's through this pipe: the engine holds no copy of it, and neither host writes it to a file.
+	counted := &countWriter{}
 	pr, pw := io.Pipe()
 	packed := make(chan error, 1)
 	go func() {
-		err := source.PackAgy(ctx, b.Layout, program, true, pw)
+		err := source.PackAgy(ctx, b.Layout, program, true, io.MultiWriter(pw, counted))
 		pw.CloseWithError(err) // a failed pack ends the stream with an error, never a clean end
 		packed <- err
 	}()
 	unpackErr := target.UnpackAgy(ctx, b.Layout, pr, sum)
 	pr.CloseWithError(errors.New("the target stopped reading"))
 	packErr := <-packed
+	log.Printf("agy seed: host %s, %d bytes in %s (sizes only)", name, counted.n.Load(), time.Since(began).Round(time.Second))
 	// A losing seed stops reading, so the source's pipe breaks: the target's answer is the result, not that.
 	if errors.Is(unpackErr, podman.ErrAgySeeded) {
 		return seeded
