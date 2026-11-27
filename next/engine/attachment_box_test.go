@@ -50,6 +50,10 @@ func (boxService) HostAdd(context.Context, contract.Principal, contract.HostAddR
 	return contract.HostAddResponse{}, nil
 }
 
+func (boxService) HostAgySeed(context.Context, contract.Principal, contract.HostAgySeedRequest) (contract.HostAgySeedResponse, *contract.Error) {
+	return contract.HostAgySeedResponse{}, nil
+}
+
 // localRunner runs the host's commands here, where a real host would run them over SSH.
 type localRunner struct{}
 

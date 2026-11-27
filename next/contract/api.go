@@ -50,6 +50,7 @@ const (
 	MethodDeliveryDone            Method = "delivery.done"
 	MethodHostAdd                 Method = "host.add"
 	MethodHostSetLimits           Method = "host.set_limits"
+	MethodHostAgySeed             Method = "host.agy_seed"
 	MethodHostSet                 Method = "host.set"
 	MethodHostList                Method = "host.list"
 	MethodAccountsList            Method = "accounts.list"
@@ -421,6 +422,14 @@ type HostSetLimitsRequest struct {
 	Rooms []RoomID `json:"rooms"`
 }
 type HostSetLimitsResponse struct{}
+
+// HostAgySeedRequest copies the signed-in agy account folder, and the program if the host has none, to a host from the one the owner
+// signed in on. A folder already there stays unless Replace is set. Refused while a session on an agy profile runs on the host.
+type HostAgySeedRequest struct {
+	Host    HostName `json:"host"`
+	Replace bool     `json:"replace,omitempty"`
+}
+type HostAgySeedResponse struct{}
 
 // HostSetRequest turns a host's two switches, each on its own; a nil one stays as it is. With agents off no new session box
 // lands on the host, and with CI off the CI pool starts no runner there, though a repository still names it. Both off

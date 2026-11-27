@@ -284,3 +284,36 @@ func TestAgyProfileHasNoSessionCap(t *testing.T) {
 		}
 	}
 }
+
+func TestAgySeedIsTheOwnersAndNeverForARunningOrIneligibleHost(t *testing.T) {
+	s, room, root, owner := agySetup(t)
+	ctx := t.Context()
+	if e := s.AgySeedProblem(ctx, contract.Principal{Kind: contract.PrincipalSession, Session: root}, "host"); e == nil || e.Code != contract.ErrForbidden {
+		t.Fatalf("a session seeds: %v", e)
+	}
+	if e := s.AgySeedProblem(ctx, owner, AgySource); e == nil || !strings.Contains(e.Message, "where the owner signed in") {
+		t.Fatalf("the source: %v", e)
+	}
+	if e := s.AgySeedProblem(ctx, owner, "nowhere"); e == nil || !strings.Contains(e.Message, "unknown host") {
+		t.Fatalf("unknown: %v", e)
+	}
+	if err := s.store.AddHost(ctx, box.Host{Name: "exec", State: box.HostReady, ExecOnly: true, NoAgents: true, CheckedAt: s.now()}); err != nil {
+		t.Fatal(err)
+	}
+	if e := s.AgySeedProblem(ctx, owner, "exec"); e == nil || !strings.Contains(e.Message, "exec-only or has agents off") {
+		t.Fatalf("exec-only: %v", e)
+	}
+	if e := s.AgySeedProblem(ctx, owner, "host"); e != nil {
+		t.Fatalf("a host with only a pig session: %v", e)
+	}
+	// An agy session on the host holds the seed off, and names it.
+	if err := s.store.SetHostAgy(ctx, "host", true); err != nil {
+		t.Fatal(err)
+	}
+	if _, e := s.SessionStart(ctx, owner, contract.SessionStartRequest{Room: room, Name: "gemini", Profile: "gem", Host: "host"}); e != nil {
+		t.Fatal(e)
+	}
+	if e := s.AgySeedProblem(ctx, owner, "host"); e == nil || e.Code != contract.ErrConflict || !strings.Contains(e.Message, "gemini") {
+		t.Fatalf("an agy session runs there: %v", e)
+	}
+}

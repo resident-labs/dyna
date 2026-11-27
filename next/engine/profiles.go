@@ -486,6 +486,10 @@ func (s *Service) pigOnly(name contract.ProfileName, what string) *contract.Erro
 	return nil
 }
 
+// AgySource is the host the owner signed in to Google on: `dyna agy seed` copies its program and account folder to another host, as the
+// owner's choice. It says where the login came from, not where agy may run.
+const AgySource contract.HostName = "hermeslab"
+
 // agyPlacement places a session on an agy profile: on a host that reports agy installed and signed in. host is what the caller asked for,
 // or empty for the placement to choose among the eligible hosts that have it; sameHost leaves the check to the parent's host.
 func (s *Service) agyPlacement(ctx context.Context, room contract.RoomID, profile contract.ProfileName, host contract.HostName, sameHost bool) (contract.HostName, *contract.Error) {
@@ -572,4 +576,45 @@ func (s *Service) sameHostAgy(ctx context.Context, profile contract.ProfileName,
 		return failure(err)
 	}
 	return s.agyHostProblem(ctx, profile, b.Host)
+}
+
+// AgySeedProblem says why the owner may not seed a host with agy now, or nil: only the owner seeds, never the source itself, an
+// exec-only host or one with agents off, and never while a session on an agy profile runs there, since a copy under a running agy
+// would change its account folder from beneath it.
+func (s *Service) AgySeedProblem(ctx context.Context, caller contract.Principal, name contract.HostName) *contract.Error {
+	if caller.Kind != contract.PrincipalOwner {
+		return forbidden()
+	}
+	if name == AgySource {
+		return invalid(fmt.Sprintf("host %s is where the owner signed in; seed another host from it", name))
+	}
+	hosts, err := s.store.Hosts(ctx)
+	if err != nil {
+		return failure(err)
+	}
+	index := slices.IndexFunc(hosts, func(h box.Host) bool { return h.Name == name })
+	if index < 0 || hosts[index].State == box.HostRemoved {
+		return invalid("unknown host: " + string(name))
+	}
+	if hosts[index].ExecOnly || hosts[index].NoAgents {
+		return invalid(fmt.Sprintf("host %s is exec-only or has agents off, so it never runs agy sessions", name))
+	}
+	onHost, err := s.store.HostSessions(ctx)
+	if err != nil {
+		return failure(err)
+	}
+	var running []string
+	for _, hosted := range onHost[name] {
+		session, err := s.store.Session(ctx, hosted.ID)
+		if err != nil {
+			return failure(err)
+		}
+		if s.AgyProfile(session.Profile) {
+			running = append(running, hosted.Name)
+		}
+	}
+	if len(running) > 0 {
+		return &contract.Error{Code: contract.ErrConflict, Message: fmt.Sprintf("agy sessions run on host %s (%s); close them, or let them end, before seeding it", name, strings.Join(running, ", "))}
+	}
+	return nil
 }

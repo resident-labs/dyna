@@ -50,7 +50,7 @@ type devService struct {
 	*engine.Service
 	empty   bool
 	renames *devRenames
-} // api.Service needs HostAdd; engine/runtime adds the real one.
+} // api.Service needs HostAdd and HostAgySeed; engine/runtime adds the real one.
 
 // devRenames keeps this run's new labels over devAccounts' invented ones.
 type devRenames struct {
@@ -60,6 +60,10 @@ type devRenames struct {
 
 func (devService) HostAdd(context.Context, contract.Principal, contract.HostAddRequest) (contract.HostAddResponse, *contract.Error) {
 	return contract.HostAddResponse{}, &contract.Error{Code: contract.ErrUnavailable, Message: "webdev uses only " + host}
+}
+
+func (devService) HostAgySeed(context.Context, contract.Principal, contract.HostAgySeedRequest) (contract.HostAgySeedResponse, *contract.Error) {
+	return contract.HostAgySeedResponse{}, &contract.Error{Code: contract.ErrUnavailable, Message: "webdev seeds no host"}
 }
 
 // Connect is read-only in webdev. Its status uses invented values for layout checks.

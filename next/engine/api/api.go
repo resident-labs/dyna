@@ -348,6 +348,7 @@ func (a *API) handler(c Caller) http.Handler {
 	call(mux, contract.MethodRoomCreate, c, a.service.RoomCreate)
 	call(mux, contract.MethodRoomDelete, c, a.service.RoomDelete)
 	call(mux, contract.MethodHostSetLimits, c, a.service.HostSetLimits)
+	call(mux, contract.MethodHostAgySeed, c, a.service.HostAgySeed)
 	call(mux, contract.MethodHostSet, c, a.service.HostSet)
 	call(mux, contract.MethodRoomGitHub, c, func(ctx context.Context, who contract.Principal, req contract.RoomGitHubRequest) (contract.RoomGitHubResponse, *contract.Error) {
 		if service, ok := a.service.(interface {

@@ -30,6 +30,7 @@ func addCLI(root *cobra.Command, getClient func() client) {
 	root.AddCommand(hostexec, run)
 
 	root.AddCommand(hostCommand(getClient))
+	root.AddCommand(agyCommand(getClient))
 	root.AddCommand(poolCommand(getClient))
 	root.AddCommand(serviceCommand(getClient))
 	root.AddCommand(browserCommand(getClient))

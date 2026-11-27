@@ -40,6 +40,7 @@ type client interface {
 	Upload(context.Context, contract.RoomID, string) (contract.Attachment, error)
 	HostAdd(context.Context, contract.HostAddRequest) (contract.HostAddResponse, error)
 	HostSetLimits(context.Context, contract.HostSetLimitsRequest) (contract.HostSetLimitsResponse, error)
+	HostAgySeed(context.Context, contract.HostAgySeedRequest) (contract.HostAgySeedResponse, error)
 	HostSet(context.Context, contract.HostSetRequest) (contract.HostSetResponse, error)
 	OwnerTimezone(context.Context, contract.OwnerTimezoneRequest) (contract.OwnerTimezoneResponse, error)
 	BrowserCreate(context.Context, contract.BrowserCreateRequest) (contract.BrowserCreateResponse, error)
@@ -275,6 +276,10 @@ func (c *socketClient) SessionStop(ctx context.Context, q contract.SessionStopRe
 
 func (c *socketClient) RoomCreate(ctx context.Context, q contract.RoomCreateRequest) (contract.RoomCreateResponse, error) {
 	return call[contract.RoomCreateRequest, contract.RoomCreateResponse](ctx, c, contract.MethodRoomCreate, q)
+}
+
+func (c *socketClient) HostAgySeed(ctx context.Context, q contract.HostAgySeedRequest) (contract.HostAgySeedResponse, error) {
+	return call[contract.HostAgySeedRequest, contract.HostAgySeedResponse](ctx, c, contract.MethodHostAgySeed, q)
 }
 
 func (c *socketClient) HostSetLimits(ctx context.Context, q contract.HostSetLimitsRequest) (contract.HostSetLimitsResponse, error) {
