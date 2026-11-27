@@ -88,7 +88,10 @@ func TestResponsesMidSessionSystemItemFollowsPendingUserMessage(t *testing.T) {
 		"input": [
 			{"type": "message", "role": "system", "content": [{"type": "input_text", "text": "S1"}]},
 			{"type": "message", "role": "user", "content": [{"type": "input_text", "text": "U1"}]},
+			{"role":"assistant","content":"initial answer"},
+			{"role":"user","content":"U2a"},
 			{"type": "message", "role": "developer", "content": "D1"},
+			{"role":"user","content":"U2b"},
 			{"type": "message", "role": "assistant", "content": [{"type": "output_text", "text": "A1"}]},
 			{"type": "message", "role": "user", "content": [{"type": "input_text", "text": "U2"}]}
 		]
@@ -96,10 +99,13 @@ func TestResponsesMidSessionSystemItemFollowsPendingUserMessage(t *testing.T) {
 	if got := root.Get("system.#.text").Raw; got != `["I1","S1"]` {
 		t.Fatalf("system = %s, want only the leading items", got)
 	}
-	if got := root.Get("messages.#.role").Raw; got != `["user","system","assistant","user"]` {
+	if got := root.Get("messages.#.role").Raw; got != `["user","assistant","user","system","assistant","user"]` {
 		t.Fatalf("roles = %s, messages: %s", got, root.Get("messages").Raw)
 	}
-	if got := root.Get("messages.1.content.0.text").String(); got != "D1" {
+	if got := root.Get("messages.2.content.#.text").Raw; got != `["U2a","U2b"]` {
+		t.Fatalf("system split a user batch: %s", root.Get("messages").Raw)
+	}
+	if got := root.Get("messages.3.content.0.text").String(); got != "D1" {
 		t.Fatalf("in-place turn text = %q, want D1", got)
 	}
 }
@@ -193,6 +199,7 @@ func TestResponsesMidSessionSystemItemKeepsCacheControl(t *testing.T) {
 		"model": "claude-opus-5",
 		"input": [
 			{"type": "message", "role": "user", "content": [{"type": "input_text", "text": "hi"}]},
+			{"role":"assistant","content":"hello"},
 			{"type": "message", "role": "developer", "cache_control": {"type": "ephemeral", "ttl": "1h"}, "content": [
 				{"type": "input_text", "text": "first", "cache_control": {"type": "ephemeral"}},
 				{"type": "input_text", "text": "second"},
@@ -204,10 +211,10 @@ func TestResponsesMidSessionSystemItemKeepsCacheControl(t *testing.T) {
 			{"type": "message", "role": "user", "content": [{"type": "input_text", "text": "go"}]}
 		]
 	}`)
-	if got := root.Get("messages.#.role").Raw; got != `["user","system"]` {
+	if got := root.Get("messages.#.role").Raw; got != `["user","assistant","user","system"]` {
 		t.Fatalf("roles = %s, messages: %s", got, root.Get("messages").Raw)
 	}
-	first := root.Get("messages.1.content")
+	first := root.Get("messages.3.content")
 	if got := first.Get("0.cache_control.type").String(); got != "ephemeral" {
 		t.Fatalf("block-level marker lost: %s", first.Raw)
 	}
@@ -217,8 +224,8 @@ func TestResponsesMidSessionSystemItemKeepsCacheControl(t *testing.T) {
 	if got := len(first.Array()); got != 3 {
 		t.Fatalf("blank part must not become a block: %s", first.Raw)
 	}
-	if got := root.Get("messages.1.content.2.cache_control.type").String(); got != "ephemeral" {
-		t.Fatalf("item-level marker lost: %s", root.Get("messages.1").Raw)
+	if got := root.Get("messages.3.content.2.cache_control.type").String(); got != "ephemeral" {
+		t.Fatalf("item-level marker lost: %s", root.Get("messages.3").Raw)
 	}
 }
 
@@ -260,8 +267,8 @@ func TestResponsesSystemItemPlacementFollowsPinnedDecision(t *testing.T) {
 				}
 				return
 			}
-			if !strings.HasPrefix(gotSystem, `["I1","S1",`) || gotRoles != `["user","system","assistant","user","system"]` {
-				t.Fatalf("want D1 and S2 in place; system=%s roles=%s", gotSystem, gotRoles)
+			if !strings.HasPrefix(gotSystem, `["I1","S1","D1",`) || gotRoles != `["user","assistant","user","system"]` {
+				t.Fatalf("want only S2 in place; system=%s roles=%s", gotSystem, gotRoles)
 			}
 		})
 	}
@@ -314,5 +321,41 @@ func TestResponsesTrailingSystemItemDoesNotUseSynthesizedToolResult(t *testing.T
 	}
 	if got := root.Get("messages.2.content.0"); got.Get("tool_use_id").String() != "lookup" || !got.Get("is_error").Bool() {
 		t.Fatalf("missing synthesized tool result: %s", got.Raw)
+	}
+}
+
+func TestResponsesSystemItemsLeaveLeadingUserRunIntact(t *testing.T) {
+	root := convertPlacement(t, WithMidSessionSystemItems(nil), "claude-opus-5", `{"input":[
+		{"role":"user","content":"first"},
+		{"role":"developer","content":"leading rule"},
+		{"role":"user","content":"follow-up"},
+		{"role":"assistant","content":"answer"},
+		{"role":"user","content":"next"}
+	]}`)
+	if got := root.Get("system.#.text").Raw; got != `["leading rule"]` {
+		t.Fatalf("system = %s, want leading rule left for cloaking", got)
+	}
+	if got := root.Get("messages.#.role").Raw; got != `["user","assistant","user"]` {
+		t.Fatalf("roles = %s, want no split or insertion within the leading user run", got)
+	}
+	if got := root.Get("messages.0.content.#.text").Raw; got != `["first","follow-up"]` {
+		t.Fatalf("leading user batch = %s", got)
+	}
+}
+
+func TestResponsesSystemItemFallbackPreservesEarlierQueuedRuleOrder(t *testing.T) {
+	root := convertPlacement(t, WithMidSessionSystemItems(nil), "claude-opus-5", `{"input":[
+		{"role":"user","content":"first"},
+		{"role":"assistant","content":"answer"},
+		{"role":"developer","content":"queued first"},
+		{"type":"custom_note","role":"developer","content":"must fall back"},
+		{"role":"developer","content":"queued after fallback"},
+		{"role":"user","content":"next"}
+	]}`)
+	if got := root.Get("system.#.text").Raw; got != `["queued first","must fall back"]` {
+		t.Fatalf("system = %s, want queued item to fall back before ineligible item", got)
+	}
+	if got := root.Get("messages.3.content.#.text").Raw; got != `["queued after fallback"]` {
+		t.Fatalf("mid-session blocks = %s, want only the later item", got)
 	}
 }

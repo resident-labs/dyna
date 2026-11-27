@@ -328,10 +328,15 @@ func convertOpenAIResponsesRequestToClaude(modelName string, inputRawJSON []byte
 			if len(blocks) == 0 {
 				continue
 			}
-			if midSessionSystemItems && textOnly && (pendingRole != "" || len(messageBlocks) > 0) {
-				if typ := item.Get("type").String(); typ == "" || typ == "message" {
-					pendingSystemItems = append(pendingSystemItems, len(systemItems))
-				}
+			// Let cloaking own the boundary after the leading user run. Once
+			// history has an assistant turn, only text messages can stay in place.
+			typ := item.Get("type").String()
+			if midSessionSystemItems && textOnly && (typ == "" || typ == "message") && (pendingRole == "assistant" || len(messageBlocks) > 0) {
+				pendingSystemItems = append(pendingSystemItems, len(systemItems))
+			} else {
+				// This item must stay top-level. Earlier queued items must go
+				// there too, or this one would move ahead of them.
+				pendingSystemItems = pendingSystemItems[:0]
 			}
 			systemItems = append(systemItems, blocks)
 			continue
