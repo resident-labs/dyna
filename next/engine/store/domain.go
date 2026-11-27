@@ -411,6 +411,11 @@ func (s *Store) EndTurn(ctx context.Context, session contract.SessionID, output 
 			if _, err := tx.ExecContext(ctx, "UPDATE sessions SET model_retry_at=?,model_retries=? WHERE id=?", retryAt, retries, session); err != nil {
 				return err
 			}
+			if output.OneWake && output.ModelRetryAfterSeconds > 0 {
+				if err := s.limitAgy(ctx, tx, event, output.ModelRetryAfterSeconds); err != nil {
+					return err
+				}
+			}
 		} else {
 			// Legacy active retries had a zero timer. Recover their deferral from
 			// event facts, not the counter alone: owner work after exhaustion or
@@ -1212,6 +1217,16 @@ func (s *Store) dispatch(ctx context.Context, session contract.SessionID, turn c
 			}
 			if active == "" {
 				return nil
+			}
+			if harness == string(contract.HarnessAgy) {
+				held, err := s.holdForAgyLimit(ctx, tx, session, started.Time)
+				if err != nil {
+					return err
+				}
+				if held {
+					active = ""
+					return nil
+				}
 			}
 			if stale != nil {
 				held, err := s.responsibilities(ctx, tx, []contract.SessionID{session}, stale)
