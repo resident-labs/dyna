@@ -200,10 +200,11 @@ export function finalTimelineItem(items: TranscriptItem[], session: string): Tra
   return final;
 }
 
-// Hold back the DM event window until the first transcript page can place its history.
+// Hold back the DM event window before the first transcript result. On failure (null), keep its posts readable.
 // An agent's own post can land while an owner's message still waits, so only inputs advance the history boundary.
-export function timelineTailPosts<Post extends { id: string; seq: number; at: string }>(posts: Post[], turns: TranscriptTurn[] | undefined, liveTurn?: string): { post: Post; queued: boolean }[] {
-  if (!turns) return [];
+export function timelineTailPosts<Post extends { id: string; seq: number; at: string }>(posts: Post[], turns: TranscriptTurn[] | null | undefined, liveTurn?: string): { post: Post; queued: boolean }[] {
+  if (turns === undefined) return [];
+  if (turns === null) return posts.map(post => ({ post, queued: false }));
   const newest = turns.at(-1);
   const started = newest ? Date.parse(newest.started) : -Infinity;
   // The live turn or its steers may not be in the transcript yet. Show unmatched posts plainly in that case.

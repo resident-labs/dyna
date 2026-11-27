@@ -9,13 +9,18 @@ const work = (id: string): TranscriptItem => ({ id, turn: "t", at: "", kind: "to
 
 const postAt = (id: string, seq: number, second = seq) => ({ id, seq, at: new Date(second * 1000).toISOString() });
 const startAt = postAt("", 0, 5).at;
-const tail = (posts: ReturnType<typeof postAt>[], turns: TranscriptTurn[] | undefined, liveTurn?: string) =>
+const tail = (posts: ReturnType<typeof postAt>[], turns: TranscriptTurn[] | null | undefined, liveTurn?: string) =>
   timelineTailPosts(posts, turns, liveTurn).map(({ post, queued }) => [post.id, queued]);
 
 test("DM history waits for the first transcript page, but a loaded empty transcript can have a waiting post", () => {
   const posts = [postAt("first", 1)];
   assert.deepEqual(tail(posts, undefined), []);
   assert.deepEqual(tail(posts, []), [["first", true]]);
+});
+
+test("a failed first transcript read leaves existing and newly confirmed DM posts readable without queue notes", () => {
+  assert.deepEqual(tail([postAt("old", 1)], null, "t"), [["old", false]]);
+  assert.deepEqual(tail([postAt("old", 1), postAt("sent", 2)], null, "t"), [["old", false], ["sent", false]]);
 });
 
 test("an unmatched post predating the newest loaded turn is not queued", () => {

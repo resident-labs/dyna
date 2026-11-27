@@ -115,7 +115,7 @@
   let loaded = $state(false);
   let destroyed = false;
   const readTranscript = transcriptReader(() => !destroyed);
-  let tailPosts = $derived(step ? [] : timelineTailPosts(view.posts(), loaded ? turns : undefined, liveTurn));
+  let tailPosts = $derived(step ? [] : timelineTailPosts(view.posts(), loaded ? turns : failed ? null : undefined, liveTurn));
   let pendingPosts = $derived(step ? [] : [...view.pendingPosts.values()]);
   // The owner's words a failed last turn read, so one press sends them again; only while nothing newer waits.
   let resendable = $derived(!operate || step || closed || tailPosts.length || pendingPosts.length || turns.at(-1)?.outcome !== "failed" ? []
