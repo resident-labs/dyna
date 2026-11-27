@@ -2,6 +2,7 @@ package agent
 
 import (
 	"bufio"
+	"context"
 	"fmt"
 	"io"
 	"net"
@@ -11,6 +12,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/resident-labs/dyna/contract"
 )
@@ -226,6 +228,7 @@ func TestAgyProxyPassesTheEnginesRefusalForAGoogleHost(t *testing.T) {
 // With the engine away only the Google hosts fail, once each; every other connection and request goes on, and the next Google CONNECT
 // is served once the engine is back.
 func TestAgyProxyWithTheEngineDownFailsOnlyGoogleHosts(t *testing.T) {
+	shortWait(t, 200*time.Millisecond)
 	socket := filepath.Join(t.TempDir(), "e.sock")
 	proxy := httptest.NewServer(agyProxy(socket))
 	defer proxy.Close()
@@ -253,4 +256,184 @@ func TestAgyProxyWithTheEngineDownFailsOnlyGoogleHosts(t *testing.T) {
 	if response, _, _ := connect(t, proxy, "accounts.google.com:443"); response.StatusCode != 200 {
 		t.Fatalf("after the engine came back: %q", response.Status)
 	}
+}
+
+// shortWait shortens how long a Google CONNECT waits for the engine, for the test and no longer.
+func shortWait(t *testing.T, wait time.Duration) {
+	t.Helper()
+	oldWait, oldBackoff := engineWait, engineBackoff
+	engineWait, engineBackoff = wait, 10*time.Millisecond
+	t.Cleanup(func() { engineWait, engineBackoff = oldWait, oldBackoff })
+}
+
+// The engine comes up while the CONNECT is waiting for it, as in a deploy's restart: the tunnel works, bytes both ways, and the engine
+// is asked once.
+func TestAgyProxyWaitsForARestartingEngine(t *testing.T) {
+	shortWait(t, 10*time.Second)
+	socket := filepath.Join(t.TempDir(), "e.sock")
+	proxy := httptest.NewServer(agyProxy(socket))
+	defer proxy.Close()
+	conn, err := net.Dial("tcp", proxy.Listener.Addr().String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	// The engine starts only after the first dial has failed.
+	var attempts sync.WaitGroup
+	attempts.Add(1)
+	var once sync.Once
+	old := dialEngine
+	dialEngine = func(ctx context.Context, s string) (net.Conn, error) {
+		c, err := old(ctx, s)
+		if err != nil {
+			once.Do(attempts.Done)
+		}
+		return c, err
+	}
+	t.Cleanup(func() { dialEngine = old })
+	fmt.Fprint(conn, "CONNECT accounts.google.com:443 HTTP/1.1\r\nHost: accounts.google.com:443\r\n\r\n")
+	client, upstream := net.Pipe()
+	engine := &fakeEngine{upstream: upstream}
+	attempts.Wait()
+	startEngine(t, socket, engine)
+	reader := bufio.NewReader(conn)
+	response, err := http.ReadResponse(reader, &http.Request{Method: "CONNECT"})
+	if err != nil || response.StatusCode != 200 {
+		t.Fatalf("%v %v", response, err)
+	}
+	fmt.Fprint(conn, "ping")
+	got := make([]byte, 4)
+	if _, err := io.ReadFull(client, got); err != nil || string(got) != "ping" {
+		t.Fatalf("up: %q %v", got, err)
+	}
+	fmt.Fprint(client, "pong")
+	if _, err := io.ReadFull(reader, got); err != nil || string(got) != "pong" {
+		t.Fatalf("down: %q %v", got, err)
+	}
+	if asked := engine.asked(); len(asked) != 1 {
+		t.Fatalf("the engine was asked %v", asked)
+	}
+}
+
+// A request that could not be written whole is sent again on a fresh connection.
+func TestAgyProxySendsAgainAfterAFailedWrite(t *testing.T) {
+	shortWait(t, 10*time.Second)
+	socket := filepath.Join(t.TempDir(), "e.sock")
+	client, upstream := net.Pipe()
+	engine := &fakeEngine{upstream: upstream}
+	startEngine(t, socket, engine)
+	old := dialEngine
+	var dials int
+	dialEngine = func(ctx context.Context, s string) (net.Conn, error) {
+		c, err := old(ctx, s)
+		dials++
+		if err == nil && dials == 1 {
+			c.Close() // a write to it fails
+		}
+		return c, err
+	}
+	t.Cleanup(func() { dialEngine = old })
+	proxy := httptest.NewServer(agyProxy(socket))
+	defer proxy.Close()
+	response, conn, _ := connect(t, proxy, "accounts.google.com:443")
+	if response.StatusCode != 200 {
+		t.Fatalf("%q", response.Status)
+	}
+	fmt.Fprint(conn, "x")
+	one := make([]byte, 1)
+	if _, err := io.ReadFull(client, one); err != nil {
+		t.Fatal(err)
+	}
+	if dials != 2 || len(engine.asked()) != 1 {
+		t.Fatalf("dials %d, asked %v", dials, engine.asked())
+	}
+}
+
+// Past the wait the answer is today's text.
+func TestAgyProxyGivesUpAfterTheWait(t *testing.T) {
+	shortWait(t, 100*time.Millisecond)
+	proxy := httptest.NewServer(agyProxy(filepath.Join(t.TempDir(), "none.sock")))
+	defer proxy.Close()
+	if response, _, _ := connect(t, proxy, "accounts.google.com:443"); response.StatusCode != 502 || response.Status != "502 the agy exit is unreachable: the engine did not answer" {
+		t.Fatalf("%q", response.Status)
+	}
+}
+
+// An engine that read the request and closed without answering may have started toward Google: exactly one request reaches it.
+func TestAgyProxyNeverSendsAgainToAnEngineThatClosedWithoutAnswering(t *testing.T) {
+	shortWait(t, 10*time.Second)
+	socket := filepath.Join(t.TempDir(), "e.sock")
+	listener, err := net.Listen("unix", socket)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+	var mu sync.Mutex
+	posts := 0
+	go func() {
+		for {
+			conn, err := listener.Accept()
+			if err != nil {
+				return
+			}
+			if _, err := http.ReadRequest(bufio.NewReader(conn)); err == nil {
+				mu.Lock()
+				posts++
+				mu.Unlock()
+			}
+			conn.Close()
+		}
+	}()
+	proxy := httptest.NewServer(agyProxy(socket))
+	defer proxy.Close()
+	if response, _, _ := connect(t, proxy, "accounts.google.com:443"); response.StatusCode != 502 || !strings.Contains(response.Status, "the engine closed the connection") {
+		t.Fatalf("%q", response.Status)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if posts != 1 {
+		t.Fatalf("the engine saw %d requests", posts)
+	}
+}
+
+// A refusal is passed on and the engine is asked once.
+func TestAgyProxyNeverSendsAgainAfterARefusal(t *testing.T) {
+	shortWait(t, 10*time.Second)
+	socket := filepath.Join(t.TempDir(), "e.sock")
+	engine := &fakeEngine{}
+	startEngine(t, socket, engine)
+	proxy := httptest.NewServer(agyProxy(socket))
+	defer proxy.Close()
+	if response, _, _ := connect(t, proxy, "accounts.google.com:80"); response.StatusCode != 403 {
+		t.Fatalf("%q", response.Status)
+	}
+	if asked := engine.asked(); len(asked) != 1 {
+		t.Fatalf("asked %v", asked)
+	}
+}
+
+// The client hanging up ends the wait, long before the bound.
+func TestAgyProxyStopsWaitingWhenTheClientHangsUp(t *testing.T) {
+	shortWait(t, time.Minute)
+	finished := make(chan struct{})
+	inner := agyProxy(filepath.Join(t.TempDir(), "none.sock"))
+	proxy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		inner.ServeHTTP(w, r)
+		close(finished)
+	}))
+	defer proxy.Close()
+	conn, err := net.Dial("tcp", proxy.Listener.Addr().String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var dialed sync.WaitGroup
+	dialed.Add(1)
+	var once sync.Once
+	old := dialEngine
+	dialEngine = func(ctx context.Context, s string) (net.Conn, error) { once.Do(dialed.Done); return old(ctx, s) }
+	t.Cleanup(func() { dialEngine = old })
+	fmt.Fprint(conn, "CONNECT accounts.google.com:443 HTTP/1.1\r\nHost: accounts.google.com:443\r\n\r\n")
+	dialed.Wait()
+	conn.Close()
+	<-finished
 }

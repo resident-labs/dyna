@@ -37,7 +37,8 @@ const directDial = 30 * time.Second
 
 // agyProxy serves the proxy: a CONNECT to a Google host goes to the engine, a CONNECT to any other host is dialled from here, and a
 // plain-HTTP request, which a tool sends to its proxy whole, is forwarded to its origin from here. An engine that is away, restarting or
-// refusing fails the Google CONNECTs only, each once with the reason as the status text, and agy's own retry opens a new one.
+// refusing fails the Google CONNECTs only, with the reason as the status text, and agy's own retry opens a new one. An engine that cannot
+// be reached yet (see throughEngine) is waited for first, so a deploy's restart does not fail the turn in flight.
 func agyProxy(socket string) http.Handler {
 	direct := &http.Transport{DialContext: (&net.Dialer{Timeout: directDial}).DialContext}
 	forward := &httputil.ReverseProxy{
@@ -93,7 +94,26 @@ func dialDirect(w http.ResponseWriter, r *http.Request) {
 	join(conn, out)
 }
 
-// throughEngine sends one CONNECT to the engine's agy exit once. It waits for nothing and sends nothing again.
+// engineWait is how long a Google CONNECT keeps trying to reach the engine before it fails. A deploy restarts the engine, and its own
+// readiness check (scripts/deploy-trial.sh) allows the owner socket up to 30 attempts a second apart after the restart, so 30 s covers
+// a restart that goes as the deploy expects; a longer outage is a real one and fails as before. engineBackoff is the pause between
+// attempts, and each attempt dials with its own timeout of at most engineDial. They are variables so that a test can shorten them.
+var (
+	engineWait    = 30 * time.Second
+	engineBackoff = 250 * time.Millisecond
+	engineDial    = 5 * time.Second
+)
+
+// dialEngine connects to the engine's socket; a test replaces it to make a write fail.
+var dialEngine = func(ctx context.Context, socket string) (net.Conn, error) {
+	return (&net.Dialer{}).DialContext(ctx, "unix", socket)
+}
+
+// throughEngine sends one CONNECT to the engine's agy exit. It waits for our own engine and for nothing else: while the socket cannot be
+// dialled (the engine is down) or the request cannot be written whole (the engine has not read a full request, so nothing can have started
+// toward Google), it dials again on a fresh connection and sends the request again, for engineWait at most and no longer than the client
+// stays. Once the request is written, nothing is sent again: an engine that closed the connection without answering, or refused, may
+// already have started toward Google, and that answer goes to the client as it is. An open tunnel that is cut later stays cut.
 func throughEngine(w http.ResponseWriter, r *http.Request, socket, target string) {
 	failed := func(status int, text string) {
 		conn, _, err := http.NewResponseController(w).Hijack()
@@ -103,18 +123,28 @@ func throughEngine(w http.ResponseWriter, r *http.Request, socket, target string
 		defer conn.Close()
 		_, _ = io.WriteString(conn, "HTTP/1.1 "+strconv.Itoa(status)+" "+oneLine(text)+"\r\n\r\n")
 	}
-	dialCtx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
-	engine, err := (&net.Dialer{}).DialContext(dialCtx, "unix", socket)
-	cancel()
-	if err != nil {
-		failed(http.StatusBadGateway, "the agy exit is unreachable: the engine did not answer")
-		return
+	waitCtx, stop := context.WithTimeout(r.Context(), engineWait)
+	defer stop()
+	var engine net.Conn
+	for {
+		dialCtx, cancel := context.WithTimeout(waitCtx, engineDial)
+		conn, err := dialEngine(dialCtx, socket)
+		cancel()
+		if err == nil {
+			if _, err = io.WriteString(conn, "POST "+contract.AgyExitPath+target+" HTTP/1.1\r\nHost: dyna\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"); err == nil {
+				engine = conn
+				break
+			}
+			conn.Close()
+		}
+		select {
+		case <-waitCtx.Done():
+			failed(http.StatusBadGateway, "the agy exit is unreachable: the engine did not answer")
+			return
+		case <-time.After(engineBackoff):
+		}
 	}
 	defer engine.Close()
-	if _, err := io.WriteString(engine, "POST "+contract.AgyExitPath+target+" HTTP/1.1\r\nHost: dyna\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"); err != nil {
-		failed(http.StatusBadGateway, "the agy exit is unreachable: the engine did not answer")
-		return
-	}
 	reader := bufio.NewReader(engine)
 	response, err := http.ReadResponse(reader, nil)
 	if err != nil {
