@@ -174,6 +174,9 @@ func (c *Crew) restore(ctx context.Context, call crewCall, reply crewReply) crew
 	defer c.repo.Unlock()
 	if _, err := runGit(ctx, c.config.Workdir, "", "fetch", "--update-head-ok", "origin", "+refs/heads/"+saved.Branch+":refs/heads/"+saved.Branch); err != nil {
 		reason := fmt.Sprintf("stored work on %s did not come back: %s", saved.Branch, err)
+		if call.Op == "agent" && strings.Contains(err.Error(), "couldn't find remote ref") {
+			reason = fmt.Sprintf("stored work on %s did not come back: the step branch is missing. Dyna deletes step branches 14 days after the last run that uses them ends. Start a new run.", saved.Branch)
+		}
 		payload, _ := json.Marshal(reason)
 		return c.step(ctx, crewCall{Op: "failed", Parent: call.Parent, Phase: call.Phase, Payload: payload, run: call.run}, stepInfo{kind: contract.WorkflowStepLog, detail: reason}, func(context.Context, string) stepOutcome {
 			return stepOutcome{reason: reason}

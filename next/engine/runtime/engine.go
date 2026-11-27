@@ -432,26 +432,35 @@ func Run(ctx context.Context, cfg Config) error {
 		boxes.BuildAhead(ctx)
 	}()
 	shutdown.join("image builds", buildDone)
-	replayDone := make(chan struct{})
+	expiryDone := make(chan struct{})
 	go func() {
-		defer close(replayDone)
+		defer close(expiryDone)
 		ticks := time.NewTicker(time.Hour)
 		defer ticks.Stop()
 		for {
 			select {
 			case <-ctx.Done():
 				return
-			case <-ticks.C:
+			case now := <-ticks.C:
 				passCtx, cancel := context.WithTimeout(ctx, 5*time.Minute)
 				err := service.ExpireReplayKeys(passCtx)
 				cancel()
 				if err != nil && ctx.Err() == nil {
 					log.Printf("replay key sweep: %v", err)
 				}
+				passCtx, cancel = context.WithTimeout(ctx, 5*time.Minute)
+				steps, err := st.ExpiredWorkflowStepBranches(passCtx, now.Add(-enginegit.WorkflowStepBranchRetention))
+				if err == nil {
+					err = enginegit.DeleteWorkflowStepBranches(passCtx, mirror.Runner, credentials.Room, steps)
+				}
+				cancel()
+				if err != nil && ctx.Err() == nil {
+					log.Printf("workflow step branch sweep: %v", err)
+				}
 			}
 		}
 	}()
-	shutdown.join("replay key expiry", replayDone)
+	shutdown.join("hourly expiry", expiryDone)
 	ciDone := make(chan struct{})
 	go func() {
 		defer close(ciDone)
