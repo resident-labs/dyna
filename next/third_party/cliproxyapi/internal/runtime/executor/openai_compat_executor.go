@@ -24,6 +24,7 @@ import (
 	"github.com/router-for-me/CLIProxyAPI/v8/internal/util"
 	cliproxyauth "github.com/router-for-me/CLIProxyAPI/v8/sdk/cliproxy/auth"
 	cliproxyexecutor "github.com/router-for-me/CLIProxyAPI/v8/sdk/cliproxy/executor"
+	"github.com/router-for-me/CLIProxyAPI/v8/sdk/cliproxy/usage"
 	sdktranslator "github.com/router-for-me/CLIProxyAPI/v8/sdk/translator"
 	log "github.com/sirupsen/logrus"
 	"github.com/tidwall/gjson"
@@ -466,26 +467,42 @@ func (e *OpenAICompatExecutor) executeStreamWithCredentials(ctx context.Context,
 		return nil, err
 	}
 	out := make(chan cliproxyexecutor.StreamChunk)
+	trackDelivery := responseFormat == sdktranslator.FormatOpenAIResponse && usage.StreamDeliveryTracked(ctx)
 	go func() {
-		defer close(out)
-		defer func() {
-			if errClose := httpResp.Body.Close(); errClose != nil {
-				log.Errorf("openai compat executor: close response body error: %v", errClose)
-			}
-		}()
+		if trackDelivery {
+			defer usage.SupportStreamDelivery(ctx)()
+		}
 		scanner := bufio.NewScanner(httpResp.Body)
 		scanner.Buffer(nil, 52_428_800) // 50MB
 		claudeInputTokens := helps.NewClaudeInputTokenState(from, to, responseFormat, originalPayload)
 		var param any
 		helps.InitializeApplyPatchStream(ctx, to, responseFormat, req.Model, helps.ApplyPatchOriginalRequest(req, opts), translated, &param)
 		var streamUsage helps.StreamUsageBuffer
-		var seenDone bool
+		var seenDone, terminalDelivered bool
 		var sawFinishReason bool
 		var streamFailed bool
-		var streamAborted bool
 		var upstreamEvent string
 		var frameData [][]byte
-		defer streamUsage.Publish(ctx, reporter)
+		defer func() {
+			if errClose := httpResp.Body.Close(); errClose != nil {
+				log.Errorf("openai compat executor: close response body error: %v", errClose)
+			}
+			close(out) // A consumer may need EOF before acknowledging delivery.
+			if streamFailed {
+				return
+			}
+			if trackDelivery && terminalDelivered {
+				if errDelivery, _ := usage.WaitStreamDelivery(ctx); errDelivery != nil {
+					streamUsage.PublishFailure(ctx, reporter, errDelivery)
+					return
+				}
+			} else if errCtx := ctx.Err(); errCtx != nil && !terminalDelivered {
+				streamUsage.PublishFailure(ctx, reporter, errCtx)
+				return
+			}
+			streamUsage.Publish(ctx, reporter)
+			reporter.EnsurePublished(ctx)
+		}()
 
 		publishStreamError := func(streamErr statusErr, containsPayload bool) {
 			loggedErr := streamErr
@@ -493,14 +510,39 @@ func (e *OpenAICompatExecutor) executeStreamWithCredentials(ctx context.Context,
 				loggedErr = statusErr{code: streamErr.code, msg: "upstream stream returned an error payload"}
 			}
 			helps.RecordAPIResponseError(ctx, e.cfg, loggedErr)
-			if !streamUsage.PublishFailure(ctx, reporter, loggedErr) {
-				reporter.PublishFailure(ctx, loggedErr)
-			}
+			streamUsage.PublishFailure(ctx, reporter, loggedErr)
 			select {
 			case out <- cliproxyexecutor.StreamChunk{Err: streamErr}:
 			case <-ctx.Done():
 			}
 			streamFailed = true
+		}
+
+		emitChunks := func(chunks [][]byte) bool {
+			for _, chunk := range chunks {
+				if ctx.Err() != nil {
+					return false
+				}
+				select {
+				case out <- cliproxyexecutor.StreamChunk{Payload: chunk}:
+					terminalDelivered = terminalDelivered || openAICompatTextChunkIsTerminal(responseFormat, chunk)
+				case <-ctx.Done():
+					return false
+				}
+			}
+			return true
+		}
+		translateFrame := func(streamLine []byte) bool {
+			if ctx.Err() != nil {
+				return false
+			}
+			chunks := helps.TranslateStreamWithClaudeInputTokens(ctx, to, responseFormat, req.Model, helps.ApplyPatchOriginalRequest(req, opts), translated, streamLine, &param, claudeInputTokens)
+			patchErr := statusErr{code: http.StatusBadGateway, msg: helps.ApplyPatchUpstreamErrorMessage}
+			patchFailed := helps.RecordApplyPatchStreamFailureWithUsage(ctx, param, reporter, &streamUsage, patchErr)
+			if emitChunks(chunks) && patchFailed {
+				publishStreamError(patchErr, false)
+			}
+			return !patchFailed && ctx.Err() == nil
 		}
 
 		processFrame := func() bool {
@@ -510,7 +552,7 @@ func (e *OpenAICompatExecutor) executeStreamWithCredentials(ctx context.Context,
 			frameData = nil
 			if len(dataLines) == 0 {
 				if openAICompatErrorEvent(eventName) {
-					publishStreamError(statusErr{code: http.StatusBadGateway, msg: "upstream error event ended without data"}, false)
+					publishStreamError(statusErr{code: http.StatusBadGateway, msg: "upstream error event ended without data", streamTruncated: true}, false)
 					return true
 				}
 				return false
@@ -519,7 +561,7 @@ func (e *OpenAICompatExecutor) executeStreamWithCredentials(ctx context.Context,
 			if len(dataLines) > 1 {
 				for _, dataLine := range dataLines {
 					if bytes.Equal(bytes.TrimSpace(dataLine), []byte("[DONE]")) {
-						publishStreamError(statusErr{code: http.StatusBadGateway, msg: "upstream stream ended with incomplete data before [DONE]"}, false)
+						publishStreamError(statusErr{code: http.StatusBadGateway, msg: "upstream stream ended with incomplete data before [DONE]", streamTruncated: true}, false)
 						return true
 					}
 				}
@@ -527,14 +569,15 @@ func (e *OpenAICompatExecutor) executeStreamWithCredentials(ctx context.Context,
 			dataPayload := bytes.TrimSpace(bytes.Join(dataLines, []byte("\n")))
 			isDone := bytes.Equal(dataPayload, []byte("[DONE]"))
 			if isDone && openAICompatErrorEvent(eventName) {
-				publishStreamError(statusErr{code: http.StatusBadGateway, msg: "upstream error event ended before [DONE]"}, false)
+				publishStreamError(statusErr{code: http.StatusBadGateway, msg: "upstream error event ended before [DONE]", streamTruncated: true}, false)
 				return true
 			}
 			if !isDone && !json.Valid(dataPayload) {
-				publishStreamError(statusErr{code: http.StatusBadGateway, msg: "upstream stream ended with incomplete SSE data frame"}, false)
+				publishStreamError(statusErr{code: http.StatusBadGateway, msg: "upstream stream ended with incomplete SSE data frame", streamTruncated: true}, false)
 				return true
 			}
 			if !isDone {
+				streamUsage.ObserveOpenAIStream(dataPayload)
 				if streamErr, isError := openAICompatStreamDataError(dataPayload, eventName); isError {
 					publishStreamError(streamErr, true)
 					return true
@@ -544,38 +587,21 @@ func (e *OpenAICompatExecutor) executeStreamWithCredentials(ctx context.Context,
 				}
 			}
 
-			// Observe complete upstream frames before translation or downstream backpressure.
-			if !isDone && len(dataLines) > 1 {
-				streamUsage.ObserveOpenAIStream(dataPayload)
-			}
 			helps.ObserveChatTokenEvent(reporter, dataPayload)
-			streamLine := append([]byte("data: "), dataPayload...)
-			chunks := helps.TranslateStreamWithClaudeInputTokens(ctx, to, responseFormat, req.Model, helps.ApplyPatchOriginalRequest(req, opts), translated, streamLine, &param, claudeInputTokens)
-			helps.RecordApplyPatchStreamFailure(ctx, param, reporter, statusErr{code: http.StatusBadGateway, msg: helps.ApplyPatchUpstreamErrorMessage})
-			for i := range chunks {
-				select {
-				case out <- cliproxyexecutor.StreamChunk{Payload: chunks[i]}:
-				case <-ctx.Done():
-					streamAborted = true
-					return true
-				}
-			}
-			if helps.ApplyPatchTranslationError(param) != nil {
-				publishStreamError(statusErr{code: http.StatusBadGateway, msg: helps.ApplyPatchUpstreamErrorMessage}, false)
+			if !translateFrame(append([]byte("data: "), dataPayload...)) {
 				return true
 			}
 			if isDone {
 				seenDone = true
 				return true
 			}
-			return false
+			return trackDelivery && terminalDelivered
 		}
 
 	scanLoop:
 		for scanner.Scan() {
 			line := scanner.Bytes()
 			helps.AppendAPIResponseChunk(ctx, e.cfg, line)
-			streamUsage.ObserveOpenAIStream(line)
 			trimmedLine := bytes.TrimSpace(line)
 			if len(trimmedLine) == 0 {
 				if processFrame() {
@@ -595,77 +621,61 @@ func (e *OpenAICompatExecutor) executeStreamWithCredentials(ctx context.Context,
 				continue
 			}
 			if bytes.HasPrefix(trimmedLine, []byte("{")) || bytes.HasPrefix(trimmedLine, []byte("[")) {
-				publishStreamError(statusErr{code: http.StatusBadGateway, msg: string(trimmedLine)}, true)
+				if json.Valid(trimmedLine) {
+					publishStreamError(statusErr{code: http.StatusBadGateway, msg: string(trimmedLine)}, true)
+				} else {
+					publishStreamError(statusErr{code: http.StatusBadGateway, msg: "upstream stream ended with incomplete SSE data frame", streamTruncated: true}, false)
+				}
 				break
 			}
 		}
+		if ctx.Err() != nil || streamFailed || (trackDelivery && terminalDelivered) {
+			return
+		}
 		errScan := scanner.Err()
-		if errScan == nil && !seenDone && !streamFailed && !streamAborted && len(frameData) > 0 {
+		if !seenDone && (len(frameData) > 0 || upstreamEvent != "") {
+			// Scanner can yield a complete final frame before reporting a read cut.
 			_ = processFrame()
 		}
-		if !streamFailed && !streamAborted && helps.EndApplyPatchStream(ctx, param, reporter, out, statusErr{code: http.StatusBadGateway, msg: helps.ApplyPatchUpstreamErrorMessage}) {
+		if ctx.Err() != nil || streamFailed {
 			return
 		}
-		if !streamFailed && !streamAborted && !seenDone && errScan == nil && responseFormat == sdktranslator.FormatOpenAIResponse && ctx.Err() == nil && helps.CanFinalizeResponseStream(param) {
-			finalChunks := helps.TranslateStreamWithClaudeInputTokens(ctx, to, responseFormat, req.Model, helps.ApplyPatchOriginalRequest(req, opts), translated, []byte("data: [DONE]"), &param, claudeInputTokens)
-			for _, finalChunk := range finalChunks {
-				select {
-				case out <- cliproxyexecutor.StreamChunk{Payload: finalChunk}:
-				case <-ctx.Done():
-					streamAborted = true
-				}
-				if streamAborted {
-					break
-				}
-			}
-			if len(finalChunks) > 0 && !streamAborted {
-				seenDone = true
-			}
-		}
-		if streamFailed || streamAborted {
+		if terminalDelivered && (seenDone || responseFormat != sdktranslator.FormatOpenAI || errScan != nil) {
 			return
 		}
-		if errScan != nil && !seenDone {
+		patchErr := statusErr{code: http.StatusBadGateway, msg: helps.ApplyPatchUpstreamErrorMessage, streamTruncated: errScan != nil}
+		finalChunks := helps.FinalizeApplyPatchStream(param)
+		patchFailed := helps.RecordApplyPatchStreamFailureWithUsage(ctx, param, reporter, &streamUsage, patchErr)
+		if !emitChunks(finalChunks) {
+			return
+		}
+		if patchFailed {
+			publishStreamError(patchErr, false)
+			return
+		}
+		if seenDone && responseFormat != sdktranslator.FormatOpenAIResponse {
+			return
+		}
+		if errScan != nil {
 			helps.RecordAPIResponseError(ctx, e.cfg, errScan)
-			if !streamUsage.PublishFailure(ctx, reporter, errScan) {
-				reporter.PublishFailure(ctx, errScan)
-			}
-			select {
-			case out <- cliproxyexecutor.StreamChunk{Err: errScan}:
-			case <-ctx.Done():
-			}
-		} else if !seenDone {
-			// Without a translator-confirmed terminal state, a clean Responses or Claude EOF
-			// without [DONE] remains a failed stream instead of completing it.
-			if responseFormat == sdktranslator.FormatOpenAIResponse || (responseFormat == sdktranslator.FormatClaude && !sawFinishReason) {
-				streamErr := statusErr{code: http.StatusBadGateway, msg: "upstream stream closed before [DONE]", streamTruncated: true}
-				helps.RecordAPIResponseError(ctx, e.cfg, streamErr)
-				if !helps.RecordApplyPatchStreamFailureWithUsage(ctx, param, reporter, &streamUsage, streamErr) {
-					if !streamUsage.PublishFailure(ctx, reporter, streamErr) {
-						reporter.PublishFailure(ctx, streamErr)
-					}
-				}
-				select {
-				case out <- cliproxyexecutor.StreamChunk{Err: streamErr}:
-				case <-ctx.Done():
-				}
+			publishStreamError(statusErr{code: http.StatusBadGateway, msg: "upstream stream closed before [DONE]", streamTruncated: true}, false)
+			return
+		}
+		canFinalize := responseFormat != sdktranslator.FormatOpenAIResponse && (responseFormat != sdktranslator.FormatClaude || sawFinishReason)
+		if responseFormat == sdktranslator.FormatOpenAIResponse {
+			canFinalize = !seenDone && helps.CanFinalizeResponseStream(param)
+		}
+		if canFinalize {
+			// Keep the legacy Chat fallback and translator-confirmed EOF completion.
+			if !translateFrame([]byte("data: [DONE]")) || terminalDelivered || responseFormat != sdktranslator.FormatOpenAIResponse {
 				return
 			}
-
-			// Other protocols retain compatibility with providers that omit [DONE].
-			chunks := helps.TranslateStreamWithClaudeInputTokens(ctx, to, responseFormat, req.Model, helps.ApplyPatchOriginalRequest(req, opts), translated, []byte("data: [DONE]"), &param, claudeInputTokens)
-			helps.RecordApplyPatchStreamFailure(ctx, param, reporter, statusErr{code: http.StatusBadGateway, msg: helps.ApplyPatchUpstreamErrorMessage})
-			for i := range chunks {
-				select {
-				case out <- cliproxyexecutor.StreamChunk{Payload: chunks[i]}:
-				case <-ctx.Done():
-					return
-				}
-			}
 		}
-		// Ensure we record the request if no usage chunk was ever seen.
-		streamUsage.Publish(ctx, reporter)
-		reporter.EnsurePublished(ctx)
+		msg := "upstream stream closed before [DONE]"
+		if seenDone {
+			msg = "upstream [DONE] did not produce a Responses terminal event"
+		}
+		publishStreamError(statusErr{code: http.StatusBadGateway, msg: msg, streamTruncated: true}, false)
 	}()
 	return &cliproxyexecutor.StreamResult{Headers: httpResp.Header.Clone(), Chunks: out}, nil
 }
@@ -1141,6 +1151,39 @@ func openAICompatChunkHasFinishReason(payload []byte) bool {
 	for _, choice := range gjson.GetBytes(payload, "choices").Array() {
 		if reason := choice.Get("finish_reason"); reason.Exists() && reason.Type != gjson.Null && strings.TrimSpace(reason.String()) != "" {
 			return true
+		}
+	}
+	return false
+}
+
+// openAICompatTextChunkIsTerminal inspects rendered data fields, not text
+// content or an SSE event name whose JSON payload may not have been sent.
+func openAICompatTextChunkIsTerminal(format sdktranslator.Format, chunk []byte) bool {
+	for line := range bytes.SplitSeq(chunk, []byte("\n")) {
+		line = bytes.TrimSpace(line)
+		if bytes.HasPrefix(line, dataTag) {
+			line = bytes.TrimSpace(line[len(dataTag):])
+		}
+		if format == sdktranslator.FormatOpenAI && bytes.Equal(line, []byte("[DONE]")) {
+			return true
+		}
+		if len(line) == 0 || line[0] != '{' || !json.Valid(line) {
+			continue
+		}
+		root := gjson.ParseBytes(line)
+		switch format {
+		case sdktranslator.FormatClaude:
+			if root.Get("type").String() == "message_stop" {
+				return true
+			}
+		case sdktranslator.FormatOpenAIResponse:
+			if kind := root.Get("type").String(); (kind == "response.completed" || kind == "response.incomplete") && root.Get("response").IsObject() {
+				return true
+			}
+		case sdktranslator.FormatOpenAI:
+			if openAICompatChunkHasFinishReason(line) {
+				return true
+			}
 		}
 	}
 	return false
