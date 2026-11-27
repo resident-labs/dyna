@@ -211,7 +211,7 @@ func TestRemoveRoomRepoPreservesFeedForForeignTracker(t *testing.T) {
 	if _, e := s.writer.ExecContext(ctx, `INSERT INTO sessions(id,room,name,profile,state,goal,created_at,repo) VALUES('other-worker','other','worker','p','open','',0,'')`); e != nil {
 		t.Fatal(e)
 	}
-	if e := s.TrackIssue(ctx, TrackedIssue{IssueSummary: contract.IssueSummary{Repo: auditRepo, Number: 5, Session: "other-worker", State: contract.IssueOpen}}); e != nil {
+	if e := s.TrackIssue(ctx, TrackedIssue{IssueSummary: contract.IssueSummary{Repo: auditRepo, Number: 5, Session: "other-worker", State: contract.IssueOpen}}, false); e != nil {
 		t.Fatal(e)
 	}
 	if e := s.ApplyPRPoll(ctx, GitHubPass{Feeds: []GitHubFeed{{Repo: auditRepo, Feed: "events", ETag: "still-needed"}}}, now); e != nil {
