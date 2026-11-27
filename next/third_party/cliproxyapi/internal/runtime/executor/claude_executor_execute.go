@@ -1,6 +1,7 @@
 package executor
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"fmt"
@@ -354,12 +355,23 @@ func (e *ClaudeExecutor) Execute(ctx context.Context, auth *cliproxyauth.Auth, r
 		}
 	}()
 	data, err := io.ReadAll(decodedBody)
-	if err != nil {
+	responsesStream := upstreamStream && responseFormat == sdktranslator.FormatOpenAIResponse
+	if err != nil && (!responsesStream || ctx.Err() != nil) {
 		helps.RecordAPIResponseError(ctx, e.cfg, err)
 		return resp, wrapClaudeFastRequestError(fastRequest, httpResp.StatusCode, err)
 	}
 	helps.AppendAPIResponseChunk(ctx, e.cfg, data)
 	var streamUsage helps.StreamUsageBuffer
+	if responsesStream {
+		// A buffered client has not seen any output. Preserve the existing
+		// HTTP error contract, but account for intact frames before failure.
+		data, err = readBufferedClaudeResponses(data, reporter, &streamUsage)
+		if err != nil {
+			helps.RecordAPIResponseError(ctx, e.cfg, err)
+			streamUsage.PublishFailure(ctx, reporter, err)
+			return resp, wrapClaudeFastRequestError(fastRequest, httpResp.StatusCode, err)
+		}
+	}
 	if upstreamStream {
 		if errValidate := validateClaudeStreamingResponse(data); errValidate != nil {
 			helps.RecordAPIResponseError(ctx, e.cfg, errValidate)
@@ -378,8 +390,10 @@ func (e *ClaudeExecutor) Execute(ctx context.Context, auth *cliproxyauth.Auth, r
 				streamUsage.ObserveClaudeSSEEvent(eventBuf.Bytes())
 				eventBuf.Reset()
 			}
-			reporter.ObserveResponseModel(line)
-			streamUsage.ObserveClaudeStream(line)
+			if !responsesStream {
+				reporter.ObserveResponseModel(line)
+				streamUsage.ObserveClaudeStream(line)
+			}
 			restoredLine, errRestore := restoreClaudeOAuthToolNamesFromStreamLine(line, oauthToolNamesReverseMap)
 			if errRestore != nil {
 				errRestore = fmt.Errorf("restore Claude OAuth tool name from streaming response: %w", errRestore)
@@ -434,4 +448,52 @@ func (e *ClaudeExecutor) Execute(ctx context.Context, auth *cliproxyauth.Auth, r
 	}
 	resp = cliproxyexecutor.Response{Payload: out, Headers: httpResp.Header.Clone()}
 	return resp, nil
+}
+
+// readBufferedClaudeResponses normalizes SSE frames to the single data line
+// expected by the buffered translator. A complete terminal frame can survive a
+// transport error from the preceding ReadAll.
+func readBufferedClaudeResponses(data []byte, reporter *helps.UsageReporter, usage *helps.StreamUsageBuffer) ([]byte, error) {
+	const maxFrameBytes = 52_428_800
+	var frames, event bytes.Buffer
+	var messageID string
+	var providerErr error
+	var completed bool
+	flush := func() bool {
+		payload, valid := observeClaudeSSEEvent(event.Bytes(), &messageID, &completed, &providerErr)
+		event.Reset()
+		if len(payload) > 0 {
+			reporter.ObserveResponseModel(payload)
+			usage.ObserveClaudeStream(payload)
+			frames.WriteString("data: ")
+			// Strip formatting newlines inserted between SSE data lines.
+			frames.Write(bytes.ReplaceAll(payload, []byte("\n"), nil))
+			frames.WriteString("\n\n")
+		}
+		return valid
+	}
+	scanner := bufio.NewScanner(bytes.NewReader(data))
+	scanner.Buffer(nil, maxFrameBytes)
+	for scanner.Scan() {
+		line := scanner.Bytes()
+		if event.Len()+len(line)+1 > maxFrameBytes {
+			event.Reset()
+			break
+		}
+		event.Write(line)
+		event.WriteByte('\n')
+		if len(bytes.TrimSpace(line)) == 0 && (!flush() || completed || providerErr != nil) {
+			break
+		}
+	}
+	if event.Len() > 0 {
+		flush()
+	}
+	if providerErr != nil {
+		return nil, providerErr
+	}
+	if !completed {
+		return nil, statusErr{code: http.StatusBadGateway, msg: "upstream stream closed before message_stop", streamTruncated: true}
+	}
+	return frames.Bytes(), nil
 }
