@@ -1336,6 +1336,12 @@ func ConvertClaudeResponseToOpenAIResponses(ctx context.Context, modelName strin
 // An interrupted patch must not emit input.done or hide the Anthropic error
 // behind a validation error for arguments the provider never finished sending.
 func (st *claudeToResponsesState) finalizeInterruptedApplyPatchItem(idx int, nextSeq func() int) []byte {
+	if st.FuncItemDone == nil {
+		st.FuncItemDone = make(map[int]bool)
+	}
+	if st.FuncItemStatus == nil {
+		st.FuncItemStatus = make(map[int]string)
+	}
 	st.FuncItemDone[idx] = true
 	st.FuncItemStatus[idx] = "incomplete"
 	input := ""
