@@ -1,4 +1,5 @@
 import type { Account, ModelProvider, Profile, ProfileEntry, ThinkingLevel } from "./contract.gen.ts";
+import { APIError } from "./client.ts";
 import type { Chip, Column } from "./settings-list.ts";
 
 // A profile as the web lists and edits it: profile.list's stored profile with its read-only in-use count beside it
@@ -90,3 +91,9 @@ export function slugName(slug: string): string {
 export function profileLabel(profile: ProfileSummary): { name: string; detail: string } {
   return { name: slugName(profile.name), detail: thinking[profile.thinking] };
 }
+
+// Why a profile change failed. The engine's refusal says what to do next (a host the profile cannot run on, a session that
+// is closing), so it is shown as it is, with no "Try again" that would repeat the refusal. Only a failure that never
+// reached the engine's decision (unreachable, renewing sign-in) is worth trying again.
+const NOT_A_REFUSAL = ["unavailable", "renew", "renew-wait", "connect-unavailable", "connect-ended"];
+export const profileChangeFailure = (error: unknown) => error instanceof APIError && error.detail.message && !NOT_A_REFUSAL.includes(error.detail.code) ? error.detail.message : "The profile did not change. Try again.";
