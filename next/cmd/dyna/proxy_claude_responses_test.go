@@ -29,10 +29,13 @@ func TestActiveDynaClaudeResponses(t *testing.T) {
 	for _, tc := range []struct {
 		name, first, stream, failure string
 		status                       int
+		cut                          bool
 	}{
-		{"partial", `data: {"type":"error","error":{"type":"overloaded_error","message":`, "true", "", 502},
-		{"missing-stop", "data: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"}}\n\n", "false", "", 502},
-		{"provider-error", "data: {\"type\":\"error\",\ndata: \"error\":{\"type\":\"overloaded_error\",\"message\":\"provider fixture\"}}", "true", `"code":"overloaded_error"`, 200},
+		{"partial", `data: {"type":"error","error":{"type":"overloaded_error","message":`, "true", "", 502, false},
+		{"missing-stop", "data: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"}}\n\n", "false", "", 502, false},
+		{"missing-delta", "data: {\"type\":\"message_stop\"}\n\n", "false", "", 502, false},
+		{"provider-error", "data: {\"type\":\"error\",\ndata: \"error\":{\"type\":\"overloaded_error\",\"message\":\"provider fixture\"}}", "true", `"code":"overloaded_error"`, 200, true},
+		{"buffered-provider-error", "data: {\"type\":\"error\",\ndata: \"error\":{\"type\":\"overloaded_error\",\"message\":\"provider fixture\",\"private_field\":\"do not project\"}}", "false", "claude executor: upstream returned error event: provider fixture", 502, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			manager, service, router := importTestRoutes(t)
@@ -70,7 +73,7 @@ func TestActiveDynaClaudeResponses(t *testing.T) {
 					_, _ = w.WriteString(start + "data: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"},\"usage\":{\"output_tokens\":3}}\n\ndata: {\"type\":\"message_stop\"}\n\n")
 				}
 				resp := w.Result()
-				if tc.name == "provider-error" && attempts.Load() == 1 {
+				if tc.cut && attempts.Load() == 1 {
 					resp.Body = claudeFixtureCutBody{resp.Body}
 				}
 				return resp, nil
@@ -88,6 +91,12 @@ func TestActiveDynaClaudeResponses(t *testing.T) {
 			body := w.Body.String()
 			if w.Code != tc.status || attempts.Load() != 1 || strings.Contains(body, `"type":"response.completed"`) || !strings.Contains(body, tc.failure) {
 				t.Fatalf("first request: HTTP %d, attempts %d: %s", w.Code, attempts.Load(), body)
+			}
+			if tc.name == "buffered-provider-error" {
+				if strings.Contains(body, "private_field") || strings.Contains(body, "overloaded_error") {
+					t.Fatalf("buffered failure leaked upstream fields: %s", body)
+				}
+				return
 			}
 			if tc.failure != "" {
 				if strings.Count(body, `"type":"response.failed"`) != 1 || !strings.Contains(body, `"input_tokens":12`) {

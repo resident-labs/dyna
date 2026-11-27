@@ -373,9 +373,11 @@ func (e *ClaudeExecutor) Execute(ctx context.Context, auth *cliproxyauth.Auth, r
 		}
 	}
 	if upstreamStream {
-		if errValidate := validateClaudeStreamingResponse(data); errValidate != nil {
-			helps.RecordAPIResponseError(ctx, e.cfg, errValidate)
-			return resp, wrapClaudeFastRequestError(fastRequest, httpResp.StatusCode, errValidate)
+		if !responsesStream {
+			if errValidate := validateClaudeStreamingResponse(data); errValidate != nil {
+				helps.RecordAPIResponseError(ctx, e.cfg, errValidate)
+				return resp, wrapClaudeFastRequestError(fastRequest, httpResp.StatusCode, errValidate)
+			}
 		}
 		if msgID := claudeMessageIDFromSSE(data); msgID != "" {
 			commitClaudeContinuity(diagnosticsState, msgID, helps.HeaderValueCaseInsensitive(httpResp.Header, "request-id"))
@@ -465,6 +467,10 @@ func readBufferedClaudeResponses(data []byte, reporter *helps.UsageReporter, usa
 		if len(payload) > 0 {
 			reporter.ObserveResponseModel(payload)
 			usage.ObserveClaudeStream(payload)
+			if providerErr != nil {
+				providerErr = bufferedClaudeProviderError(gjson.ParseBytes(payload))
+				return true
+			}
 			frames.WriteString("data: ")
 			// Strip formatting newlines inserted between SSE data lines.
 			frames.Write(bytes.ReplaceAll(payload, []byte("\n"), nil))
@@ -494,6 +500,9 @@ func readBufferedClaudeResponses(data []byte, reporter *helps.UsageReporter, usa
 	}
 	if !completed {
 		return nil, statusErr{code: http.StatusBadGateway, msg: "upstream stream closed before message_stop", streamTruncated: true}
+	}
+	if err := validateClaudeStreamingResponse(frames.Bytes()); err != nil {
+		return nil, statusErr{code: http.StatusBadGateway, msg: err.Error(), streamTruncated: true}
 	}
 	return frames.Bytes(), nil
 }

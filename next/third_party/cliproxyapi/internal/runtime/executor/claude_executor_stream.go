@@ -650,14 +650,7 @@ func validateClaudeStreamingResponse(data []byte) error {
 		root := gjson.ParseBytes(payload)
 		switch root.Get("type").String() {
 		case "error":
-			message := strings.TrimSpace(root.Get("error.message").String())
-			if message == "" {
-				message = strings.TrimSpace(root.Get("error.type").String())
-			}
-			if message == "" {
-				message = "unknown upstream error"
-			}
-			return statusErr{code: http.StatusBadGateway, msg: "claude executor: upstream returned error event: " + message}
+			return bufferedClaudeProviderError(root)
 		case "message_start":
 			message := root.Get("message")
 			if strings.TrimSpace(message.Get("id").String()) == "" || strings.TrimSpace(message.Get("model").String()) == "" {
@@ -681,4 +674,15 @@ func validateClaudeStreamingResponse(data []byte) error {
 		return statusErr{code: http.StatusBadGateway, msg: "claude executor: upstream stream response ended before message completion"}
 	}
 	return nil
+}
+
+func bufferedClaudeProviderError(root gjson.Result) error {
+	message := strings.TrimSpace(root.Get("error.message").String())
+	if message == "" {
+		message = strings.TrimSpace(root.Get("error.type").String())
+	}
+	if message == "" {
+		message = "unknown upstream error"
+	}
+	return statusErr{code: http.StatusBadGateway, msg: "claude executor: upstream returned error event: " + message}
 }
