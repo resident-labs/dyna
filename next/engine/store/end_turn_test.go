@@ -192,3 +192,59 @@ func TestFailedTurnIgnoresEndPosts(t *testing.T) {
 		t.Fatalf("turn %+v", body)
 	}
 }
+
+func TestEmptyFinalAfterPostDoesNotWake(t *testing.T) {
+	channel := contract.ReplyChannel{Kind: contract.ReplyFinal, Target: endTurnParent, Home: endTurnFeed}
+	s, post := endTurnFixture(t, []contract.ReplyChannel{channel}, contract.PostCreated{Text: "answer", Home: endTurnFeed, Mentions: []contract.Principal{endTurnParent}})
+	_, seq := endChildTurn(t, s, contract.TurnOutputRequest{Outcome: contract.TurnCompleted})
+	if got, want := parentDeliveries(t, s), []string{fmt.Sprintf("%d true", post.Seq), fmt.Sprintf("%d false", seq)}; !slices.Equal(got, want) {
+		t.Fatalf("deliveries %v, want %v", got, want)
+	}
+}
+
+func TestEndPostPaysSessionDebtWhileWaiting(t *testing.T) {
+	ctx := context.Background()
+	channel := contract.ReplyChannel{Kind: contract.ReplyFinal, Target: endTurnParent, Home: endTurnFeed}
+	s, progress := endTurnFixture(t, []contract.ReplyChannel{channel}, contract.PostCreated{Text: "progress", Home: endTurnFeed, Mentions: []contract.Principal{endTurnParent}})
+	endChildTurn(t, s, contract.TurnOutputRequest{Outcome: contract.TurnCompleted, ShellJobs: 2})
+	if owed, err := s.RepliesOwed(ctx, "child"); err != nil || !slices.Equal(owed, []contract.ReplyChannel{channel}) {
+		t.Fatalf("owed after progress: %v: %v", owed, err)
+	}
+	now := progress.Time
+	jobTurn := func(job contract.ShellJobID) contract.TurnID {
+		t.Helper()
+		now = now.Add(InputBatchWindow)
+		event := contract.Event{ID: contract.EventID(job) + "-end", Time: now, Room: "room", From: endTurnChild, Body: contract.ShellJobEnded{Session: "child", Job: job}}
+		if err := s.ShellJobEnded(ctx, "child", job, event, false); err != nil {
+			t.Fatal(err)
+		}
+		turn := contract.TurnID(job) + "-turn"
+		start := contract.Event{ID: contract.EventID(job) + "-start", Time: now, Room: "room", From: contract.Principal{Kind: contract.PrincipalEngine}, Body: contract.TurnStarted{}}
+		if active, inputs, _, err := s.Dispatch(ctx, "child", turn, start, false); err != nil || active != turn || len(inputs) != 1 || inputs[0].Reply.Kind != contract.ReplyNone {
+			t.Fatalf("job %q dispatched %q with %+v: %v", job, active, inputs, err)
+		}
+		return turn
+	}
+	turn := jobTurn("first")
+	// This post does not mention the parent. Only the reply debt identifies its target.
+	post := contract.Event{ID: "answer", Time: now, Room: "room", From: endTurnChild, Body: contract.PostCreated{Text: "answer", Home: endTurnFeed}}
+	seq, err := s.Post(ctx, post, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	end := contract.Event{ID: "answer-end", Time: now, Room: "room", From: endTurnChild, Body: contract.TurnEnded{Session: "child", Turn: turn, Outcome: contract.TurnCompleted, ShellJobs: 1}}
+	if err := s.EndTurn(ctx, "child", contract.TurnOutputRequest{Turn: turn, Outcome: contract.TurnCompleted, ShellJobs: 1, EndPosts: []contract.EventID{post.ID}}, end); err != nil {
+		t.Fatal(err)
+	}
+	if owed, err := s.RepliesOwed(ctx, "child"); err != nil || len(owed) != 0 {
+		t.Fatalf("owed after end post: %v: %v", owed, err)
+	}
+	turn = jobTurn("second")
+	end = contract.Event{ID: "last-end", Time: now, Room: "room", From: endTurnChild, Body: contract.TurnEnded{Session: "child", Turn: turn, Outcome: contract.TurnCompleted, Final: "done"}}
+	if err := s.EndTurn(ctx, "child", contract.TurnOutputRequest{Turn: turn, Outcome: contract.TurnCompleted, Final: "done"}, end); err != nil {
+		t.Fatal(err)
+	}
+	if got, want := parentDeliveries(t, s), []string{fmt.Sprintf("%d true", progress.Seq), fmt.Sprintf("%d true", seq)}; !slices.Equal(got, want) {
+		t.Fatalf("deliveries %v, want only the progress and result posts %v", got, want)
+	}
+}
