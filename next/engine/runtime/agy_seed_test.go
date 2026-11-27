@@ -181,3 +181,14 @@ func TestSeedAgyALosingSeedSaysSeededNotBrokenPipe(t *testing.T) {
 		t.Fatalf("err = %v", err)
 	}
 }
+
+// A program path the target cannot use ends the seed with an actionable text, and not with the generic one.
+func TestSeedAgyAnUnusableProgramSaysWhatToRemove(t *testing.T) {
+	refused := exec.Command("bash", "-c", "exit 18").Run()
+	source := &agyHostFake{state: signedIn, pack: "ARCHIVE"}
+	target := &agyHostFake{state: "dyna-agy-arch Linux x86_64\n", unpackErr: refused}
+	err := seedRig(t, source, target).SeedAgy(t.Context(), "other")
+	if !errors.As(err, new(ProgramError)) || !strings.Contains(err.Error(), "/data/agy/antigravity") || !strings.Contains(err.Error(), "remove it") {
+		t.Fatalf("err = %v", err)
+	}
+}

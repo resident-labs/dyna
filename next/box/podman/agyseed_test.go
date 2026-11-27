@@ -220,9 +220,10 @@ func TestAgyArchiveNeverRestsUnderTmp(t *testing.T) {
 func TestAgyUnpackOfACutStreamInstallsNothing(t *testing.T) {
 	src := agyFolder(t)
 	pack, _ := shell(t, nil, agyPackScript, src, "antigravity", "accounts/main")
+	sum, _ := shell(t, nil, `sha256sum < "$1" | cut -d ' ' -f 1`, src+"/antigravity")
 	cut := pack[:len(pack)-10240] // the marker's tar, one padded record, is the last of the stream
 	dst := t.TempDir() + "/agy"
-	if err := shellIn(t, t.TempDir(), bytes.NewReader(cut), agyUnpackScript, dst, "-"); err == nil {
+	if err := shellIn(t, t.TempDir(), bytes.NewReader(cut), agyUnpackScript, dst, strings.TrimSpace(string(sum))); err == nil {
 		t.Fatal("a cut stream was installed")
 	}
 	for _, path := range []string{"/antigravity", "/accounts/main"} {
@@ -240,10 +241,11 @@ func TestAgyUnpackKilledLeavesNothingUnderTmpAndTheNextSeedSweeps(t *testing.T) 
 	src := agyFolder(t)
 	write(t, src+"/accounts/main/token.json", "SENTINEL-KILLED-BYTES", 0o600)
 	pack, _ := shell(t, nil, agyPackScript, src, "antigravity", "accounts/main")
+	sum, _ := shell(t, nil, `sha256sum < "$1" | cut -d ' ' -f 1`, src+"/antigravity")
 	tmp := t.TempDir()
 	dst := t.TempDir() + "/agy"
 	reader, writer := io.Pipe()
-	cmd := exec.Command("bash", "-c", agyUnpackScript, "dyna", dst, "-")
+	cmd := exec.Command("bash", "-c", agyUnpackScript, "dyna", dst, strings.TrimSpace(string(sum)))
 	cmd.Env = append(os.Environ(), "TMPDIR="+tmp)
 	cmd.Stdin = reader
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
@@ -267,7 +269,7 @@ func TestAgyUnpackKilledLeavesNothingUnderTmpAndTheNextSeedSweeps(t *testing.T) 
 	if found := holdsSentinel(t, tmp, "SENTINEL-KILLED-BYTES"); len(found) != 0 {
 		t.Fatalf("archive bytes under TMPDIR after a killed copy: %v", found)
 	}
-	if err := shellIn(t, tmp, bytes.NewReader(pack), agyUnpackScript, dst, "-"); err != nil {
+	if err := shellIn(t, tmp, bytes.NewReader(pack), agyUnpackScript, dst, strings.TrimSpace(string(sum))); err != nil {
 		t.Fatal(err)
 	}
 	if left, _ := filepath.Glob(dst + "/.seed.??????"); len(left) != 0 {
@@ -465,5 +467,57 @@ func TestAgyAnAccountThatAppearsBeforeTheRenameIsNotTakenForOurs(t *testing.T) {
 	}
 	if left, _ := filepath.Glob(dst + "/.seed.??????"); len(left) != 0 {
 		t.Fatalf("left: %v", left)
+	}
+}
+
+// A program path that holds anything but an executable file ends the seed with the program status before the account is published, and
+// nothing is created: a retry is not "seeded", and the owner is told to clear the path.
+func TestAgyUnpackRefusesAnUnusableProgramBeforeTheAccount(t *testing.T) {
+	pack, want := agyArchive(t, "NEW")
+	for name, make := range map[string]func(bin string){
+		"not executable":  func(bin string) { write(t, bin, "x", 0o644) },
+		"a dangling link": func(bin string) { os.MkdirAll(filepath.Dir(bin), 0o700); os.Symlink("/nowhere/at/all", bin) },
+		"a folder":        func(bin string) { os.MkdirAll(bin, 0o755) },
+	} {
+		dst := t.TempDir() + "/agy"
+		make(dst + "/antigravity")
+		err := shellIn(t, t.TempDir(), bytes.NewReader(pack), agyUnpackScript, dst, want)
+		if exitCode(err) != agyUnpackExitProgram {
+			t.Fatalf("%s: %v", name, err)
+		}
+		if _, err := os.Lstat(dst + "/accounts/main"); err == nil {
+			t.Fatalf("%s: the account was published beside an unusable program", name)
+		}
+		if left, _ := filepath.Glob(dst + "/.seed.??????"); len(left) != 0 {
+			t.Fatalf("%s: left %v", name, left)
+		}
+	}
+}
+
+// An unusable program that appears between the check and the program's rename is found after it, and the account is still not
+// published; a usable one that appears there is kept, and the seed goes on.
+func TestAgyAProgramThatAppearsBeforeItsRenameIsNotTakenForOurs(t *testing.T) {
+	pack, want := agyArchive(t, "NEW")
+	for name, test := range map[string]struct {
+		mode   string
+		status int
+	}{"unusable": {"0644", agyUnpackExitProgram}, "usable": {"0755", 0}} {
+		dst := t.TempDir() + "/agy"
+		real, _ := exec.LookPath("mv")
+		bin := t.TempDir()
+		write(t, bin+"/mv", "#!/bin/bash\ncase \"$*\" in *antigravity*) mkdir -p "+dst+"; echo THEIRS > "+dst+"/antigravity; chmod "+test.mode+" "+dst+"/antigravity ;; esac\nexec "+real+" \"$@\"\n", 0o755)
+		cmd := exec.Command("bash", "-c", agyUnpackScript, "dyna", dst, want)
+		cmd.Env = append(os.Environ(), "PATH="+bin+":"+os.Getenv("PATH"))
+		cmd.Stdin = bytes.NewReader(pack)
+		if err := cmd.Run(); exitCode(err) != test.status && !(test.status == 0 && err == nil) {
+			t.Fatalf("%s: %v", name, err)
+		}
+		if got, _ := os.ReadFile(dst + "/antigravity"); string(got) != "THEIRS\n" {
+			t.Fatalf("%s: the program: %q", name, got)
+		}
+		_, err := os.Lstat(dst + "/accounts/main")
+		if (err == nil) != (test.status == 0) {
+			t.Fatalf("%s: account published = %v", name, err == nil)
+		}
 	}
 }

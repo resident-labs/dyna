@@ -24,6 +24,16 @@ func (e SeededError) Error() string {
 	return fmt.Sprintf("host %s is seeded already, and a folder is never replaced in place; to seed it again, close its agy sessions and every agy process using the old folder, remove %s on that host, and seed again", e.Host, e.Path)
 }
 
+// ProgramError says the host's agy program path holds something that is not an executable file, so nothing was published.
+type ProgramError struct {
+	Host contract.HostName
+	Path string
+}
+
+func (e ProgramError) Error() string {
+	return fmt.Sprintf("the agy program at %s on host %s is not an executable file, or went missing during the seed; remove it on that host and seed again", e.Path, e.Host)
+}
+
 // SeedAgy is the owner's `dyna agy seed`: it copies the signed-in agy account folder, and the program when the host has none, from
 // engine.AgySource to the target, as an opaque archive streamed between the two hosts' drivers, with no spool and no copy in memory. A host
 // that has an account folder is refused here, and again by the target's own script under its lock, so of two seeds at once exactly one
@@ -74,6 +84,9 @@ func (b *Boxes) SeedAgy(ctx context.Context, name contract.HostName) error {
 	// A losing seed stops reading, so the source's pipe breaks: the target's answer is the result, not that.
 	if errors.Is(unpackErr, podman.ErrAgySeeded) {
 		return seeded
+	}
+	if errors.Is(unpackErr, podman.ErrAgyProgram) {
+		return ProgramError{Host: name, Path: b.Layout.HostAgyBinary()}
 	}
 	if packErr != nil {
 		return packErr

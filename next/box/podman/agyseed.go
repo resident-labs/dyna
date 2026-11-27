@@ -45,9 +45,17 @@ const agyUnpackExitSeeded = 17
 // ErrAgySeeded says the host has an account folder, so the seed copied nothing. It is a fact about the host, not a fault.
 var ErrAgySeeded = errors.New("the host has an agy account folder already")
 
+// agyUnpackExitProgram is its exit status for a program path that holds something that is not an executable file, or that is missing and
+// was not sent: nothing was published, the account folder included.
+const agyUnpackExitProgram = 18
+
+// ErrAgyProgram says the host's agy program path cannot be used as it is, so nothing was published.
+var ErrAgyProgram = errors.New("the agy program on the host is not an executable file")
+
 // agyUnpackScript extracts the tar on stdin under a temporary folder in the agy folder $1, on the folder's own filesystem and never under
 // /tmp, and publishes it: the program first, only if there is none, after its checksum $2 (or "-" for none) matches, and the account
-// folder last, by one no-clobber rename of the complete folder. All of it, the sweep of an earlier seed's temporary folder included, runs
+// folder last, by one no-clobber rename of the complete folder. A program path that holds anything but an executable file (a dangling
+// link too) ends it with status 18 before anything is extracted, and an existing executable one is kept, whatever the source's is. All of it, the sweep of an earlier seed's temporary folder included, runs
 // under one flock, so two seeds never interleave. An existing accounts/main, a dangling link at that path too, ends it with status 17
 // before anything is extracted and again just before the rename; the rename's result is checked by the folder's identity (a stat, never a
 // read of its contents), because mv -n succeeds when it declines. The temporary folder is 0700 and goes on every way out, even a signal;
@@ -62,17 +70,25 @@ exec 9> "$dir/.seed.lock"
 flock -x 9
 rm -rf -- "$dir"/.seed.??????
 if seeded; then exit 17; fi
+bin=$dir/antigravity
+present() { [ -e "$bin" ] || [ -L "$bin" ]; }
+usable() { [ -f "$bin" ] && [ -x "$bin" ]; }
+if present && ! usable; then exit 18; fi
 tmp=$(mktemp -d "$dir/.seed.XXXXXX")
 trap 'rm -rf -- "$tmp"' EXIT
 trap 'exit 1' HUP INT TERM
 tar -x -i -p --no-same-owner -C "$tmp" -f -
 [ -f "$tmp/.dyna-complete" ]
 [ -d "$tmp/accounts/main" ]
-if [ "$want" != - ]; then
+if ! present; then
+ [ "$want" != - ] || exit 18
  test "$(sha256sum < "$tmp/antigravity" | cut -d ' ' -f 1)" = "$want"
  chmod 0755 "$tmp/antigravity"
- if [ ! -e "$dir/antigravity" ]; then mv -T -- "$tmp/antigravity" "$dir/antigravity"; fi
+ program=$(stat -c %d:%i -- "$tmp/antigravity")
+ mv -T -n -- "$tmp/antigravity" "$bin"
+ if [ "$(stat -c %d:%i -- "$bin" 2>/dev/null)" != "$program" ]; then usable || exit 18; fi
 fi
+usable || exit 18
 chmod 0700 "$tmp/accounts/main"
 mkdir -p -m 0700 -- "$dir/accounts"
 identity=$(stat -c %d:%i -- "$tmp/accounts/main")
@@ -155,7 +171,7 @@ func (h *Host) PackAgy(ctx context.Context, layout box.Layout, binary, account b
 }
 
 // UnpackAgy installs the archive from PackAgy that r delivers under this host's own agy folder, and says ErrAgySeeded when the host has an
-// account folder already. binarySum is the program's checksum on the source, or "" when the archive holds no program.
+// account folder already, and ErrAgyProgram when its program path is unusable. binarySum is the program's checksum on the source, or "" when the archive holds no program.
 func (h *Host) UnpackAgy(ctx context.Context, layout box.Layout, r io.Reader, binarySum string) error {
 	want := binarySum
 	if want == "" {
@@ -168,6 +184,9 @@ func (h *Host) UnpackAgy(ctx context.Context, layout box.Layout, r io.Reader, bi
 		var exit *exec.ExitError
 		if errors.As(err, &exit) && exit.ExitCode() == agyUnpackExitSeeded {
 			return ErrAgySeeded
+		}
+		if errors.As(err, &exit) && exit.ExitCode() == agyUnpackExitProgram {
+			return ErrAgyProgram
 		}
 		return errors.New("could not unpack the agy files on the target host")
 	}

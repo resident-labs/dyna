@@ -73,7 +73,8 @@ func (s *serviceWithHosts) HostAgySeed(ctx context.Context, caller contract.Prin
 	if err := s.boxes.SeedAgy(ctx, req.Host); err != nil {
 		code := contract.ErrUnavailable
 		var seeded SeededError
-		if errors.Is(err, ErrAgyArch) || errors.As(err, &seeded) {
+		var program ProgramError
+		if errors.Is(err, ErrAgyArch) || errors.As(err, &seeded) || errors.As(err, &program) {
 			code = contract.ErrConflict
 		}
 		return contract.HostAgySeedResponse{}, &contract.Error{Code: code, Message: err.Error()}
