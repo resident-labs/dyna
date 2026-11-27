@@ -362,6 +362,7 @@ func (s *Store) hosts(ctx context.Context, where string) ([]box.Host, error) {
 			return nil, err
 		}
 		if len(hosts) == 0 || hosts[len(hosts)-1].Name != h.Name {
+			h.Agy = h.Agy && !s.AgySeeding(h.Name)
 			h.NoAgents = !agents
 			if err := json.Unmarshal([]byte(gpus), &h.GPUs); err != nil {
 				return nil, err
@@ -436,6 +437,36 @@ func (s *Store) SetHostGPUs(ctx context.Context, host contract.HostName, gpus []
 		_, err := tx.ExecContext(ctx, "UPDATE hosts SET gpus=? WHERE name=?", text, host)
 		return err
 	})
+}
+
+// BeginAgySeed marks a host as being seeded with agy, and says false when it already is. The mark is the one fence of a seed: while it
+// stands Hosts reports the host without agy, so admission, placement and a harness switch all refuse to enter agy on it. A caller holds
+// LockAdmission across the mark and its check that no agy session is on the host, so an admission lands wholly before or after.
+func (s *Store) BeginAgySeed(host contract.HostName) bool {
+	s.agyMu.Lock()
+	defer s.agyMu.Unlock()
+	if s.agySeeding[host] {
+		return false
+	}
+	if s.agySeeding == nil {
+		s.agySeeding = map[contract.HostName]bool{}
+	}
+	s.agySeeding[host] = true
+	return true
+}
+
+// EndAgySeed ends the mark BeginAgySeed set.
+func (s *Store) EndAgySeed(host contract.HostName) {
+	s.agyMu.Lock()
+	delete(s.agySeeding, host)
+	s.agyMu.Unlock()
+}
+
+// AgySeeding says a host is being seeded with agy now.
+func (s *Store) AgySeeding(host contract.HostName) bool {
+	s.agyMu.Lock()
+	defer s.agyMu.Unlock()
+	return s.agySeeding[host]
 }
 
 // SetHostAgy records whether a host's latest probe found agy installed and signed in.

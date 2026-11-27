@@ -818,6 +818,27 @@ const (
 	AgyExitAddr = "127.0.0.1:7782"
 )
 
+// agyExitDomains are the domains agy's Google traffic goes to: the host and every name below it.
+var agyExitDomains = []string{"googleapis.com", "google.com", "gstatic.com", "googleusercontent.com"}
+
+// AgyExitHost says a CONNECT target host is Google's, and returns its normal form (lower case, no trailing dot). The box's listener sends
+// such a host through the engine's exit and the engine serves no other, so the one function decides both: an address, an empty label
+// or a name with anything but letters, digits and hyphens is not Google's.
+func AgyExitHost(host string) (string, bool) {
+	host = strings.TrimSuffix(strings.ToLower(host), ".")
+	for _, label := range strings.Split(host, ".") {
+		if label == "" || strings.Trim(label, "abcdefghijklmnopqrstuvwxyz0123456789-") != "" {
+			return "", false
+		}
+	}
+	for _, domain := range agyExitDomains {
+		if host == domain || strings.HasSuffix(host, "."+domain) {
+			return host, true
+		}
+	}
+	return "", false
+}
+
 // GitHubAgyPath is where the box socket serves GitHub's tools as agy declares them (short descriptions, help behind github_help); /github/ is the full listing.
 const GitHubAgyPath = "/github-agy/"
 
@@ -826,7 +847,7 @@ type BoxAgy struct {
 	Binary    string `json:"binary"`
 	GeminiDir string `json:"geminiDir"`
 	// Exit is the engine route agy reaches Google through (AgyExitPath); a hello without it is from an engine that has none, and the box
-	// then does not open agy, which would otherwise connect from the box's own host.
+	// then does not open agy, which has no exit to be pointed at.
 	Exit string `json:"exit,omitempty"`
 }
 

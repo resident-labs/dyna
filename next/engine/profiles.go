@@ -523,12 +523,22 @@ func (s *Service) agyHostProblem(ctx context.Context, profile contract.ProfileNa
 	if slices.ContainsFunc(hosts, func(h box.Host) bool { return h.Name == name && h.Agy }) {
 		return nil
 	}
+	if s.store.AgySeeding(name) {
+		return &contract.Error{Code: contract.ErrConflict, Message: fmt.Sprintf("host %s is being seeded with agy now; try again once the seed has finished", name)}
+	}
 	return invalid(fmt.Sprintf("profile %s runs on agy, and host %s does not have agy installed and signed in; host list shows which hosts do, and the owner signs in to Antigravity on %s", profile, name, name))
 }
 
 // The agy program and the signed-in profile directory are mounted into the box by the host's root, the directory read-write.
 // Dyna never reads or copies a file in it.
 var agyMount = contract.BoxAgy{Binary: box.AgyBinary, GeminiDir: contract.AgyGeminiDir, Exit: contract.AgyExitPath}
+
+// AgyExitAllowed says a box may use the agy exit: the harness it reported at its last hello is agy. That is stored, not asked of the
+// request, so no other box, whatever its session says, reaches Google through the engine.
+func (s *Service) AgyExitAllowed(ctx context.Context, id contract.BoxID) (bool, error) {
+	harness, err := s.store.BoxHarness(ctx, id)
+	return harness == contract.HarnessAgy, err
+}
 
 // AgyProfile says a profile runs on the agy harness.
 func (s *Service) AgyProfile(name contract.ProfileName) bool {
@@ -581,6 +591,21 @@ func (s *Service) sameHostAgy(ctx context.Context, profile contract.ProfileName,
 // AgySeedProblem says why the owner may not seed a host with agy now, or nil: only the owner seeds, never the source itself, an
 // exec-only host or one with agents off, and never while a session on an agy profile runs there, since a copy under a running agy
 // would change its account folder from beneath it.
+// BeginAgySeed is the owner's seed taking its fence: the host is marked, so agy sessions can no longer enter it, and only then is it
+// checked for agy sessions that are on it. The caller ends the fence with the returned function when the copy is done or has failed.
+func (s *Service) BeginAgySeed(ctx context.Context, caller contract.Principal, name contract.HostName) (func(), *contract.Error) {
+	unlock := s.store.LockAdmission()
+	defer unlock()
+	if !s.store.BeginAgySeed(name) {
+		return nil, &contract.Error{Code: contract.ErrConflict, Message: fmt.Sprintf("host %s is being seeded already", name)}
+	}
+	if problem := s.AgySeedProblem(ctx, caller, name); problem != nil {
+		s.store.EndAgySeed(name)
+		return nil, problem
+	}
+	return func() { s.store.EndAgySeed(name) }, nil
+}
+
 func (s *Service) AgySeedProblem(ctx context.Context, caller contract.Principal, name contract.HostName) *contract.Error {
 	if caller.Kind != contract.PrincipalOwner {
 		return forbidden()

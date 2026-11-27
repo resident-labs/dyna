@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 
 	"github.com/resident-labs/dyna/contract"
 	"github.com/resident-labs/dyna/engine"
@@ -17,21 +18,6 @@ var ErrAgyArch = errors.New("agy binary architecture differs")
 // binary). The target's account folder is left alone unless replace says so, and a target that has what is wanted is left alone.
 // The caller has decided that the host may be seeded.
 func (b *Boxes) SeedAgy(ctx context.Context, name contract.HostName, replace bool) error {
-	b.mu.Lock()
-	if b.agySeeding[name] {
-		b.mu.Unlock()
-		return fmt.Errorf("host %s is being seeded already", name)
-	}
-	if b.agySeeding == nil {
-		b.agySeeding = map[contract.HostName]bool{}
-	}
-	b.agySeeding[name] = true
-	b.mu.Unlock()
-	defer func() {
-		b.mu.Lock()
-		delete(b.agySeeding, name)
-		b.mu.Unlock()
-	}()
 	source, err := b.host(ctx, engine.AgySource)
 	if err != nil {
 		return err
@@ -58,13 +44,22 @@ func (b *Boxes) SeedAgy(ctx context.Context, name contract.HostName, replace boo
 	if program && have.Arch != has.Arch {
 		return ErrAgyArch
 	}
-	pack, err := source.PackAgy(ctx, b.Layout, program, account)
-	if err != nil {
-		return err
-	}
 	sum := ""
 	if program {
 		sum = have.BinarySum
 	}
-	return target.UnpackAgy(ctx, b.Layout, pack, sum, replace)
+	// The archive passes from one host's tar to the other's through this pipe: the engine holds no copy of it, and neither host writes it to a file.
+	pr, pw := io.Pipe()
+	packed := make(chan error, 1)
+	go func() {
+		err := source.PackAgy(ctx, b.Layout, program, account, pw)
+		pw.CloseWithError(err) // a failed pack ends the stream with an error, never a clean end
+		packed <- err
+	}()
+	unpackErr := target.UnpackAgy(ctx, b.Layout, pr, sum, replace)
+	pr.CloseWithError(errors.New("the target stopped reading"))
+	if err := <-packed; err != nil {
+		return err
+	}
+	return unpackErr
 }

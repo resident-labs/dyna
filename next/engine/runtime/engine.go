@@ -66,9 +66,11 @@ func (s *serviceWithHosts) HostList(ctx context.Context, caller contract.Princip
 
 // HostAgySeed is the owner's `dyna agy seed`: the service says whether the host may be seeded, the boxes do the copy.
 func (s *serviceWithHosts) HostAgySeed(ctx context.Context, caller contract.Principal, req contract.HostAgySeedRequest) (contract.HostAgySeedResponse, *contract.Error) {
-	if problem := s.Service.AgySeedProblem(ctx, caller, req.Host); problem != nil {
+	end, problem := s.Service.BeginAgySeed(ctx, caller, req.Host)
+	if problem != nil {
 		return contract.HostAgySeedResponse{}, problem
 	}
+	defer end()
 	if err := s.boxes.SeedAgy(ctx, req.Host, req.Replace); err != nil {
 		code := contract.ErrUnavailable
 		if errors.Is(err, ErrAgyArch) {

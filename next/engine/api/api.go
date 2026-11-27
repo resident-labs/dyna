@@ -793,7 +793,20 @@ func (a *API) handler(c Caller) http.Handler {
 		for _, path := range []string{"/github/", contract.GitHubAgyPath} {
 			mux.HandleFunc(path, func(w http.ResponseWriter, r *http.Request) { a.githubTools(c, w, r) })
 		}
-		mux.Handle(contract.AgyExitPath, agyexit.Handler((&net.Dialer{}).DialContext))
+		exit := agyexit.Handler((&net.Dialer{}).DialContext)
+		mux.HandleFunc(contract.AgyExitPath, func(w http.ResponseWriter, r *http.Request) {
+			// Only a box whose agent serves agy, by what the engine stored at its hello. A service that cannot say refuses.
+			if held, ok := a.service.(interface {
+				AgyExitAllowed(context.Context, contract.BoxID) (bool, error)
+			}); ok {
+				if allowed, err := held.AgyExitAllowed(r.Context(), c.Box); err == nil && allowed {
+					exit.ServeHTTP(w, r)
+					return
+				}
+			}
+			w.Header().Set("X-Dyna-Exit", "this box does not serve agy, so it has no agy exit")
+			w.WriteHeader(http.StatusForbidden)
+		})
 	}
 	// Never on the web listener, which Connect carries off the host.
 	if owner(c) && !c.Web && a.localModel != nil {

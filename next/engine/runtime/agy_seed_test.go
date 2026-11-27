@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"log"
 	"os"
 	"strings"
@@ -17,7 +18,7 @@ import (
 	"github.com/resident-labs/dyna/engine"
 )
 
-// agyHostFake answers the three seeding scripts of one host: its state, the pack it makes, and the unpack it is handed.
+// agyHostFake answers the seeding scripts of one host: its state over the framed path, and the pack it makes and the unpack it is handed as streams.
 type agyHostFake struct {
 	mu       sync.Mutex
 	state    string
@@ -44,22 +45,39 @@ func (f *agyHostFake) Run(_ context.Context, input []byte, args ...string) ([]by
 	switch {
 	case strings.Contains(command, "dyna-agy-state"):
 		return reply(f.state, 0)
-	case strings.Contains(command, "dyna-agy-pack"):
-		f.packs = append(f.packs, command[strings.Index(command, "dyna-agy-pack"):])
-		if f.failPack {
-			return reply(f.pack, 3)
-		}
-		return reply(f.pack, 0)
-	case strings.Contains(command, "dyna-agy-unpack"):
-		_, bytesIn, _ := bytes.Cut(input, []byte("\n"))
-		f.unpacked = append(f.unpacked, append([]byte(nil), bytesIn...))
-		f.replaces = append(f.replaces, command[strings.Index(command, "dyna-agy-unpack"):])
-		if f.failUnp {
-			return reply("tar: something failed", 2)
-		}
-		return reply("", 0)
 	}
 	return nil, errors.New("unexpected command")
+}
+
+// RunStream answers the pack and unpack scripts as streams: the fake source writes its archive to out, and the fake target reads all
+// of its input, with nothing in between that a file could hold.
+func (f *agyHostFake) RunStream(_ context.Context, in io.Reader, out io.Writer, args ...string) error {
+	command := args[len(args)-1]
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	switch {
+	case strings.Contains(command, "dyna-agy-pack"):
+		f.packs = append(f.packs, command[strings.Index(command, "dyna-agy-pack"):])
+		if _, err := io.WriteString(out, f.pack); err != nil {
+			return err
+		}
+		if f.failPack {
+			return errors.New("exit status 3")
+		}
+		return nil
+	case strings.Contains(command, "dyna-agy-unpack"):
+		got, err := io.ReadAll(in)
+		if err != nil {
+			return err
+		}
+		f.unpacked = append(f.unpacked, got)
+		f.replaces = append(f.replaces, command[strings.Index(command, "dyna-agy-unpack"):])
+		if f.failUnp {
+			return errors.New("exit status 2")
+		}
+		return nil
+	}
+	return errors.New("unexpected stream command")
 }
 
 func seedRig(t *testing.T, source, target *agyHostFake) *Boxes {
@@ -139,5 +157,17 @@ func TestSeedAgyLeavesWhatIsThereAndGuardsTheArchitecture(t *testing.T) {
 	// A source without agy has nothing to copy.
 	if err := seedRig(t, &agyHostFake{state: "dyna-agy-arch Linux x86_64\n"}, &agyHostFake{state: "dyna-agy-arch Linux x86_64\n"}).SeedAgy(t.Context(), "other", false); err == nil {
 		t.Fatal("seeded from a source with no agy")
+	}
+}
+
+// A pack that fails midway ends the stream with an error, so the target never sees a clean end of a cut archive and installs nothing.
+func TestSeedAgyAFailedPackIsNeverACleanEndForTheTarget(t *testing.T) {
+	source := &agyHostFake{state: signedIn, pack: "PARTIAL", failPack: true}
+	target := &agyHostFake{state: "dyna-agy-arch Linux x86_64\n"}
+	if err := seedRig(t, source, target).SeedAgy(t.Context(), "other", false); err == nil {
+		t.Fatal("a failed pack was a good seed")
+	}
+	if len(target.unpacked) != 0 {
+		t.Fatalf("the target took a cut archive: %q", target.unpacked)
 	}
 }

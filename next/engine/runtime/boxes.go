@@ -89,7 +89,6 @@ type Boxes struct {
 	binOnce           sync.Once
 	binSum            string
 	binErr            error
-	agySeeding        map[contract.HostName]bool // hosts being seeded with agy now, under mu
 }
 
 // startBuildCache starts the host's compiler cache for a box or runner about to start there. A build without it compiles every

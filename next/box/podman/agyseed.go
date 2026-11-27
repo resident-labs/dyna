@@ -3,6 +3,7 @@ package podman
 import (
 	"context"
 	"errors"
+	"io"
 	"path/filepath"
 	"strings"
 
@@ -27,27 +28,40 @@ echo "dyna-agy-arch $(uname -s -m)"
 `
 
 // agyPackScript writes a tar of the members named after $1 (paths below $1) to stdout, leaving out the conversation databases and the
-// logs by path. Its stderr is dropped so that only the archive is on stdout.
+// logs by path, and then a second tar that holds only an empty .dyna-complete: an archive without it was cut short, which tar alone
+// cannot tell at a member boundary. Its stderr is dropped so that only the archive is on stdout. Nothing of the archive is written to a file.
 const agyPackScript = `set -eu
 cd -- "$1"
 shift
-exec tar -c -f - --exclude=accounts/main/antigravity-acp/conversations --exclude=accounts/main/antigravity-acp/log -- "$@" 2>/dev/null`
+marker=$(mktemp)
+trap 'rm -f -- "$marker"' EXIT
+tar -c -f - --exclude=accounts/main/antigravity-acp/conversations --exclude=accounts/main/antigravity-acp/log -- "$@" 2>/dev/null
+tar -c -f - --transform='s,.*,.dyna-complete,' -- "$marker" 2>/dev/null`
 
-// agyUnpackScript extracts the tar on stdin under a temporary folder in $1, checks the program's checksum $2 (or "-" for none), and
-// moves each piece into place, so a half copy is never at the final path. The account folder is 0700. A present account folder is left
-// alone unless $3 is 1, and is then put back if the move fails.
+// agyUnpackScript extracts the tar on stdin under a temporary folder in the agy folder $1, on the folder's own filesystem and never under /tmp,
+// requires the complete marker, checks the program's checksum $2 (or "-" for none), and moves each piece into place, so a half copy is
+// never at the final path. The temporary folder is 0700 and goes on every way out, even a signal; one left by a kill is swept at the next
+// seed, under the lock. The account folder is 0700. A present account folder is left alone unless $3 is 1, and is then put back if the
+// move fails. The program is published only if the path is still free once the lock is held, or when $3 is 1.
 const agyUnpackScript = `set -eu
 dir=$1 want=$2 replace=$3
 mkdir -p -m 0700 -- "$dir"
 exec 9> "$dir/.seed.lock"
 flock -x 9
+rm -rf -- "$dir"/.seed.??????
 tmp=$(mktemp -d "$dir/.seed.XXXXXX")
-trap 'rm -rf -- "$tmp"' EXIT HUP INT TERM
-tar -x -p --no-same-owner -C "$tmp" -f -
+trap 'rm -rf -- "$tmp"' EXIT
+trap 'exit 1' HUP INT TERM
+tar -x -i -p --no-same-owner -C "$tmp" -f -
+[ -f "$tmp/.dyna-complete" ]
 if [ "$want" != - ]; then
  test "$(sha256sum < "$tmp/antigravity" | cut -d ' ' -f 1)" = "$want"
  chmod 0755 "$tmp/antigravity"
- mv -f -- "$tmp/antigravity" "$dir/antigravity"
+ if [ "$replace" = 1 ]; then
+  mv -f -T -- "$tmp/antigravity" "$dir/antigravity"
+ elif [ ! -e "$dir/antigravity" ]; then
+  mv -T -- "$tmp/antigravity" "$dir/antigravity"
+ fi
 fi
 if [ -d "$tmp/accounts/main" ]; then
  chmod 0700 "$tmp/accounts/main"
@@ -83,8 +97,40 @@ func (h *Host) AgyState(ctx context.Context, layout box.Layout) (AgyState, error
 	return state, nil
 }
 
-// PackAgy returns the program and the account folder as an opaque archive, as the host has them. The caller only hands it to UnpackAgy.
-func (h *Host) PackAgy(ctx context.Context, layout box.Layout, binary, account bool) ([]byte, error) {
+// stream runs a command on the host with its input and output as streams, over the host's own connection and under its gates. A driver that
+// cannot stream refuses: the archive is never spooled to a file on either host to make up for it.
+func (h *Host) stream(ctx context.Context, in io.Reader, out io.Writer, argv ...string) error {
+	streamer, ok := h.runner.(StreamRunner)
+	if !ok {
+		return errors.New("this host's driver cannot stream")
+	}
+	select {
+	case h.shortGate <- struct{}{}:
+		defer func() { <-h.shortGate }()
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+	if err := h.lock(ctx); err != nil {
+		return err
+	}
+	err := h.ensure(ctx)
+	h.unlock()
+	if err != nil {
+		return err
+	}
+	if err := h.joinPending(ctx); err != nil {
+		return err
+	}
+	parts := make([]string, len(argv))
+	for i, arg := range argv {
+		parts[i] = quote(arg)
+	}
+	return streamer.RunStream(ctx, in, out, append(h.base(), h.destination, strings.Join(parts, " "))...)
+}
+
+// PackAgy writes the program and the account folder as an opaque archive to w, as the host has them. The caller only hands it on to
+// UnpackAgy, through a pipe, so the engine holds no more of it than the pipe's one write at a time.
+func (h *Host) PackAgy(ctx context.Context, layout box.Layout, binary, account bool, w io.Writer) error {
 	members := []string{}
 	if binary {
 		members = append(members, "antigravity")
@@ -92,19 +138,18 @@ func (h *Host) PackAgy(ctx context.Context, layout box.Layout, binary, account b
 	if account {
 		members = append(members, "accounts/main")
 	}
-	pack, err := h.run(WithRemoteCancellation(ctx), append([]string{"bash", "-c", agyPackScript, "dyna-agy-pack", agyDir(layout)}, members...)...)
-	if err != nil {
+	if err := h.stream(ctx, nil, w, append([]string{"bash", "-c", agyPackScript, "dyna-agy-pack", agyDir(layout)}, members...)...); err != nil {
 		if ctx.Err() != nil {
-			return nil, ctx.Err()
+			return ctx.Err()
 		}
-		return nil, errors.New("could not pack the agy files on the source host")
+		return errors.New("could not pack the agy files on the source host")
 	}
-	return pack, nil
+	return nil
 }
 
-// UnpackAgy installs an archive from PackAgy under this host's own agy folder. binarySum is the program's checksum on the source, or ""
-// when the archive holds no program. replace puts the archive's account folder over one that is there.
-func (h *Host) UnpackAgy(ctx context.Context, layout box.Layout, pack []byte, binarySum string, replace bool) error {
+// UnpackAgy installs the archive from PackAgy that r delivers under this host's own agy folder. binarySum is the program's checksum on
+// the source, or "" when the archive holds no program. replace puts the archive's account folder over one that is there.
+func (h *Host) UnpackAgy(ctx context.Context, layout box.Layout, r io.Reader, binarySum string, replace bool) error {
 	want, swap := binarySum, "0"
 	if want == "" {
 		want = "-"
@@ -112,7 +157,7 @@ func (h *Host) UnpackAgy(ctx context.Context, layout box.Layout, pack []byte, bi
 	if replace {
 		swap = "1"
 	}
-	if _, err := h.runInput(WithRemoteCancellation(ctx), pack, "bash", "-c", agyUnpackScript, "dyna-agy-unpack", agyDir(layout), want, swap); err != nil {
+	if err := h.stream(ctx, r, nil, "bash", "-c", agyUnpackScript, "dyna-agy-unpack", agyDir(layout), want, swap); err != nil {
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}

@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -29,7 +30,23 @@ import (
 type Runner interface {
 	Run(context.Context, []byte, ...string) ([]byte, error)
 }
+
+// StreamRunner is a Runner that can also carry a command's input and output as streams, with no frame and no copy of either in memory
+// or in a file on the host: what the agy seed needs, as the account folder it carries must rest nowhere but in its two folders.
+type StreamRunner interface {
+	RunStream(ctx context.Context, in io.Reader, out io.Writer, args ...string) error
+}
+
 type ExecRunner struct{}
+
+// RunStream runs the command with in and out on its standard streams. Its standard error is dropped: a stream's failure is told as a
+// fixed text, never from what the command printed.
+func (ExecRunner) RunStream(ctx context.Context, in io.Reader, out io.Writer, args ...string) error {
+	c := exec.CommandContext(ctx, args[0], args[1:]...)
+	c.WaitDelay = 2 * time.Second
+	c.Stdin, c.Stdout = in, out
+	return c.Run()
+}
 
 func (r ExecRunner) Run(ctx context.Context, in []byte, args ...string) ([]byte, error) {
 	return r.RunProgress(ctx, in, nil, args...)

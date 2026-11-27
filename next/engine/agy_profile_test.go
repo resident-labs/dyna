@@ -4,6 +4,7 @@ import (
 	"github.com/resident-labs/dyna/engine/live"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -315,5 +316,43 @@ func TestAgySeedIsTheOwnersAndNeverForARunningOrIneligibleHost(t *testing.T) {
 	}
 	if e := s.AgySeedProblem(ctx, owner, "host"); e == nil || e.Code != contract.ErrConflict || !strings.Contains(e.Message, "gemini") {
 		t.Fatalf("an agy session runs there: %v", e)
+	}
+}
+
+// While a host is being seeded it reports no agy to placement, start and a harness switch alike, and the seed itself is refused when an
+// agy session is on the host: one fence, taken before the check.
+func TestAgySeedFenceHoldsAgyOffTheHostUntilTheSeedEnds(t *testing.T) {
+	s, room, root, owner := agySetup(t)
+	ctx := t.Context()
+	if err := s.store.SetHostAgy(ctx, "host", true); err != nil {
+		t.Fatal(err)
+	}
+	start := func(name string) *contract.Error {
+		_, e := s.SessionStart(ctx, owner, contract.SessionStartRequest{Room: room, Name: name, Profile: "gem", Parent: root, Host: "host"})
+		return e
+	}
+	end, e := s.BeginAgySeed(ctx, owner, "host")
+	if e != nil {
+		t.Fatal(e)
+	}
+	if e := start("during"); e == nil || e.Code != contract.ErrConflict || !strings.Contains(e.Message, "being seeded") {
+		t.Fatalf("an agy session started on a host being seeded: %v", e)
+	}
+	if hosts, _ := s.store.Hosts(ctx); slices.ContainsFunc(hosts, func(h box.Host) bool { return h.Name == "host" && h.Agy }) {
+		t.Fatal("a host being seeded still reports agy to admission")
+	}
+	if _, e := s.BeginAgySeed(ctx, owner, "host"); e == nil || e.Code != contract.ErrConflict {
+		t.Fatalf("a second seed of the same host: %v", e)
+	}
+	end()
+	if e := start("after"); e != nil {
+		t.Fatalf("after the seed: %v", e)
+	}
+	// A failed check ends its own fence.
+	if _, e := s.BeginAgySeed(ctx, owner, "host"); e == nil || !strings.Contains(e.Message, "after") {
+		t.Fatalf("a host with an agy session: %v", e)
+	}
+	if s.store.AgySeeding("host") {
+		t.Fatal("a refused seed left its fence up")
 	}
 }

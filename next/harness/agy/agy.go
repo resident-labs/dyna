@@ -267,8 +267,8 @@ func environment(base []string, geminiDir, tmp, proxy string) []string {
 		env = append(env, "SSH_CONNECTION=127.0.0.1 0 127.0.0.1 0")
 	}
 	if proxy != "" {
-		// Every request agy makes goes through the proxy or fails; Go has no direct fallback for a proxied request. Loopback is the
-		// one exception, which is how agy reaches its MCP servers.
+		// Configured, not enforced: a client that honours these sends its requests to the box's agy proxy, and one that ignores them connects
+		// directly. Loopback is left out, which is how agy reaches its MCP servers.
 		for _, name := range []string{"HTTPS_PROXY", "HTTP_PROXY"} {
 			env = append(env, name+"=http://"+proxy, strings.ToLower(name)+"=http://"+proxy)
 		}

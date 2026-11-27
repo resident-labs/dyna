@@ -1,6 +1,6 @@
-// Package agyexit is the way out of every agy box: agy reaches Google only through the engine host, so Google sees one IP however many
-// hosts run agy. The box's agent listens for agy's CONNECT on a loopback port and forwards each to this route over the box socket; the
-// engine dials the Google host itself and the two ends are joined byte for byte. TLS runs from agy to Google, and nothing here reads,
+// Package agyexit is the way out of an agy box for Google's hosts: the box's proxy sends them here, so Google sees one IP however many
+// hosts run agy. The box's agent listens for a CONNECT on a loopback port and forwards each one to a Google host to this route over the box
+// socket (the proxy is configured, not enforced); the engine dials the Google host itself and the two ends are joined byte for byte. TLS runs from agy to Google, and nothing here reads,
 // logs or stores a byte of it.
 package agyexit
 
@@ -15,9 +15,6 @@ import (
 
 	"github.com/resident-labs/dyna/contract"
 )
-
-// suffixes are the only hosts the exit dials: names below these four domains.
-var suffixes = []string{".googleapis.com", ".google.com", ".gstatic.com", ".googleusercontent.com"}
 
 var count atomic.Int64
 
@@ -35,7 +32,7 @@ func Handler(dial func(ctx context.Context, network, address string) (net.Conn, 
 			refuse(w, http.StatusForbidden, "the agy exit takes only port 443")
 			return
 		}
-		if !allowed(host) {
+		if normal, ok := contract.AgyExitHost(host); !ok || normal != host {
 			refuse(w, http.StatusForbidden, "the agy exit does not serve "+host)
 			return
 		}
@@ -76,25 +73,6 @@ func Handler(dial func(ctx context.Context, network, address string) (net.Conn, 
 		go pipe(conn, out)
 		<-done
 	})
-}
-
-// allowed says a host is below one of the four domains: letters, digits and hyphens in dotted labels, so an address, an empty label
-// or a name with anything else in it is not.
-func allowed(host string) bool {
-	if host != strings.ToLower(host) {
-		return false
-	}
-	for _, label := range strings.Split(host, ".") {
-		if label == "" || strings.Trim(label, "abcdefghijklmnopqrstuvwxyz0123456789-") != "" {
-			return false
-		}
-	}
-	for _, suffix := range suffixes {
-		if strings.HasSuffix(host, suffix) {
-			return true
-		}
-	}
-	return false
 }
 
 func refuse(w http.ResponseWriter, status int, text string) {

@@ -259,6 +259,13 @@ func (s *Store) NoteBoxHello(ctx context.Context, box contract.BoxID, launchGen 
 	})
 }
 
+// BoxHarness is the harness the box's agent said it serves at its last hello.
+func (s *Store) BoxHarness(ctx context.Context, box contract.BoxID) (contract.Harness, error) {
+	var harness contract.Harness
+	err := s.Read().QueryRowContext(ctx, "SELECT harness FROM boxes WHERE id=?", box).Scan(&harness)
+	return harness, err
+}
+
 // BoxCanHandoff says the session's box reported at its last hello that it can hand a conversation over.
 func (s *Store) BoxCanHandoff(ctx context.Context, box contract.BoxID) (bool, error) {
 	var ok bool

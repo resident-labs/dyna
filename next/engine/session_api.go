@@ -779,6 +779,8 @@ func (s *Service) SessionSetProfile(ctx context.Context, caller contract.Princip
 	problem = s.withProfile(req.Profile, func(harnessOf func(contract.ProfileName) contract.Harness) *contract.Error {
 		var harness *store.HarnessSwitch
 		if switching = harnessOf(target.Profile) != harnessOf(req.Profile); switching {
+			// With the admission lock, a seed of the host sees the new profile or the switch sees the seed, never neither.
+			defer s.store.LockAdmission()()
 			if problem := s.checkHarnessSwitch(ctx, target, req.Profile, harnessOf(req.Profile)); problem != nil {
 				return problem
 			}
