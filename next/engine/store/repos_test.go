@@ -245,7 +245,7 @@ func TestRepositoryRegistrationMigration(t *testing.T) {
 	if err := s.AddRoomRepo(ctx, "r", "owner/repo", false); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.writer.ExecContext(ctx, `DROP TABLE repo_registrations; UPDATE meta SET value='131' WHERE key='schema_version'`); err != nil {
+	if _, err := s.writer.ExecContext(ctx, `DROP TABLE repo_registrations; ALTER TABLE boxes DROP COLUMN agy; ALTER TABLE hosts DROP COLUMN agy; UPDATE meta SET value='131' WHERE key='schema_version'`); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.Close(); err != nil {
