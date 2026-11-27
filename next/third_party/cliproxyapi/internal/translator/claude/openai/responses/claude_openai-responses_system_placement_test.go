@@ -359,3 +359,45 @@ func TestResponsesSystemItemFallbackPreservesEarlierQueuedRuleOrder(t *testing.T
 		t.Fatalf("mid-session blocks = %s, want only the later item", got)
 	}
 }
+
+func TestResponsesSystemItemFallbackPreservesEarlierPlacedRuleOrder(t *testing.T) {
+	for _, tc := range []struct {
+		name, tail, roles, later string
+	}{
+		{
+			name:  "trailing item without user",
+			tail:  `{"role":"developer","content":"fallback"}`,
+			roles: `["user","assistant","user","assistant"]`,
+		},
+		{
+			name: "ineligible later item",
+			tail: `{"type":"custom_note","role":"developer","content":"fallback"},
+				{"role":"developer","content":"stay mid-session"},
+				{"role":"user","content":"third"}`,
+			roles: `["user","assistant","user","assistant","user","system"]`,
+			later: "stay mid-session",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			root := convertPlacement(t, WithMidSessionSystemItems(nil), "claude-opus-5", `{"input":[
+				{"role":"user","content":"first"},
+				{"role":"assistant","content":"first answer"},
+				{"role":"developer","content":"placed first","cache_control":{"type":"ephemeral"}},
+				{"role":"system","content":"placed second"},
+				{"role":"user","content":"second"},
+				{"role":"assistant","content":"second answer"},`+tc.tail+`]}`)
+			if got := root.Get("system.#.text").Raw; got != `["placed first","placed second","fallback"]` {
+				t.Fatalf("system = %s, want earlier items before later fallback", got)
+			}
+			if got := root.Get("system.0.cache_control.type").String(); got != "ephemeral" {
+				t.Fatalf("earlier item's cache marker lost: %s", root.Get("system").Raw)
+			}
+			if got := root.Get("messages.#.role").Raw; got != tc.roles {
+				t.Fatalf("roles = %s, want %s", got, tc.roles)
+			}
+			if got := root.Get("messages.5.content.0.text").String(); got != tc.later {
+				t.Fatalf("later mid-session rule = %q, want %q", got, tc.later)
+			}
+		})
+	}
+}

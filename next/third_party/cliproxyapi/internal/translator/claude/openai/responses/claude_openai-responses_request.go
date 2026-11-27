@@ -201,7 +201,13 @@ func convertOpenAIResponsesRequestToClaude(modelName string, inputRawJSON []byte
 	// Keep source order for top-level fallbacks. Pending items are placed only
 	// after a complete user batch, never between a tool call and its results.
 	var systemItems [][][]byte
-	var pendingSystemItems []int
+	pendingSystemStart := -1
+	topLevelSystemEnd := 0
+	type systemPlacement struct {
+		messageIndex int
+		first, end   int // Contiguous range in systemItems.
+	}
+	var systemPlacements []systemPlacement
 	flushPendingMessage := func() {
 		if pendingRole == "" {
 			return
@@ -231,17 +237,12 @@ func convertOpenAIResponsesRequestToClaude(modelName string, inputRawJSON []byte
 				msg, _ = sjson.SetRawBytes(msg, "content", common.JoinRawArray(parts))
 			}
 			messageBlocks = append(messageBlocks, msg)
-			if pendingRole == "user" && len(pendingSystemItems) > 0 {
-				// Use a single system message per user turn. Keep every source
-				// block intact, including its cache_control.
-				var systemParts [][]byte
-				for _, i := range pendingSystemItems {
-					systemParts = append(systemParts, systemItems[i]...)
-					systemItems[i] = nil
-				}
-				systemMessage, _ := sjson.SetRawBytes([]byte(`{"role":"system","content":[]}`), "content", common.JoinRawArray(systemParts))
-				messageBlocks = append(messageBlocks, systemMessage)
-				pendingSystemItems = pendingSystemItems[:0]
+			if pendingRole == "user" && pendingSystemStart >= 0 {
+				// Reserve one system message after the user batch. Resolve it
+				// once we know whether later items require a top-level fallback.
+				systemPlacements = append(systemPlacements, systemPlacement{messageIndex: len(messageBlocks), first: pendingSystemStart, end: len(systemItems)})
+				messageBlocks = append(messageBlocks, nil)
+				pendingSystemStart = -1
 			}
 		}
 
@@ -332,11 +333,14 @@ func convertOpenAIResponsesRequestToClaude(modelName string, inputRawJSON []byte
 			// history has an assistant turn, only text messages can stay in place.
 			typ := item.Get("type").String()
 			if midSessionSystemItems && textOnly && (typ == "" || typ == "message") && (pendingRole == "assistant" || len(messageBlocks) > 0) {
-				pendingSystemItems = append(pendingSystemItems, len(systemItems))
+				if pendingSystemStart < 0 {
+					pendingSystemStart = len(systemItems)
+				}
 			} else {
-				// This item must stay top-level. Earlier queued items must go
-				// there too, or this one would move ahead of them.
-				pendingSystemItems = pendingSystemItems[:0]
+				// Top-level items are sent before every conversation message.
+				// Keep all earlier items top-level too, not just queued ones.
+				topLevelSystemEnd = len(systemItems) + 1
+				pendingSystemStart = -1
 			}
 			systemItems = append(systemItems, blocks)
 			continue
@@ -631,8 +635,31 @@ func convertOpenAIResponsesRequestToClaude(modelName string, inputRawJSON []byte
 		}
 	}
 	flushPendingMessage()
-	for _, blocks := range systemItems {
+	if pendingSystemStart >= 0 {
+		// No user batch followed the trailing items. Keep their predecessors
+		// top-level as well so the trailing instructions cannot jump ahead.
+		topLevelSystemEnd = len(systemItems)
+	}
+	for _, blocks := range systemItems[:topLevelSystemEnd] {
 		systemBlocks = append(systemBlocks, blocks...)
+	}
+	if len(systemPlacements) > 0 {
+		kept := messageBlocks[:0]
+		start := 0
+		for _, placement := range systemPlacements {
+			kept = append(kept, messageBlocks[start:placement.messageIndex]...)
+			start = placement.messageIndex + 1
+			if placement.first < topLevelSystemEnd {
+				continue
+			}
+			var parts [][]byte
+			for _, blocks := range systemItems[placement.first:placement.end] {
+				parts = append(parts, blocks...)
+			}
+			message, _ := sjson.SetRawBytes([]byte(`{"role":"system","content":[]}`), "content", common.JoinRawArray(parts))
+			kept = append(kept, message)
+		}
+		messageBlocks = append(kept, messageBlocks[start:]...)
 	}
 	formatResult := root.Get("text.format")
 	if !formatResult.Exists() {
