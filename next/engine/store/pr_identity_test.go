@@ -23,12 +23,12 @@ func TestTrackPRCaseVariantKeepsOneOwner(t *testing.T) {
 		t.Fatal(err)
 	}
 	// An open recorded PR, under the spelling used by the opener's room.
-	err = s.TrackPR(ctx, TrackedPR{PrSummary: contract.PrSummary{Repo: "acme/app", Number: 7, Session: "owner", State: contract.PrOpen}})
+	err = s.TrackPR(ctx, TrackedPR{PrSummary: contract.PrSummary{Repo: "acme/app", Number: 7, Session: "owner", State: contract.PrOpen}}, false)
 	if err != nil {
 		t.Fatal(err)
 	}
 	// TrackPR receives GitHub's canonical spelling from Pull.Base.Repo.FullName.
-	err = s.TrackPR(ctx, TrackedPR{PrSummary: contract.PrSummary{Repo: "Acme/App", Number: 7, Session: "sibling", State: contract.PrOpen}})
+	err = s.TrackPR(ctx, TrackedPR{PrSummary: contract.PrSummary{Repo: "Acme/App", Number: 7, Session: "sibling", State: contract.PrOpen}}, false)
 
 	if !errors.Is(err, ErrPRTracked) {
 		t.Fatalf("case variant claim = %v, want ErrPRTracked", err)
@@ -53,7 +53,7 @@ func TestTrackPRCaseVariantKeepsOneOwner(t *testing.T) {
 		if err != nil || owns {
 			t.Fatalf("ambiguous owner %s: %v %v", session, owns, err)
 		}
-		err = s.TrackPR(ctx, TrackedPR{PrSummary: contract.PrSummary{Repo: "ACME/APP", Number: 7, Session: session, State: contract.PrOpen}})
+		err = s.TrackPR(ctx, TrackedPR{PrSummary: contract.PrSummary{Repo: "ACME/APP", Number: 7, Session: session, State: contract.PrOpen}}, false)
 		if !errors.Is(err, ErrPRTracked) {
 			t.Fatalf("ambiguous claim %s: %v", session, err)
 		}
@@ -111,14 +111,14 @@ func TestTrackPRCaseVariantRetakesFinishedIdentity(t *testing.T) {
 		t.Fatal(err)
 	}
 	row := TrackedPR{PrSummary: contract.PrSummary{Repo: "Acme/App", Number: 7, Session: "owner", State: contract.PrClosed}}
-	if err := s.TrackPR(ctx, row); err != nil {
+	if err := s.TrackPR(ctx, row, false); err != nil {
 		t.Fatal(err)
 	}
 	row.Repo, row.Session, row.State = "acme/app", "sibling", contract.PrOpen
-	if err := s.TrackPR(ctx, row); err != nil {
+	if err := s.TrackPR(ctx, row, false); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.TrackPR(ctx, row); err != nil {
+	if err := s.TrackPR(ctx, row, false); err != nil {
 		t.Fatal("same owner alias:", err)
 	}
 	stored, err := s.PR(ctx, "ACME/APP", 7)

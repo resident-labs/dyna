@@ -132,19 +132,19 @@ func TestTrackPRKeepsAnOpenOwnerAndRetakesAFinishedRow(t *testing.T) {
 	row := func(session contract.SessionID) TrackedPR {
 		return TrackedPR{HeadRepo: "fork/repo", PrSummary: contract.PrSummary{Repo: "upstream/repo", Number: 1, URL: "u", Title: "t", Author: "x", Session: session, State: contract.PrOpen, Head: "h"}}
 	}
-	if err := s.TrackPR(ctx, row("a")); err != nil {
+	if err := s.TrackPR(ctx, row("a"), false); err != nil {
 		t.Fatal("a repository no room lists must be trackable:", err)
 	}
-	if err := s.TrackPR(ctx, row("a")); err != nil {
+	if err := s.TrackPR(ctx, row("a"), false); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.TrackPR(ctx, row("b")); !errors.Is(err, ErrPRTracked) {
+	if err := s.TrackPR(ctx, row("b"), false); !errors.Is(err, ErrPRTracked) {
 		t.Fatal(err)
 	}
 	if _, err := s.writer.ExecContext(ctx, "UPDATE pr_owners SET state='merged',branch='old',ci='success',own_wake_at=5,baseline=0"); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.TrackPR(ctx, row("b")); err != nil {
+	if err := s.TrackPR(ctx, row("b"), false); err != nil {
 		t.Fatal(err)
 	}
 	got, err := s.PR(ctx, "upstream/repo", 1)
@@ -174,7 +174,7 @@ func TestOwnsPRUsesRecordedSessionOnly(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := s.TrackPR(ctx, TrackedPR{PrSummary: contract.PrSummary{Repo: "Acme/App", Number: 7, Session: "owner", State: "closed"}}); err != nil {
+	if err := s.TrackPR(ctx, TrackedPR{PrSummary: contract.PrSummary{Repo: "Acme/App", Number: 7, Session: "owner", State: "closed"}}, false); err != nil {
 		t.Fatal(err)
 	}
 	for _, tt := range []struct {
@@ -250,7 +250,7 @@ func TestTrackPRRetakePreservesKnownBranchAndRecoversOnlyTrustedRef(t *testing.T
 	}
 	for i, headRepo := range []contract.RepoName{"", "fork/repo", "OWNER/REPO"} {
 		pr := TrackedPR{HeadRepo: headRepo, HeadBranch: "feature", PrSummary: contract.PrSummary{Repo: "owner/repo", Number: i + 1, Session: "s", State: contract.PrOpen}}
-		if err := s.TrackPR(ctx, pr); err != nil {
+		if err := s.TrackPR(ctx, pr, false); err != nil {
 			t.Fatal(err)
 		}
 		var branch string
@@ -265,7 +265,7 @@ func TestTrackPRRetakePreservesKnownBranchAndRecoversOnlyTrustedRef(t *testing.T
 	if _, err := s.writer.ExecContext(ctx, "UPDATE pr_owners SET state='closed' WHERE number=3"); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.TrackPR(ctx, TrackedPR{PrSummary: contract.PrSummary{Repo: "OWNER/REPO", Number: 3, Session: "s", State: contract.PrOpen}}); err != nil {
+	if err := s.TrackPR(ctx, TrackedPR{PrSummary: contract.PrSummary{Repo: "OWNER/REPO", Number: 3, Session: "s", State: contract.PrOpen}}, false); err != nil {
 		t.Fatal(err)
 	}
 	var branch string

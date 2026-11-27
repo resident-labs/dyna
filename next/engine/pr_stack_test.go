@@ -41,7 +41,7 @@ func TestPrStackBoundary(t *testing.T) {
 				owner = root
 			}
 			for _, n := range []int{1, 2} {
-				if err := s.store.TrackPR(ctx, store.TrackedPR{PrSummary: contract.PrSummary{Repo: "owner/repo", Number: n, Session: owner, State: contract.PrOpen}}); err != nil {
+				if err := s.store.TrackPR(ctx, store.TrackedPR{PrSummary: contract.PrSummary{Repo: "owner/repo", Number: n, Session: owner, State: contract.PrOpen}}, false); err != nil {
 					t.Fatal(err)
 				}
 			}

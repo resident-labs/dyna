@@ -99,7 +99,7 @@ func TestPRStackMembershipSurvivesUntrack(t *testing.T) {
 			}
 			track := func(n int) {
 				t.Helper()
-				if err := s.TrackPR(ctx, TrackedPR{PrSummary: contract.PrSummary{Repo: "Acme/App", Number: n, Session: "owner", State: contract.PrOpen}}); err != nil {
+				if err := s.TrackPR(ctx, TrackedPR{PrSummary: contract.PrSummary{Repo: "Acme/App", Number: n, Session: "owner", State: contract.PrOpen}}, false); err != nil {
 					t.Fatal(err)
 				}
 			}
@@ -124,7 +124,7 @@ func TestPRStackMembershipSurvivesUntrack(t *testing.T) {
 			if err != nil || p.Stack != 50 || p.Position != remaining || p.StackSize != 2 {
 				t.Fatalf("remaining %+v %v", p, err)
 			}
-			if err := s.TrackPR(ctx, TrackedPR{PrSummary: contract.PrSummary{Repo: "acme/app", Number: removed, Session: "owner", State: contract.PrOpen}}); err != nil {
+			if err := s.TrackPR(ctx, TrackedPR{PrSummary: contract.PrSummary{Repo: "acme/app", Number: removed, Session: "owner", State: contract.PrOpen}}, false); err != nil {
 				t.Fatal(err)
 			}
 			var storedStack, storedPosition int

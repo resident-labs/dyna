@@ -204,13 +204,13 @@ func (s *Store) RecordPROpen(ctx context.Context, repo contract.RepoName, number
 // recover a push right only from a branch recorded for this session or its descendants (including closed ones).
 // A merged or closed row can be tracked again.
 // TrackPR may require that the session's room still lists the repository. The owner may track an unlisted repository.
-func (s *Store) TrackPR(ctx context.Context, pr TrackedPR, requireListed ...bool) error {
+func (s *Store) TrackPR(ctx context.Context, pr TrackedPR, requireListed bool) error {
 	meta, err := encodeMeta(pr.Meta)
 	if err != nil {
 		return err
 	}
 	return s.Write(ctx, func(tx *sql.Tx) error {
-		if len(requireListed) > 0 && requireListed[0] {
+		if requireListed {
 			if err := requireTrackerRepo(ctx, tx, pr.Session, pr.Repo, pr.HeadRepo); err != nil {
 				return err
 			}
