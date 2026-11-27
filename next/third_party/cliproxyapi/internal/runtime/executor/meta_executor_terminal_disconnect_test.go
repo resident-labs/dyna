@@ -244,7 +244,7 @@ func TestMetaExecute_ResponseDoneHTTP(t *testing.T) {
 func assertMetaTruncation(t *testing.T, err error) {
 	t.Helper()
 	status, ok := errors.AsType[statusErr](err)
-	if !ok || status.StatusCode() != http.StatusBadGateway || !status.IsStreamTruncated() || !strings.HasPrefix(status.Error(), metaIncompleteStreamMessage) {
+	if !ok || status.StatusCode() != http.StatusBadGateway || !status.IsStreamTruncated() || status.Error() != metaIncompleteStreamMessage {
 		t.Fatalf("expected typed Meta 502 truncation, got %v", err)
 	}
 }
@@ -346,6 +346,13 @@ func TestMetaAcceptedBodyValidation(t *testing.T) {
 			opts := cliproxyexecutor.Options{SourceFormat: sdktranslator.FormatOpenAIResponse, Stream: tc.stream}
 			assertError := func(err error) {
 				t.Helper()
+				if tc.name == "error_cut_stream" {
+					status, ok := errors.AsType[statusErr](err)
+					if !ok || !status.IsStreamTruncated() || status.StatusCode() != http.StatusBadGateway || status.Error() != metaIncompleteStreamMessage+": "+io.ErrUnexpectedEOF.Error() {
+						t.Fatalf("expected typed Meta 502 with short-read detail, got %v", err)
+					}
+					return
+				}
 				if tc.providerStatus == 0 {
 					assertMetaTruncation(t, err)
 					return
