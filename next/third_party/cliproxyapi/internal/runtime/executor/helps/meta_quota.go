@@ -55,7 +55,11 @@ func ParseMetaSubscriptionUsageSSE(body []byte) http.Header {
 		if !bytes.HasPrefix(line, []byte("data:")) {
 			continue
 		}
-		if parsed := ParseMetaSubscriptionUsageHeaders(bytes.TrimSpace(line[len("data:"):])); parsed != nil {
+		payload := bytes.TrimSpace(line[len("data:"):])
+		if !gjson.ValidBytes(payload) {
+			continue
+		}
+		if parsed := ParseMetaSubscriptionUsageHeaders(payload); parsed != nil {
 			headers = parsed
 		}
 	}

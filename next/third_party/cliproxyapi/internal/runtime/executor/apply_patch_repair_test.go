@@ -92,9 +92,13 @@ func TestApplyPatchRepairResponsesSourceTerminalHTTP(t *testing.T) {
 					if errExecuteStream != nil {
 						t.Fatal(errExecuteStream)
 					}
-					if provider == "xai" && mode == "empty" {
+					if (provider == "xai" || provider == "meta") && mode == "empty" {
 						chunk := <-stream.Chunks
-						assertXAIEmptyStream(t, chunk.Err)
+						if provider == "xai" {
+							assertXAIEmptyStream(t, chunk.Err)
+						} else {
+							assertMetaTruncation(t, chunk.Err)
+						}
 						if next, ok := <-stream.Chunks; ok {
 							t.Fatalf("unexpected output after empty stream error: %+v", next)
 						}
@@ -107,8 +111,12 @@ func TestApplyPatchRepairResponsesSourceTerminalHTTP(t *testing.T) {
 					checkGatewayUsage := task6CaptureFailureUsage(t, auth.ID)
 					result := task6Gateway(t, exec, auth, true)
 					output := result.Body.String()
-					if provider == "xai" && mode == "empty" {
-						if result.Code != http.StatusBadGateway || !strings.Contains(output, xaiEmptyStreamMessage) {
+					if (provider == "xai" || provider == "meta") && mode == "empty" {
+						wantMessage := xaiEmptyStreamMessage
+						if provider == "meta" {
+							wantMessage = metaIncompleteStreamMessage
+						}
+						if result.Code != http.StatusBadGateway || !strings.Contains(output, wantMessage) {
 							t.Errorf("empty stream reported as a patch failure: %d %s", result.Code, output)
 						}
 					} else if strings.Count(output, "event: response.failed") != 1 || strings.Contains(output, "event: error") || strings.Contains(output, "response.completed") || strings.Contains(output, "[DONE]") {
@@ -486,6 +494,9 @@ func TestApplyPatchRepairResponsesSourceTerminalNonStream(t *testing.T) {
 				if provider == "xai" && mode == "empty" {
 					assertXAIEmptyStream(t, errExecute)
 					wantMessage = xaiEmptyStreamMessage
+				} else if provider == "meta" && mode == "empty" {
+					assertMetaTruncation(t, errExecute)
+					wantMessage = metaIncompleteStreamMessage
 				} else {
 					assertTask6PatchError(t, errExecute)
 				}
@@ -643,8 +654,8 @@ func TestApplyPatchRepairOrdinaryEmptyHTTPPassthrough(t *testing.T) {
 				}
 			} else if provider == "xai" {
 				assertXAIEmptyStream(t, errExecute)
-			} else if status, okStatus := errExecute.(interface{ StatusCode() int }); !okStatus || status.StatusCode() != http.StatusRequestTimeout {
-				t.Fatalf("ordinary disconnect changed: %v", errExecute)
+			} else {
+				assertMetaTruncation(t, errExecute)
 			}
 		})
 	}

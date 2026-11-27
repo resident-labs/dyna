@@ -4,7 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
-	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"strings"
@@ -12,6 +12,7 @@ import (
 	"github.com/router-for-me/CLIProxyAPI/v8/internal/runtime/executor/helps"
 	cliproxyauth "github.com/router-for-me/CLIProxyAPI/v8/sdk/cliproxy/auth"
 	cliproxyexecutor "github.com/router-for-me/CLIProxyAPI/v8/sdk/cliproxy/executor"
+	sdktranslator "github.com/router-for-me/CLIProxyAPI/v8/sdk/translator"
 	log "github.com/sirupsen/logrus"
 	"github.com/tidwall/gjson"
 )
@@ -89,11 +90,26 @@ func (e *MetaExecutor) ExecuteStream(ctx context.Context, auth *cliproxyauth.Aut
 		scanner.Buffer(nil, 52_428_800)
 		claudeInputTokens := helps.NewClaudeInputTokenState(prepared.from, prepared.to, prepared.responseFormat, prepared.originalPayload)
 		var streamUsage helps.StreamUsageBuffer
-		defer streamUsage.Publish(ctx, reporter)
+		nativeResponses := prepared.responseFormat == sdktranslator.FormatOpenAIResponse
+		var terminalDelivered bool
+		defer func() {
+			if errCtx := ctx.Err(); errCtx != nil && !terminalDelivered {
+				streamUsage.PublishFailure(ctx, reporter, errCtx)
+				return
+			}
+			streamUsage.Publish(ctx, reporter)
+		}()
+		fail := func(err error) {
+			helps.RecordAPIResponseError(ctx, e.cfg, err)
+			streamUsage.PublishFailure(ctx, reporter, err)
+			select {
+			case out <- cliproxyexecutor.StreamChunk{Err: err}:
+			case <-ctx.Done():
+			}
+		}
 		var param any
 		outputItemsByIndex := make(map[int64][]byte)
 		var outputItemsFallback [][]byte
-		var terminalDelivered bool
 		emitTranslatedLine := func(translatedLine []byte) bool {
 			lines, errBridge := prepared.applyPatch.Stream(translatedLine)
 			if errBridge != nil {
@@ -179,7 +195,22 @@ func (e *MetaExecutor) ExecuteStream(ctx context.Context, auth *cliproxyauth.Aut
 				continue
 			}
 			eventData := bytes.TrimSpace(trimmedLine[len(dataTag):])
-			eventType := gjson.GetBytes(eventData, "type").String()
+			if bytes.Equal(eventData, []byte("[DONE]")) {
+				if !terminalDelivered || !emitTranslatedLine([]byte("data: [DONE]")) {
+					break
+				}
+				continue
+			}
+			if !gjson.ValidBytes(eventData) {
+				if filteringSubscriptionUsage {
+					pendingEventLine = nil
+					skipFilteredBlankLine = true
+					continue
+				}
+				break
+			}
+			root := gjson.ParseBytes(eventData)
+			eventType := root.Get("type").String()
 			if isMetaSubscriptionUsageEvent(eventType, eventData) {
 				helps.ObserveMetaSubscriptionUsage(ctx, eventData)
 				pendingEventLine = nil
@@ -190,9 +221,7 @@ func (e *MetaExecutor) ExecuteStream(ctx context.Context, auth *cliproxyauth.Aut
 			if filteringSubscriptionUsage {
 				if eventType == "" {
 					pendingEventLine = nil
-					if gjson.ValidBytes(eventData) {
-						filteringSubscriptionUsage = false
-					}
+					filteringSubscriptionUsage = false
 					skipFilteredBlankLine = true
 					continue
 				}
@@ -201,23 +230,29 @@ func (e *MetaExecutor) ExecuteStream(ctx context.Context, auth *cliproxyauth.Aut
 			skipFilteredBlankLine = false
 			// Observe upstream content before translation or failure publication.
 			helps.ObserveResponsesTokenEvent(reporter, eventData)
-			if errEvent := metaStreamEventError(eventData); errEvent != nil {
-				helps.RecordAPIResponseError(ctx, e.cfg, errEvent)
-				reporter.PublishFailure(ctx, errEvent)
-				select {
-				case out <- cliproxyexecutor.StreamChunk{Err: errEvent}:
-				case <-ctx.Done():
-				}
+			if eventType == "response.output_item.done" {
+				xaiCollectOutputItemDone(eventData, outputItemsByIndex, &outputItemsFallback)
+			}
+			if detail, ok := helps.ParseCodexUsageWithOutputItems(eventData, outputItemsByIndex, outputItemsFallback); ok {
+				streamUsage.Observe(detail, true)
+			}
+			if errEvent := metaStreamEventError(eventData, root, eventType); errEvent != nil {
+				fail(errEvent)
 				return
 			}
-			switch eventType {
-			case "response.output_item.done":
-				xaiCollectOutputItemDone(eventData, outputItemsByIndex, &outputItemsFallback)
-			case "response.completed", "response.incomplete":
-				if detail, ok := helps.ParseCodexUsageWithOutputItems(eventData, outputItemsByIndex, outputItemsFallback); ok {
-					streamUsage.Observe(detail, true)
-				}
+			terminal := isMetaTerminalResponseEvent(eventType)
+			if terminal && !root.Get("response").IsObject() {
+				break
+			}
+			if terminal {
 				eventData = patchCodexCompletedOutput(eventData, outputItemsByIndex, outputItemsFallback)
+				if eventType == "response.done" && !nativeResponses {
+					var normalizedType string
+					normalizedType, eventData = normalizeMetaTerminalEvent(eventData, eventType)
+					if bytes.Equal(bytes.TrimSpace(bytes.TrimPrefix(bytes.TrimSpace(pendingEventLine), metaEventTag)), []byte(eventType)) {
+						pendingEventLine = []byte("event: " + normalizedType)
+					}
+				}
 			}
 			if pendingEventLine != nil {
 				if !emitTranslatedLine(pendingEventLine) {
@@ -225,12 +260,29 @@ func (e *MetaExecutor) ExecuteStream(ctx context.Context, auth *cliproxyauth.Aut
 				}
 				pendingEventLine = nil
 			}
-			if !emitTranslatedLine(append([]byte("data: "), eventData...)) {
+			dataLine := append([]byte("data: "), eventData...)
+			if terminal && nativeResponses {
+				// Flush the native terminal frame even if Meta leaves the body
+				// open to send subscription usage later.
+				dataLine = append(dataLine, '\n', '\n')
+			}
+			if !emitTranslatedLine(dataLine) {
 				return
 			}
-			if eventType == "response.completed" || eventType == "response.incomplete" {
+			if terminal {
 				terminalDelivered = true
 			}
+		}
+		if ctx.Err() != nil {
+			return
+		}
+		if !terminalDelivered && !prepared.applyPatch.HasPatchActivity() {
+			msg := metaIncompleteStreamMessage
+			if errScan := scanner.Err(); errScan != nil {
+				msg = fmt.Sprintf("%s: %v", msg, errScan)
+			}
+			fail(statusErr{code: http.StatusBadGateway, msg: msg, streamTruncated: true})
+			return
 		}
 		if pendingEventLine != nil {
 			if !emitTranslatedLine(pendingEventLine) {
@@ -239,8 +291,9 @@ func (e *MetaExecutor) ExecuteStream(ctx context.Context, auth *cliproxyauth.Aut
 			pendingEventLine = nil
 		}
 		finishEvents, errFinish := prepared.applyPatch.FinishStream()
+		patchErr := statusErr{code: http.StatusBadGateway, msg: helps.ApplyPatchUpstreamErrorMessage, streamTruncated: !terminalDelivered}
 		if errFinish != nil {
-			streamUsage.PublishFailure(ctx, reporter, statusErr{code: http.StatusBadGateway, msg: helps.ApplyPatchUpstreamErrorMessage})
+			streamUsage.PublishFailure(ctx, reporter, patchErr)
 		}
 		for _, event := range finishEvents {
 			for _, chunk := range helps.TranslateStreamWithClaudeInputTokens(ctx, prepared.to, prepared.responseFormat, req.Model, prepared.originalPayload, prepared.body, event, &param, claudeInputTokens) {
@@ -252,22 +305,8 @@ func (e *MetaExecutor) ExecuteStream(ctx context.Context, auth *cliproxyauth.Aut
 			}
 		}
 		if errFinish != nil {
-			errFinish = statusErr{code: http.StatusBadGateway, msg: helps.ApplyPatchUpstreamErrorMessage}
-			streamUsage.PublishFailure(ctx, reporter, errFinish)
 			select {
-			case out <- cliproxyexecutor.StreamChunk{Err: errFinish}:
-			case <-ctx.Done():
-			}
-			return
-		}
-		if errScan := scanner.Err(); errScan != nil {
-			if terminalDelivered && errors.Is(errScan, context.Canceled) {
-				return
-			}
-			helps.RecordAPIResponseError(ctx, e.cfg, errScan)
-			reporter.PublishFailure(ctx, errScan)
-			select {
-			case out <- cliproxyexecutor.StreamChunk{Err: errScan}:
+			case out <- cliproxyexecutor.StreamChunk{Err: patchErr}:
 			case <-ctx.Done():
 			}
 		}
