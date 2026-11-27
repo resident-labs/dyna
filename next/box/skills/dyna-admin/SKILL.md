@@ -45,6 +45,7 @@ unless a paragraph below says otherwise. Read again after the change. Rows marke
 | A repository is not in the room | `room repo add ROOM owner/repo` | `room repo list ROOM` | yours |
 | A repository is no longer used by the room | `room repo remove ROOM owner/repo` | `room repo list ROOM` | yours |
 | `runs-on: dyna-…` jobs sit queued | `room repo ci owner/repo --on [--max N] [--hosts A,B]` | dyna_room | yours |
+| Generated workflow step branches accumulate | `room repo add ROOM owner/repo --step-branch-expiry on` (undo with `off`) | dyna_room | yours |
 | New boxes wait or go to the wrong host* | `room hosts ROOM --only [POOL,]HOST,…` | none | yours |
 | Boxes wait while hosts have room* | `room limit ROOM --cpus N --mem SIZE` | `room log` | yours |
 | Workflow refused, or runs capped* | `workflow set --room ROOM SETTING=VALUE` | `workflow settings` | yours |

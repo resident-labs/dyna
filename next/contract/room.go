@@ -10,7 +10,8 @@ type RoomLimits struct {
 }
 
 type RoomRepo struct {
-	Repo     RepoName `json:"repo"`
-	Default  bool     `json:"default"`
-	PREvents bool     `json:"prEvents"`
+	Repo             RepoName `json:"repo"`
+	Default          bool     `json:"default"`
+	PREvents         bool     `json:"prEvents"`
+	StepBranchExpiry bool     `json:"stepBranchExpiry"`
 }

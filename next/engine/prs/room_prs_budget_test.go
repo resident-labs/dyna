@@ -25,7 +25,7 @@ func TestRoomPRMainFailureDoesNotPinEventsCursor(t *testing.T) {
 		t.Fatal(err)
 	}
 	enabled := true
-	if err := s.AddRoomRepo(ctx, "room", repo, true, &enabled); err != nil {
+	if err := s.AddRoomRepo(ctx, "room", repo, true, store.RoomRepoOptions{PREvents: &enabled}); err != nil {
 		t.Fatal(err)
 	}
 	c, server, clock := client(t)
@@ -83,7 +83,7 @@ func TestRoomPRCensusHasPageBudget(t *testing.T) {
 			t.Fatal(err)
 		}
 		enabled := true
-		if err := s.AddRoomRepo(ctx, contract.RoomID(repo), repo, true, &enabled); err != nil {
+		if err := s.AddRoomRepo(ctx, contract.RoomID(repo), repo, true, store.RoomRepoOptions{PREvents: &enabled}); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -130,7 +130,7 @@ func TestRoomPRRecoveryReconcilesKnownClosedPR(t *testing.T) {
 		t.Fatal(err)
 	}
 	enabled := true
-	if err := s.AddRoomRepo(ctx, "room", repo, true, &enabled); err != nil {
+	if err := s.AddRoomRepo(ctx, "room", repo, true, store.RoomRepoOptions{PREvents: &enabled}); err != nil {
 		t.Fatal(err)
 	}
 	c, server, clock := client(t)
@@ -198,7 +198,7 @@ func TestRoomPRCensusResumesAfterPageBudget(t *testing.T) {
 		t.Fatal(err)
 	}
 	enabled := true
-	if err := s.AddRoomRepo(ctx, "room", repo, true, &enabled); err != nil {
+	if err := s.AddRoomRepo(ctx, "room", repo, true, store.RoomRepoOptions{PREvents: &enabled}); err != nil {
 		t.Fatal(err)
 	}
 	c, server, clock := client(t)

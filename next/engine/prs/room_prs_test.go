@@ -25,7 +25,7 @@ func TestRoomPRCensusAndUntrackedChanges(t *testing.T) {
 	if err := s.CreateRoom(ctx, "room", "room", at); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.AddRoomRepo(ctx, "room", "owner/repo", true, func() *bool { v := true; return &v }()); err != nil {
+	if err := s.AddRoomRepo(ctx, "room", "owner/repo", true, store.RoomRepoOptions{PREvents: new(true)}); err != nil {
 		t.Fatal(err)
 	}
 	c, server, clock := client(t)
@@ -103,7 +103,7 @@ func TestUntrackedRoomCISettlesOnce(t *testing.T) {
 			if err := s.CreateRoom(ctx, "room", "room", at); err != nil {
 				t.Fatal(err)
 			}
-			if err := s.AddRoomRepo(ctx, "room", "owner/repo", true, func() *bool { v := true; return &v }()); err != nil {
+			if err := s.AddRoomRepo(ctx, "room", "owner/repo", true, store.RoomRepoOptions{PREvents: new(true)}); err != nil {
 				t.Fatal(err)
 			}
 			c, server, clock := client(t)
@@ -181,7 +181,7 @@ func TestRoomPRGapKeepsLiveEventsAndRetriesRecovery(t *testing.T) {
 		t.Fatal(err)
 	}
 	enabled := true
-	if err := s.AddRoomRepo(ctx, "room", repo, true, &enabled); err != nil {
+	if err := s.AddRoomRepo(ctx, "room", repo, true, store.RoomRepoOptions{PREvents: &enabled}); err != nil {
 		t.Fatal(err)
 	}
 	c, server, clock := client(t)

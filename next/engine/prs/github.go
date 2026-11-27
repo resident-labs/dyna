@@ -607,7 +607,7 @@ type gqlPull struct {
 var verdictLine = regexp.MustCompile(`\A[^\n]*\n\*\*Verdict: (Approved|Changes requested) at ([0-9a-f]{12,40})\*\*[ \t]*(?:\n|$)`)
 
 // graphQL runs one query and returns its repository, which is nil for a query that names none.
-func (c *Client) graphQL(ctx context.Context, query string, variables map[string]string) (result map[string]json.RawMessage, problem error) {
+func (c *Client) graphQL(ctx context.Context, query string, variables map[string]string, requireComplete bool) (result map[string]json.RawMessage, problem error) {
 	defer func() {
 		if problem != nil && c.AccountLabel != "" {
 			problem = fmt.Errorf("%s: %w", c.AccountLabel, problem)
@@ -655,7 +655,39 @@ func (c *Client) graphQL(ctx context.Context, query string, variables map[string
 		}
 		return nil, fmt.Errorf("GitHub: %s", message)
 	}
+	if requireComplete && len(payload.Errors) > 0 {
+		return nil, fmt.Errorf("incomplete GitHub answer: %s", strings.ReplaceAll(payload.Errors[0].Message, c.Token, "***"))
+	}
 	return payload.Data.Repository, nil
+}
+
+// OpenPRHeads checks the refs on the head repository, including PRs into a different readable base repository.
+// An incomplete response must not let the caller delete any ref in this repository.
+func (c *Client) OpenPRHeads(ctx context.Context, repo contract.RepoName, refs []string) (map[string]bool, error) {
+	owner, name, _ := strings.Cut(string(repo), "/")
+	open := make(map[string]bool)
+	for batch := range slices.Chunk(refs, 50) {
+		var fields strings.Builder
+		for i, ref := range batch {
+			quoted, _ := json.Marshal(ref)
+			fmt.Fprintf(&fields, "r%d:ref(qualifiedName:%s){associatedPullRequests(states:[OPEN],first:1){nodes{number}}}\n", i, quoted)
+		}
+		query := "query($owner:String!,$name:String!){repository(owner:$owner,name:$name){\n" + fields.String() + "}}"
+		repository, err := c.graphQL(ctx, query, map[string]string{"owner": owner, "name": name}, true)
+		if err != nil {
+			return nil, err
+		}
+		for i, ref := range batch {
+			var answer struct {
+				Pulls struct{ Nodes []json.RawMessage } `json:"associatedPullRequests"`
+			}
+			if err := json.Unmarshal(repository[fmt.Sprintf("r%d", i)], &answer); err != nil || answer.Pulls.Nodes == nil {
+				return nil, fmt.Errorf("incomplete GitHub PR check for %s", ref)
+			}
+			open[ref] = len(answer.Pulls.Nodes) > 0
+		}
+	}
+	return open, nil
 }
 
 // LoadViewer asks who the token is, once, because a quiet pass makes no query that would say.
@@ -663,7 +695,7 @@ func (c *Client) LoadViewer(ctx context.Context) error {
 	if c.Viewer() != "" {
 		return nil
 	}
-	_, err := c.graphQL(ctx, "query{viewer{login}}", nil)
+	_, err := c.graphQL(ctx, "query{viewer{login}}", nil, false)
 	return err
 }
 
@@ -682,7 +714,7 @@ func (c *Client) Read(ctx context.Context, repo contract.RepoName, numbers []int
 		fmt.Fprintf(&fields, "pr%d:pullRequest(number:%d){...pull}\n", number, number)
 	}
 	query := "query($owner:String!,$name:String!){viewer{login} repository(owner:$owner,name:$name){\n" + fields.String() + "}}\nfragment pull on PullRequest{" + pullFields + "}"
-	repository, err := c.graphQL(ctx, query, map[string]string{"owner": owner, "name": name})
+	repository, err := c.graphQL(ctx, query, map[string]string{"owner": owner, "name": name}, false)
 	if err != nil {
 		return nil, err
 	}
@@ -841,7 +873,7 @@ func (c *Client) CommitsCI(ctx context.Context, repo contract.RepoName, shas []s
 	}
 	query := "query($owner:String!,$name:String!" + declared + "){viewer{login} repository(owner:$owner,name:$name){" + fields + "}}" +
 		fmt.Sprintf(" fragment ci on Commit{"+suiteFields+" statusCheckRollup{state contexts(first:%d){totalCount pageInfo{hasNextPage} nodes{__typename ...on CheckRun{name status conclusion detailsUrl checkSuite{workflowRun{event}}} ...on StatusContext{context state targetUrl}}}}}", ciRunsRead)
-	repository, err := c.graphQL(ctx, query, variables)
+	repository, err := c.graphQL(ctx, query, variables, false)
 	if err != nil {
 		return nil, err
 	}

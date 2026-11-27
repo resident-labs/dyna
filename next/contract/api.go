@@ -542,10 +542,11 @@ type RoomDeleteRequest struct {
 
 type RoomDeleteResponse struct{}
 type RoomRepoAddRequest struct {
-	Room     RoomID   `json:"room"`
-	Repo     RepoName `json:"repo"`
-	Default  bool     `json:"default"`
-	PREvents *bool    `json:"prEvents,omitempty"`
+	Room             RoomID   `json:"room"`
+	Repo             RepoName `json:"repo"`
+	Default          bool     `json:"default"`
+	PREvents         *bool    `json:"prEvents,omitempty"`
+	StepBranchExpiry *bool    `json:"stepBranchExpiry,omitempty"`
 }
 type RoomRepoAddResponse struct{}
 

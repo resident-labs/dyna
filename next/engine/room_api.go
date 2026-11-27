@@ -45,7 +45,7 @@ func (s *Service) RoomRepoAdd(ctx context.Context, caller contract.Principal, re
 	if !validRoomRepo(req.Repo) {
 		return contract.RoomRepoAddResponse{}, invalid("repository must be owner/name")
 	}
-	if err := s.store.AddRoomRepo(ctx, req.Room, req.Repo, req.Default, req.PREvents); err != nil {
+	if err := s.store.AddRoomRepo(ctx, req.Room, req.Repo, req.Default, store.RoomRepoOptions{PREvents: req.PREvents, StepBranchExpiry: req.StepBranchExpiry}); err != nil {
 		if errors.Is(err, store.ErrRoomNotFound) {
 			return contract.RoomRepoAddResponse{}, invalid("unknown room")
 		}

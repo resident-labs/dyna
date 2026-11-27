@@ -8,6 +8,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/resident-labs/dyna/contract"
+	"github.com/resident-labs/dyna/engine/store"
 )
 
 func TestContextRoomCI(t *testing.T) {
@@ -148,7 +149,7 @@ func TestContextRoomCIAtNextTurn(t *testing.T) {
 	}
 }
 
-func TestContextShowsRoomWidePREventsOnlyWhenEnabled(t *testing.T) {
+func TestContextShowsPerRepoSwitchesOnlyWhenEnabled(t *testing.T) {
 	r := newGrantRig(t)
 	snapshot := func() string {
 		t.Helper()
@@ -163,13 +164,13 @@ func TestContextShowsRoomWidePREventsOnlyWhenEnabled(t *testing.T) {
 		}
 		return ""
 	}
-	if strings.Contains(snapshot(), "Room-wide PR events:") {
+	if strings.Contains(snapshot(), "Room-wide PR events:") || strings.Contains(snapshot(), "Workflow step branch expiry:") {
 		t.Fatal("on by default")
 	}
-	if err := r.s.store.AddRoomRepo(t.Context(), r.room, "owner/review", false, func() *bool { v := true; return &v }()); err != nil {
+	if err := r.s.store.AddRoomRepo(t.Context(), r.room, "owner/review", false, store.RoomRepoOptions{PREvents: new(true), StepBranchExpiry: new(true)}); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(snapshot(), "Room-wide PR events: owner/review") {
+	if text := snapshot(); !strings.Contains(text, "Room-wide PR events: owner/review") || !strings.Contains(text, "Workflow step branch expiry: owner/review") {
 		t.Fatal("enabled setting absent")
 	}
 	heads, err := r.s.store.RepoHeads(t.Context(), r.s.now())
@@ -180,10 +181,10 @@ func TestContextShowsRoomWidePREventsOnlyWhenEnabled(t *testing.T) {
 	if !strings.Contains(snapshot(), "Room-wide PR events: owner/review (stalled: GitHub HTTP 504)") {
 		t.Fatal("stalled status absent")
 	}
-	if err := r.s.store.AddRoomRepo(t.Context(), r.room, "owner/review", false, func() *bool { v := false; return &v }()); err != nil {
+	if err := r.s.store.AddRoomRepo(t.Context(), r.room, "owner/review", false, store.RoomRepoOptions{PREvents: new(false), StepBranchExpiry: new(false)}); err != nil {
 		t.Fatal(err)
 	}
-	if strings.Contains(snapshot(), "Room-wide PR events:") {
+	if strings.Contains(snapshot(), "Room-wide PR events:") || strings.Contains(snapshot(), "Workflow step branch expiry:") {
 		t.Fatal("disabled setting remained")
 	}
 }

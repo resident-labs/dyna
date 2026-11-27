@@ -162,21 +162,27 @@ func roomCommand(getClient func() client) *cobra.Command {
 	log.Flags().BoolVar(&follow, "follow", false, "Follow new events")
 	repo := &cobra.Command{Use: "repo"}
 	var makeDefault bool
-	var prEvents string
+	var prEvents, stepBranchExpiry string
 	addRepo := &cobra.Command{Use: "add ROOM REPO", Args: cobra.ExactArgs(2), RunE: func(cmd *cobra.Command, args []string) error {
-		if prEvents != "on" && prEvents != "off" {
-			return fmt.Errorf("--pr-events is on or off")
+		req := contract.RoomRepoAddRequest{Room: contract.RoomID(args[0]), Repo: contract.RepoName(args[1]), Default: makeDefault}
+		for _, flag := range []struct {
+			name, value string
+			field       **bool
+		}{{"pr-events", prEvents, &req.PREvents}, {"step-branch-expiry", stepBranchExpiry, &req.StepBranchExpiry}} {
+			if cmd.Flags().Changed(flag.name) {
+				if flag.value != "on" && flag.value != "off" {
+					return fmt.Errorf("--%s is on or off", flag.name)
+				}
+				enabled := flag.value == "on"
+				*flag.field = &enabled
+			}
 		}
-		var events *bool
-		if cmd.Flags().Changed("pr-events") {
-			enabled := prEvents == "on"
-			events = &enabled
-		}
-		_, err := getClient().RoomRepoAdd(cmd.Context(), contract.RoomRepoAddRequest{Room: contract.RoomID(args[0]), Repo: contract.RepoName(args[1]), Default: makeDefault, PREvents: events})
+		_, err := getClient().RoomRepoAdd(cmd.Context(), req)
 		return err
 	}}
 	addRepo.Flags().BoolVar(&makeDefault, "default", false, "Make this the room default")
 	addRepo.Flags().StringVar(&prEvents, "pr-events", "off", "Room-wide PR events: on or off; left as it is when omitted.")
+	addRepo.Flags().StringVar(&stepBranchExpiry, "step-branch-expiry", "off", "Delete expired workflow step branches: on or off; left as it is when omitted. An open PR into a repository the room's GitHub account cannot read is not seen.")
 	removeRepo := &cobra.Command{Use: "remove ROOM REPO", Short: "Remove a repository from the room", Long: "Remove the room's repository link, PR event snapshots and closed tracking entries. Refuses the room default or a repository used by open sessions, PRs or issues. Other rooms keep their links; the last link cannot be removed while Dyna CI is on. Wait for running jobs, then use room repo ci REPO --off. Feed cursors stay if another room still tracks a PR or issue there.", Args: cobra.ExactArgs(2), RunE: func(cmd *cobra.Command, args []string) error {
 		_, err := getClient().RoomRepoRemove(cmd.Context(), contract.RoomRepoRemoveRequest{Room: contract.RoomID(args[0]), Repo: contract.RepoName(args[1])})
 		return err
@@ -187,11 +193,14 @@ func roomCommand(getClient func() client) *cobra.Command {
 			return err
 		}
 		for _, repo := range r.Repos {
+			name := string(repo.Repo)
 			if repo.Default {
-				if _, err := fmt.Fprintf(cmd.OutOrStdout(), "%s (default)\n", repo.Repo); err != nil {
-					return err
-				}
-			} else if _, err := fmt.Fprintln(cmd.OutOrStdout(), repo.Repo); err != nil {
+				name += " (default)"
+			}
+			if repo.StepBranchExpiry {
+				name += " (step branch expiry on)"
+			}
+			if _, err := fmt.Fprintln(cmd.OutOrStdout(), name); err != nil {
 				return err
 			}
 		}
