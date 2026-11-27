@@ -111,7 +111,7 @@ func observeClaudeStreamJSONPayload(payload []byte, hasDataPrefix bool, messageI
 	}
 }
 
-func observeClaudeSSEEvent(rawEvent []byte, messageID *string, completed *bool, streamErr *error) {
+func observeClaudeSSEEvent(rawEvent []byte, messageID *string, completed *bool, streamErr *error) (payload []byte, valid bool) {
 	var dataLines [][]byte
 	for _, line := range bytes.Split(rawEvent, []byte("\n")) {
 		trimmed := bytes.TrimSpace(line)
@@ -128,16 +128,20 @@ func observeClaudeSSEEvent(rawEvent []byte, messageID *string, completed *bool, 
 		if bytes.HasPrefix(trimmed, []byte("{")) && gjson.ValidBytes(trimmed) {
 			observeClaudeStreamJSONPayload(trimmed, false, messageID, completed)
 		}
-		return
+		return nil, true
 	}
 	joined := bytes.TrimSpace(bytes.Join(dataLines, []byte("\n")))
+	if bytes.Equal(joined, []byte("[DONE]")) {
+		return nil, true
+	}
 	if !gjson.ValidBytes(joined) {
-		return
+		return nil, false
 	}
 	observeClaudeStreamJSONPayload(joined, true, messageID, completed)
 	if streamErr != nil && *streamErr == nil && gjson.ParseBytes(joined).Get("type").String() == "error" {
 		*streamErr = statusErr{code: 502, msg: string(joined)}
 	}
+	return joined, true
 }
 
 func claudeMessageIDFromSSE(data []byte) string {
