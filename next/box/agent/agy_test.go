@@ -21,7 +21,7 @@ func TestMain(m *testing.M) {
 }
 
 func TestOpenAgyNeedsItsFiles(t *testing.T) {
-	_, err := openAgy(t.Context(), contract.BoxHelloResponse{Harness: contract.HarnessAgy}, "/box/work", t.TempDir(), nil, &activity{}, func(string) {})
+	_, err := openAgy(t.Context(), contract.BoxHelloResponse{Harness: contract.HarnessAgy}, "127.0.0.1:7782", "/box/work", t.TempDir(), nil, &activity{}, func(string) {})
 	if err == nil || !strings.Contains(err.Error(), "without its files") {
 		t.Fatal(err)
 	}
@@ -45,8 +45,8 @@ func TestAgySessionGetsTheRoomInstructionsOnce(t *testing.T) {
 	t.Setenv(fakeagent.EnvVar, "1")
 	t.Setenv("FAKE_AGY_LOG", log)
 	profile := t.TempDir()
-	hello := contract.BoxHelloResponse{Harness: contract.HarnessAgy, Instructions: "be Dyna", Fresh: true, Agy: &contract.BoxAgy{Binary: exe, GeminiDir: profile}, Model: contract.ModelChoice{ID: "gemini-3.8-flash", Thinking: contract.ThinkingLow}}
-	h, err := openAgy(t.Context(), hello, t.TempDir(), t.TempDir(), []string{global, room, filepath.Join(dir, "missing.md")}, &activity{}, func(string) {})
+	hello := contract.BoxHelloResponse{Harness: contract.HarnessAgy, Instructions: "be Dyna", Fresh: true, Agy: &contract.BoxAgy{Binary: exe, GeminiDir: profile, Exit: contract.AgyExitPath}, Model: contract.ModelChoice{ID: "gemini-3.8-flash", Thinking: contract.ThinkingLow}}
+	h, err := openAgy(t.Context(), hello, "127.0.0.1:7782", t.TempDir(), t.TempDir(), []string{global, room, filepath.Join(dir, "missing.md")}, &activity{}, func(string) {})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -101,8 +101,8 @@ func TestARetryWakeAfterAQuotaFailureSendsOneContinuePrompt(t *testing.T) {
 	log := filepath.Join(dir, "agent.log")
 	t.Setenv(fakeagent.EnvVar, "1")
 	t.Setenv("FAKE_AGY_LOG", log)
-	hello := contract.BoxHelloResponse{Harness: contract.HarnessAgy, Fresh: true, Agy: &contract.BoxAgy{Binary: exe, GeminiDir: t.TempDir()}, Model: contract.ModelChoice{ID: "gemini-3.8-flash", Thinking: contract.ThinkingLow}}
-	h, err := openAgy(t.Context(), hello, t.TempDir(), t.TempDir(), nil, &activity{}, func(string) {})
+	hello := contract.BoxHelloResponse{Harness: contract.HarnessAgy, Fresh: true, Agy: &contract.BoxAgy{Binary: exe, GeminiDir: t.TempDir(), Exit: contract.AgyExitPath}, Model: contract.ModelChoice{ID: "gemini-3.8-flash", Thinking: contract.ThinkingLow}}
+	h, err := openAgy(t.Context(), hello, "127.0.0.1:7782", t.TempDir(), t.TempDir(), nil, &activity{}, func(string) {})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -127,5 +127,16 @@ func TestARetryWakeAfterAQuotaFailureSendsOneContinuePrompt(t *testing.T) {
 	data, _ := os.ReadFile(log)
 	if n := strings.Count(string(data), "Continue where you left off."); n != 1 {
 		t.Fatalf("%d continue prompts after the retry wake, want 1", n)
+	}
+}
+
+func TestOpenAgyRefusesWithoutAnExit(t *testing.T) {
+	for name, c := range map[string]struct {
+		exit, proxy string
+	}{"engine without an exit": {"", "127.0.0.1:7782"}, "no listener": {"/agy-exit/", ""}} {
+		hello := contract.BoxHelloResponse{Harness: contract.HarnessAgy, Agy: &contract.BoxAgy{Binary: "/bin/true", GeminiDir: t.TempDir(), Exit: c.exit}}
+		if _, err := openAgy(t.Context(), hello, c.proxy, "/box/work", t.TempDir(), nil, &activity{}, func(string) {}); err == nil || !strings.Contains(err.Error(), "agy is not started") {
+			t.Errorf("%s: %v", name, err)
+		}
 	}
 }

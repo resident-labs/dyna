@@ -134,3 +134,36 @@ func TestBoxSocketServesTheAgyGitHubListing(t *testing.T) {
 		t.Fatalf("full %v\nagy %v", full, agy)
 	}
 }
+
+type agyExitService struct {
+	fakeService
+	agy bool
+}
+
+func (s *agyExitService) AgyExitAllowed(context.Context, contract.BoxID) (bool, error) {
+	return s.agy, nil
+}
+
+// A box socket serves the agy exit only to a box whose agent the engine stored as serving agy; a service that cannot say refuses too.
+// An allowed box still gets a refusal of a host that is not Google's before anything is dialled.
+func TestBoxSocketServesTheAgyExitOnlyToAnAgyBox(t *testing.T) {
+	for name, c := range map[string]struct {
+		service Service
+		reason  string
+	}{
+		"not an agy box":      {&agyExitService{}, "does not serve agy"},
+		"service cannot say":  {&githubToolsService{}, "does not serve agy"},
+		"agy box, other host": {&agyExitService{agy: true}, "does not serve example.com"},
+	} {
+		server := httptest.NewServer(New(c.service, nil).handler(Caller{Principal: contract.Principal{Kind: contract.PrincipalSession, Session: "ses_a"}, Box: "box_a", Room: "room_a"}))
+		response, err := http.Post(server.URL+contract.AgyExitPath+"example.com:443", "", nil)
+		server.Close()
+		if err != nil {
+			t.Fatal(err)
+		}
+		response.Body.Close()
+		if response.StatusCode != http.StatusForbidden || !strings.Contains(response.Header.Get("X-Dyna-Exit"), c.reason) {
+			t.Errorf("%s: %d %q", name, response.StatusCode, response.Header.Get("X-Dyna-Exit"))
+		}
+	}
+}

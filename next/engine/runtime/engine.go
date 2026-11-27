@@ -42,6 +42,7 @@ import (
 type hostRegistrar interface {
 	AddHost(context.Context, contract.HostAddRequest) (bool, error)
 	HostLoad(context.Context, []contract.HostSummary) error
+	SeedAgy(context.Context, contract.HostName) error
 }
 
 type serviceWithHosts struct {
@@ -61,6 +62,24 @@ func (s *serviceWithHosts) AccountsQuota(ctx context.Context, caller contract.Pr
 
 func (s *serviceWithHosts) HostList(ctx context.Context, caller contract.Principal, req contract.HostListRequest) (contract.HostListResponse, *contract.Error) {
 	return s.Service.HostListWithLoad(ctx, caller, req, s.boxes.HostLoad)
+}
+
+// HostAgySeed is the owner's `dyna agy seed`: the service says whether the host may be seeded at all, the boxes do the copy, which refuses a
+// host that has an account folder.
+func (s *serviceWithHosts) HostAgySeed(ctx context.Context, caller contract.Principal, req contract.HostAgySeedRequest) (contract.HostAgySeedResponse, *contract.Error) {
+	if problem := s.Service.AgySeedProblem(ctx, caller, req.Host); problem != nil {
+		return contract.HostAgySeedResponse{}, problem
+	}
+	if err := s.boxes.SeedAgy(ctx, req.Host); err != nil {
+		code := contract.ErrUnavailable
+		var seeded SeededError
+		var program ProgramError
+		if errors.Is(err, ErrAgyArch) || errors.As(err, &seeded) || errors.As(err, &program) {
+			code = contract.ErrConflict
+		}
+		return contract.HostAgySeedResponse{}, &contract.Error{Code: code, Message: err.Error()}
+	}
+	return contract.HostAgySeedResponse{}, nil
 }
 
 func (s *serviceWithHosts) HostAdd(ctx context.Context, caller contract.Principal, req contract.HostAddRequest) (contract.HostAddResponse, *contract.Error) {

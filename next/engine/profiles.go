@@ -478,9 +478,6 @@ func (s *Service) wakeWorkflowsOnProfile(ctx context.Context, name contract.Prof
 	s.live.Wake(sessions, nil)
 }
 
-// agyHost is the one host agy sessions run on: the owner signs in to Google there, and one IP uses the login.
-const agyHost contract.HostName = "hermeslab"
-
 // pigOnly refuses an agy profile where only PiG runs: a workflow's workers and the room's advisor.
 func (s *Service) pigOnly(name contract.ProfileName, what string) *contract.Error {
 	if s.profiles.Harness(name) == contract.HarnessAgy {
@@ -489,20 +486,56 @@ func (s *Service) pigOnly(name contract.ProfileName, what string) *contract.Erro
 	return nil
 }
 
-// agyPlacement pins a session on an agy profile to agyHost. host is what the caller asked for: empty, or a host the session may not take.
-func (s *Service) agyPlacement(profile contract.ProfileName, host contract.HostName, sameHost bool) (contract.HostName, *contract.Error) {
+// AgySource is the host the owner signed in to Google on: `dyna agy seed` copies its program and account folder to another host, as the
+// owner's choice. It says where the login came from, not where agy may run.
+const AgySource contract.HostName = "hermeslab"
+
+// agyPlacement places a session on an agy profile: on a host that reports agy installed and signed in. host is what the caller asked for,
+// or empty for the placement to choose among the eligible hosts that have it; sameHost leaves the check to the parent's host.
+func (s *Service) agyPlacement(ctx context.Context, room contract.RoomID, profile contract.ProfileName, host contract.HostName, sameHost bool) (contract.HostName, *contract.Error) {
 	if s.profiles.Harness(profile) != contract.HarnessAgy {
 		return host, nil
 	}
-	if sameHost || host != "" && host != agyHost {
-		return "", invalid(fmt.Sprintf("profile %s runs on agy, which runs only on host %s, where the owner signed in to Google; leave host and sameHost out, or pick a pig profile for another host", profile, agyHost))
+	if host != "" {
+		return host, s.agyHostProblem(ctx, profile, host)
 	}
-	return agyHost, nil
+	if sameHost {
+		return "", nil
+	}
+	hosts, err := s.store.Hosts(ctx)
+	if err != nil {
+		return "", failure(err)
+	}
+	for _, h := range hosts {
+		if h.Agy && s.validateSessionHost(ctx, room, h.Name) == nil {
+			return "", nil
+		}
+	}
+	return "", invalid(fmt.Sprintf("profile %s runs on agy, and no host that takes this room's sessions has agy installed and signed in; host list shows each host's agy, and the owner signs in to Antigravity on a host", profile))
+}
+
+// agyHostProblem refuses a host that does not report agy installed and signed in, with the next step.
+func (s *Service) agyHostProblem(ctx context.Context, profile contract.ProfileName, name contract.HostName) *contract.Error {
+	hosts, err := s.store.Hosts(ctx)
+	if err != nil {
+		return failure(err)
+	}
+	if slices.ContainsFunc(hosts, func(h box.Host) bool { return h.Name == name && h.Agy }) {
+		return nil
+	}
+	return invalid(fmt.Sprintf("profile %s runs on agy, and host %s does not have agy installed and signed in; host list shows which hosts do, and the owner signs in to Antigravity on %s", profile, name, name))
 }
 
 // The agy program and the signed-in profile directory are mounted into the box by the host's root, the directory read-write.
 // Dyna never reads or copies a file in it.
-var agyMount = contract.BoxAgy{Binary: box.AgyBinary, GeminiDir: contract.AgyGeminiDir}
+var agyMount = contract.BoxAgy{Binary: box.AgyBinary, GeminiDir: contract.AgyGeminiDir, Exit: contract.AgyExitPath}
+
+// AgyExitAllowed says a box may use the agy exit: the harness it reported at its last hello is agy. That is stored, not asked of the
+// request, so no other box, whatever its session says, reaches Google through the engine.
+func (s *Service) AgyExitAllowed(ctx context.Context, id contract.BoxID) (bool, error) {
+	harness, err := s.store.BoxHarness(ctx, id)
+	return harness == contract.HarnessAgy, err
+}
 
 // AgyProfile says a profile runs on the agy harness.
 func (s *Service) AgyProfile(name contract.ProfileName) bool {
@@ -521,13 +554,56 @@ func (s *Service) checkHarnessSwitch(ctx context.Context, target store.Session, 
 	if err != nil {
 		return failure(err)
 	}
-	if to == contract.HarnessAgy && current.Host != agyHost {
-		return &contract.Error{Code: contract.ErrConflict, Message: fmt.Sprintf("session %s runs on host %q and agy runs only on host %s, where the owner signed in to Google; its files cannot move there, so start a new session on profile %s", target.Name, current.Host, agyHost, profile)}
+	if to == contract.HarnessAgy {
+		if current.Host == "" {
+			return &contract.Error{Code: contract.ErrConflict, Message: fmt.Sprintf("session %s's box has no host yet, and agy needs the host its files are on; try again once its box has started", target.Name)}
+		}
+		if problem := s.agyHostProblem(ctx, profile, current.Host); problem != nil {
+			problem.Code = contract.ErrConflict
+			problem.Message = fmt.Sprintf("session %s runs on host %q, which does not have agy installed and signed in, and its files cannot move to another host; the owner can sign in to Antigravity on %s, or start a new session on profile %s", target.Name, current.Host, current.Host, profile)
+			return problem
+		}
 	}
 	if can, err := s.store.BoxCanHandoff(ctx, target.Box); err != nil {
 		return failure(err)
 	} else if !can {
 		return &contract.Error{Code: contract.ErrConflict, Message: fmt.Sprintf("session %s runs in a box that cannot hand its conversation to another harness yet; the engine and box binaries differ until the box restarts, so try again after its box has restarted, or start a new session on profile %s", target.Name, profile)}
+	}
+	return nil
+}
+
+// sameHostAgy refuses an agy session beside a parent whose host has no agy.
+func (s *Service) sameHostAgy(ctx context.Context, profile contract.ProfileName, parent contract.SessionID) *contract.Error {
+	p, err := s.store.Session(ctx, parent)
+	if err != nil {
+		return failure(err)
+	}
+	b, err := s.store.Box(ctx, p.Box)
+	if err != nil {
+		return failure(err)
+	}
+	return s.agyHostProblem(ctx, profile, b.Host)
+}
+
+// AgySeedProblem says why the owner may not seed a host, or nil: only the owner seeds, never the source itself, an exec-only host or one
+// with agents off. A host that is seeded already, or that has agy sessions, has an account folder, which the copy refuses to touch.
+func (s *Service) AgySeedProblem(ctx context.Context, caller contract.Principal, name contract.HostName) *contract.Error {
+	if caller.Kind != contract.PrincipalOwner {
+		return forbidden()
+	}
+	if name == AgySource {
+		return invalid(fmt.Sprintf("host %s is where the owner signed in; seed another host from it", name))
+	}
+	hosts, err := s.store.Hosts(ctx)
+	if err != nil {
+		return failure(err)
+	}
+	index := slices.IndexFunc(hosts, func(h box.Host) bool { return h.Name == name })
+	if index < 0 || hosts[index].State == box.HostRemoved {
+		return invalid("unknown host: " + string(name))
+	}
+	if hosts[index].ExecOnly || hosts[index].NoAgents {
+		return invalid(fmt.Sprintf("host %s is exec-only or has agents off, so it never runs agy sessions", name))
 	}
 	return nil
 }

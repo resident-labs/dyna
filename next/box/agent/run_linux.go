@@ -7,6 +7,7 @@ import (
 	_ "embed"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log"
 	"net"
 	"net/http"
@@ -244,7 +245,10 @@ func Run(ctx context.Context) error {
 		h, files = crew, crew.Files
 	} else {
 		if hello.Harness == contract.HarnessAgy {
-			session, err := openAgy(ctx, hello, workdir, sessions, agyContextFiles, activity, func(text string) { go notice(text) })
+			if err := ListenAgyExit(ctx, engineSocket); err != nil {
+				return fmt.Errorf("agy is not started: the box cannot listen on %s for its exit: %w", contract.AgyExitAddr, err)
+			}
+			session, err := openAgy(ctx, hello, contract.AgyExitAddr, workdir, sessions, agyContextFiles, activity, func(text string) { go notice(text) })
 			if err != nil {
 				return err
 			}

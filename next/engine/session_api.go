@@ -57,7 +57,7 @@ func (s *Service) startSession(ctx context.Context, caller contract.Principal, r
 		}
 	}
 
-	host, problem := s.agyPlacement(req.Profile, req.Host, req.SameHost)
+	host, problem := s.agyPlacement(ctx, req.Room, req.Profile, req.Host, req.SameHost)
 	if problem != nil {
 		return contract.SessionStartResponse{}, problem
 	}
@@ -119,6 +119,11 @@ func (s *Service) startSession(ctx context.Context, caller contract.Principal, r
 		if err != nil {
 			return contract.SessionStartResponse{}, invalid(err.Error())
 		}
+		if req.SameHost && s.AgyProfile(req.Profile) && parent != "" {
+			if problem := s.sameHostAgy(ctx, req.Profile, parent); problem != nil {
+				return contract.SessionStartResponse{}, problem
+			}
+		}
 	}
 	var repo contract.RepoName
 	if roomName == "" {
@@ -152,7 +157,7 @@ func (s *Service) startSession(ctx context.Context, caller contract.Principal, r
 			return contract.SessionStartResponse{}, problem
 		}
 	}
-	session := store.Session{ID: contract.SessionID(sid), Room: req.Room, Name: req.Name, Repo: repo, Profile: req.Profile, Box: contract.BoxID(bid), NewRoomName: roomName, Compose: composeName, GPU: req.GPU, Workflow: run}
+	session := store.Session{ID: contract.SessionID(sid), Room: req.Room, Name: req.Name, Repo: repo, Profile: req.Profile, Box: contract.BoxID(bid), NewRoomName: roomName, Compose: composeName, GPU: req.GPU, Agy: s.AgyProfile(req.Profile), Workflow: run}
 	event, err := s.event(req.Room, caller, contract.SessionStarted{Session: session.ID, Name: req.Name, Parent: parent, Profile: req.Profile, Goal: req.Goal, DoneWhen: req.DoneWhen, Brief: req.Brief, Workflow: run != nil})
 	if err != nil {
 		return contract.SessionStartResponse{}, failure(err)
@@ -461,7 +466,7 @@ func (s *Service) SessionRestart(ctx context.Context, caller contract.Principal,
 	if old.State != contract.BoxFailed && old.State != contract.BoxPending {
 		return contract.SessionRestartResponse{}, conflict
 	}
-	host, problem := s.agyPlacement(session.Profile, req.Host, false)
+	host, problem := s.agyPlacement(ctx, session.Room, session.Profile, req.Host, false)
 	if problem != nil {
 		return contract.SessionRestartResponse{}, problem
 	}

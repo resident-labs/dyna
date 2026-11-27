@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"github.com/coder/websocket"
 	"io"
+	"net"
 	"net/http"
 	"reflect"
 	"slices"
@@ -17,6 +18,7 @@ import (
 
 	"github.com/resident-labs/dyna/contract"
 	"github.com/resident-labs/dyna/contract/tools"
+	"github.com/resident-labs/dyna/engine/agyexit"
 	"github.com/resident-labs/dyna/engine/connect"
 	"github.com/resident-labs/dyna/engine/githubwrites"
 	"github.com/resident-labs/dyna/engine/store"
@@ -348,6 +350,7 @@ func (a *API) handler(c Caller) http.Handler {
 	call(mux, contract.MethodRoomCreate, c, a.service.RoomCreate)
 	call(mux, contract.MethodRoomDelete, c, a.service.RoomDelete)
 	call(mux, contract.MethodHostSetLimits, c, a.service.HostSetLimits)
+	call(mux, contract.MethodHostAgySeed, c, a.service.HostAgySeed)
 	call(mux, contract.MethodHostSet, c, a.service.HostSet)
 	call(mux, contract.MethodRoomGitHub, c, func(ctx context.Context, who contract.Principal, req contract.RoomGitHubRequest) (contract.RoomGitHubResponse, *contract.Error) {
 		if service, ok := a.service.(interface {
@@ -790,6 +793,20 @@ func (a *API) handler(c Caller) http.Handler {
 		for _, path := range []string{"/github/", contract.GitHubAgyPath} {
 			mux.HandleFunc(path, func(w http.ResponseWriter, r *http.Request) { a.githubTools(c, w, r) })
 		}
+		exit := agyexit.Handler((&net.Dialer{}).DialContext)
+		mux.HandleFunc(contract.AgyExitPath, func(w http.ResponseWriter, r *http.Request) {
+			// Only a box whose agent serves agy, by what the engine stored at its hello. A service that cannot say refuses.
+			if held, ok := a.service.(interface {
+				AgyExitAllowed(context.Context, contract.BoxID) (bool, error)
+			}); ok {
+				if allowed, err := held.AgyExitAllowed(r.Context(), c.Box); err == nil && allowed {
+					exit.ServeHTTP(w, r)
+					return
+				}
+			}
+			w.Header().Set("X-Dyna-Exit", "this box does not serve agy, so it has no agy exit")
+			w.WriteHeader(http.StatusForbidden)
+		})
 	}
 	// Never on the web listener, which Connect carries off the host.
 	if owner(c) && !c.Web && a.localModel != nil {

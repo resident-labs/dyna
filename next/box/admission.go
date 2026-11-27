@@ -25,6 +25,8 @@ const (
 	// PendingGPU says every card on the ready hosts is taken, up to its reserve, and PendingNoGPU that no ready host has one.
 	PendingGPU   PendingReason = "gpu"
 	PendingNoGPU PendingReason = "no-gpu"
+	// PendingNoAgy says no ready host has agy installed and signed in, for a box of an agy session.
+	PendingNoAgy PendingReason = "no-agy"
 )
 
 type Placement struct {
@@ -110,6 +112,12 @@ func Admit(hosts []Host, boxes []Box, request Box, only ...string) Placement {
 		if !h.Serves(request.Room) || existing == nil && !takes(h, request.ID, only) {
 			if reason == PendingNoReadyHost {
 				reason = PendingRoomHost
+			}
+			continue
+		}
+		if request.Agy && existing == nil && !h.Agy {
+			if reason == PendingNoReadyHost {
+				reason = PendingNoAgy
 			}
 			continue
 		}

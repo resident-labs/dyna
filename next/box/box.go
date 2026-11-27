@@ -57,6 +57,7 @@ type Host struct {
 	CheckedAt time.Time
 	Pool      string         // the pool that holds this node
 	GPUs      []contract.GPU // the cards its CDI spec offers, from the latest probe
+	Agy       bool           // agy is installed and signed in on it, from the latest probe
 	Box       contract.BoxID // the one box a per-session node serves
 	// Services are the services placed here, which admission counts first (5.5, 5.18).
 	Services []ServiceHold
@@ -78,6 +79,8 @@ type Box struct {
 	// is above 0 and Host is set, and kept while the box lives there.
 	GPU     contract.GPUGiB
 	GPUCard int
+	// Agy is set for a box of an agy session: it waits for a host that has agy.
+	Agy bool
 }
 
 type TransitionError struct{ From, To contract.BoxState }

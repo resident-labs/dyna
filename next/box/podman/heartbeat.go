@@ -33,6 +33,7 @@ type Load struct {
 	CPUs                                   int               // Cores of an exec-only host's whole machine; zero on other hosts and when it printed none.
 	ExecOnly                               bool              // An exec-only host: the figures are the whole machine's, for display only.
 	GPUs                                   *[]contract.GPU   // The cards the host has, when this beat probed for them: none is a probe that found none.
+	Agy                                    *bool             // Whether the host has agy installed and signed in, when this beat probed for it; nil when it did not.
 }
 
 // LocalDisk reads the disk at path on this machine with the host probe. It returns zeros when the probe fails.
@@ -105,7 +106,7 @@ func (h *Host) Heartbeat(ctx context.Context, ticks <-chan time.Time, layout box
 				if h.services != nil {
 					ids = h.services()
 				}
-				args := []string{"bash", "-c", heartbeatScript, "dyna", layout.HostData, layout.HostShareMount(), probe, layout.HostBinary()}
+				args := []string{"bash", "-c", heartbeatScript, "dyna", layout.HostData, layout.HostShareMount(), probe, layout.HostBinary(), layout.HostAgyBinary(), layout.HostAgyAccount()}
 				for _, id := range ids {
 					args = append(args, string(id))
 				}
@@ -117,7 +118,7 @@ func (h *Host) Heartbeat(ctx context.Context, ticks <-chan time.Time, layout box
 					return
 				}
 				failures++
-				load.Probe, load.GPUs = ProbeFailed, nil
+				load.Probe, load.GPUs, load.Agy = ProbeFailed, nil, nil
 				if failures >= box.ProbeFailureLimit {
 					load.Health = contract.HostDegraded
 				}
@@ -142,10 +143,10 @@ func (h *Host) Heartbeat(ctx context.Context, ticks <-chan time.Time, layout box
 			}
 			misses, busy, failures = 0, false, 0
 			load.Health, load.Probe = contract.HostHealthy, ProbeGood
-			load.GPUs = nil
+			load.GPUs, load.Agy = nil, nil
 			if probe == "gpu" && !execOnly {
 				gpus := parseGPUs(out)
-				load.GPUs = &gpus
+				load.GPUs, load.Agy = &gpus, parseAgy(out)
 			}
 			beats++
 			if execOnly {
@@ -263,4 +264,22 @@ func parseGPUs(out []byte) []contract.GPU {
 	}
 	slices.SortFunc(gpus, func(a, b contract.GPU) int { return a.Index - b.Index })
 	return gpus
+}
+
+// agyScript says whether the host has agy: its program is an executable file at $5 and the signed-in folder is a directory at $6, on
+// the same beat as the GPU probe. It only stats, and never opens the folder.
+const agyScript = `if [ "$3" = gpu ]; then
+if [ -f "$5" ] && [ -x "$5" ] && [ -d "$6" ]; then echo dyna-agy 1; else echo dyna-agy 0; fi
+fi
+`
+
+// parseAgy reads agyScript's output. A host that printed no dyna-agy line (an older script, or no probe this beat) is not probed, nil.
+func parseAgy(out []byte) *bool {
+	for _, line := range strings.Split(string(out), "\n") {
+		if text, ok := strings.CutPrefix(line, "dyna-agy "); ok && (text == "0" || text == "1") {
+			has := text == "1"
+			return &has
+		}
+	}
+	return nil
 }

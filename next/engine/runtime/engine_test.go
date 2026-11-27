@@ -23,6 +23,7 @@ func (f *fakeRegistrar) AddHost(context.Context, contract.HostAddRequest) (bool,
 }
 
 func (*fakeRegistrar) HostLoad(context.Context, []contract.HostSummary) error { return nil }
+func (*fakeRegistrar) SeedAgy(context.Context, contract.HostName) error       { return nil }
 
 func TestHostAddRequiresOwnerAndConfirmation(t *testing.T) {
 	f := &fakeRegistrar{}

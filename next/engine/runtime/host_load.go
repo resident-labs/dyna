@@ -17,6 +17,7 @@ import (
 type heartbeatStore interface {
 	RecordHostHeartbeat(context.Context, contract.HostName, bool, *int64, int64, time.Time) error
 	SetHostGPUs(context.Context, contract.HostName, []contract.GPU) error
+	SetHostAgy(context.Context, contract.HostName, bool) error
 }
 
 type hostLoad struct {
@@ -52,6 +53,13 @@ func (b *Boxes) reportHeartbeat(ctx context.Context, name contract.HostName, ok 
 	if ok && load.Probe != podman.ProbeFailed && load.GPUs != nil {
 		if err := b.HeartbeatStore.SetHostGPUs(ctx, name, *load.GPUs); err != nil {
 			log.Printf("host %s: record GPUs: %v", name, err)
+		}
+	}
+	// A beat that did not probe, or an older box binary that printed no dyna-agy line, leaves the last value: such a host is not
+	// treated as having agy until a probe says so, and is never an error.
+	if ok && load.Probe != podman.ProbeFailed && load.Agy != nil {
+		if err := b.HeartbeatStore.SetHostAgy(ctx, name, *load.Agy); err != nil {
+			log.Printf("host %s: record agy: %v", name, err)
 		}
 	}
 	b.Pressure.Reconciler().Kick()

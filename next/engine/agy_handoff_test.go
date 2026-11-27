@@ -54,15 +54,23 @@ func TestHarnessSwitchPigToAgyAndBack(t *testing.T) {
 	}
 }
 
-func TestHarnessSwitchToAgyNeedsHermeslab(t *testing.T) {
+func TestHarnessSwitchToAgyNeedsAHostWithAgy(t *testing.T) {
 	s, room, _, owner := agySetup(t)
 	sid := startOn(t, s, room, "away", "other", "host")
 	_, e := s.SessionSetProfile(t.Context(), owner, contract.SessionSetProfileRequest{Session: sid, Profile: "gem"})
-	if e == nil || e.Code != contract.ErrConflict || !strings.Contains(e.Message, "runs only on host hermeslab") && !strings.Contains(e.Message, "agy runs only on host hermeslab") {
+	if e == nil || e.Code != contract.ErrConflict || !strings.Contains(e.Message, "does not have agy installed and signed in") {
 		t.Fatalf("err = %v", e)
 	}
 	if session, err := s.store.Session(t.Context(), sid); err != nil || session.Profile != "other" || session.Handoff {
 		t.Fatalf("a refused switch changed the session: %+v %v", session, err)
+	}
+	// The same session switches once its own host reports agy.
+	if err := s.store.SetHostAgy(t.Context(), "host", true); err != nil {
+		t.Fatal(err)
+	}
+	readySession(t, s, sid)
+	if _, e := s.SessionSetProfile(t.Context(), owner, contract.SessionSetProfileRequest{Session: sid, Profile: "gem"}); e != nil {
+		t.Fatal(e)
 	}
 }
 
@@ -170,7 +178,7 @@ func TestHelloNamesEachHandoff(t *testing.T) {
 func TestRunningAgyTurnKeepsItsHarnessThroughASwitchThereAndBack(t *testing.T) {
 	s, room, _, owner := agySetup(t)
 	ctx := t.Context()
-	sid := startOn(t, s, room, "back", "gem", "")
+	sid := startOn(t, s, room, "back", "gem", "hermeslab")
 	readySession(t, s, sid)
 	openTurn(t, s, ctx, room, sid, "t1")
 	for _, profile := range []contract.ProfileName{"other", "gem"} {

@@ -51,9 +51,12 @@ type Config struct {
 	Instructions, ModelInstructions string
 	ProjectInstructions             []string
 	MCPServers                      []MCPServer
-	New                             bool          // a fresh conversation instead of resuming the stored one
-	CancelTimeout                   time.Duration // wait for the prompt's response after session/cancel, then kill; default 15s as T3 (ARUN:92)
-	Notice                          func(string)  // out-of-turn warnings
+	// Proxy is the loopback address of the HTTPS proxy agy reaches Google through (host:port). It is set in agy's environment, with every
+	// other proxy variable of the host dropped, and never left out by the caller that runs agy in a box.
+	Proxy         string
+	New           bool          // a fresh conversation instead of resuming the stored one
+	CancelTimeout time.Duration // wait for the prompt's response after session/cancel, then kill; default 15s as T3 (ARUN:92)
+	Notice        func(string)  // out-of-turn warnings
 	// Handoff is the earlier conversation as handoff.Build renders it. It starts a fresh agy session (New, or one agy could not resume)
 	// and rides once on that session's first prompt (handoff.Prompt, T3 ContextHandoffDelivery.ts withInlineContext). It is ignored when the
 	// stored session resumes. It is kept in agy-session.json until agy has accepted the prompt, so a restart delivers it too.
@@ -226,6 +229,9 @@ var dropped = []string{
 	"PYTHONUNBUFFERED", "ELECTRON_RUN_AS_NODE", "CHROME_CRASHPAD_PIPE_NAME", "TMPDIR",
 }
 
+// proxyVars are the host's own proxy settings, which a proxied agy does not inherit.
+var proxyVars = []string{"HTTPS_PROXY", "HTTP_PROXY", "ALL_PROXY", "NO_PROXY"}
+
 var caBundles = []string{"/etc/ssl/certs/ca-bundle.crt", "/etc/ssl/certs/ca-certificates.crt", "/etc/pki/tls/certs/ca-bundle.crt", "/etc/ssl/cert.pem"}
 
 // browserCommand is BROWSER: a command that opens nothing and exits 0, as T3's helper does (ASUP:56-60, 198-200, 239): agy must
@@ -236,7 +242,7 @@ const browserCommand = `'/bin/sh' '-c' 'exit 0' '--' '%s'`
 // environment is T3's agent environment (ASUP:202-246). HOME and PATH come from base. T3's Electron-as-node variable is left
 // out, as there is no helper to run with it. SSH_CONNECTION is the host's, else a fake one (ASUP:230-234), so the
 // 1.5 CLI keeps the login in the profile and not in the OS keyring.
-func environment(base []string, geminiDir, tmp string) []string {
+func environment(base []string, geminiDir, tmp, proxy string) []string {
 	var env []string
 	hasCA, hasSSH, nix := false, false, ""
 	for _, kv := range base {
@@ -248,6 +254,9 @@ func environment(base []string, geminiDir, tmp string) []string {
 			nix = value
 		}
 		// T3 matches the names case-insensitively (ASUP:204-209).
+		if proxy != "" && slices.Contains(proxyVars, strings.ToUpper(name)) {
+			continue
+		}
 		if !slices.Contains(dropped, strings.ToUpper(name)) {
 			env = append(env, kv)
 		}
@@ -256,6 +265,14 @@ func environment(base []string, geminiDir, tmp string) []string {
 		"BROWSER="+browserCommand, "PYTHONUNBUFFERED=1", "TMPDIR="+tmp)
 	if !hasSSH {
 		env = append(env, "SSH_CONNECTION=127.0.0.1 0 127.0.0.1 0")
+	}
+	if proxy != "" {
+		// Configured, not enforced: a client that honours these sends its requests to the box's agy proxy, and one that ignores them connects
+		// directly. Loopback is left out, which is how agy reaches its MCP servers.
+		for _, name := range []string{"HTTPS_PROXY", "HTTP_PROXY"} {
+			env = append(env, name+"=http://"+proxy, strings.ToLower(name)+"=http://"+proxy)
+		}
+		env = append(env, "NO_PROXY=127.0.0.1,localhost,::1", "no_proxy=127.0.0.1,localhost,::1")
 	}
 	if !hasCA {
 		// Relative paths would resolve differently in the project directory (ASUP:443-469).
@@ -350,7 +367,7 @@ func (h *Harness) spawn() (p *process, err error) {
 	}()
 	cmd := exec.Command(h.cfg.Binary, "acp", "--gemini-dir", h.cfg.GeminiDir, "--app-data-dir", "antigravity-acp")
 	cmd.Dir = h.cfg.Dir
-	cmd.Env = environment(os.Environ(), h.cfg.GeminiDir, tmp)
+	cmd.Env = environment(os.Environ(), h.cfg.GeminiDir, tmp, h.cfg.Proxy)
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	stdin, err := cmd.StdinPipe()
 	if err != nil {

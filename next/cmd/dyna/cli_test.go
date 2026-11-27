@@ -69,6 +69,7 @@ type fakeClient struct {
 	goalDone       contract.GoalDoneRequest
 	host           contract.HostAddRequest
 	hostLimit      *contract.HostSetLimitsRequest
+	agySeed        *contract.HostAgySeedRequest
 	hostSet        *contract.HostSetRequest
 	profiles       []contract.ProfileEntry
 	profileSet     *contract.ProfileSetRequest
@@ -222,6 +223,10 @@ func (f *fakeClient) HostList(context.Context, contract.HostListRequest) (contra
 func (f *fakeClient) HostAdd(_ context.Context, q contract.HostAddRequest) (contract.HostAddResponse, error) {
 	f.host = q
 	return contract.HostAddResponse{NoSwap: f.hostNoSwap}, nil
+}
+func (f *fakeClient) HostAgySeed(_ context.Context, q contract.HostAgySeedRequest) (contract.HostAgySeedResponse, error) {
+	f.agySeed = &q
+	return contract.HostAgySeedResponse{}, nil
 }
 func (f *fakeClient) HostSetLimits(_ context.Context, q contract.HostSetLimitsRequest) (contract.HostSetLimitsResponse, error) {
 	f.hostLimit = &q
@@ -1042,5 +1047,13 @@ func TestServiceSendCLI(t *testing.T) {
 	got := runCLI(t, f, "service", "send", "--room", "room_1", "agent-chat", "#general", "hello world")
 	if strings.TrimSpace(got) != "out_1" {
 		t.Fatalf("service send output = %q, want out_1", got)
+	}
+}
+
+func TestAgySeedMapsHost(t *testing.T) {
+	f := &fakeClient{}
+	runCLI(t, f, "agy", "seed", "node")
+	if f.agySeed == nil || f.agySeed.Host != "node" {
+		t.Fatalf("%+v", f.agySeed)
 	}
 }

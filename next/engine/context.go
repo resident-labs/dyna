@@ -148,7 +148,7 @@ func (s *Service) ContextSnapshot(ctx context.Context, caller contract.Principal
 				line += fmt.Sprintf("; max concurrent %d", p.MaxConcurrent)
 			}
 			if p.Harness == contract.HarnessAgy {
-				line += "; harness agy: Google's agent with its own tools plus Dyna's, hermeslab only"
+				line += "; harness agy: Google's agent with its own tools plus Dyna's, on the hosts that host list marks agy"
 			}
 			lines = append(lines, line)
 		}

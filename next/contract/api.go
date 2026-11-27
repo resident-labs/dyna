@@ -50,6 +50,7 @@ const (
 	MethodDeliveryDone            Method = "delivery.done"
 	MethodHostAdd                 Method = "host.add"
 	MethodHostSetLimits           Method = "host.set_limits"
+	MethodHostAgySeed             Method = "host.agy_seed"
 	MethodHostSet                 Method = "host.set"
 	MethodHostList                Method = "host.list"
 	MethodAccountsList            Method = "accounts.list"
@@ -422,6 +423,13 @@ type HostSetLimitsRequest struct {
 }
 type HostSetLimitsResponse struct{}
 
+// HostAgySeedRequest copies the signed-in agy account folder, and the program if the host has none, to a host from the one the owner
+// signed in on, once: a host that already has an account folder is refused, and the folder is never replaced in place.
+type HostAgySeedRequest struct {
+	Host HostName `json:"host"`
+}
+type HostAgySeedResponse struct{}
+
 // HostSetRequest turns a host's two switches, each on its own; a nil one stays as it is. With agents off no new session box
 // lands on the host, and with CI off the CI pool starts no runner there, though a repository still names it. Both off
 // disables the host and keeps it registered, as before. A host added exec only (HostAddRequest.ExecOnly) stays exec only
@@ -502,6 +510,7 @@ type HostSummary struct {
 	CIScale      int                  `json:"ciScale,omitempty"`
 	CI           bool                 `json:"ci,omitempty"`          // the CI pool may start runners on this added host
 	ExecOnly     bool                 `json:"execOnly,omitempty"`    // added exec only: host-exec runs, no boxes or runners
+	Agy          bool                 `json:"agy,omitempty"`         // agy is installed and signed in here, so sessions on an agy profile may run here
 	Runners      int                  `json:"runners,omitempty"`     // the CI runners on this added host now
 	Rooms        []RoomID             `json:"rooms,omitempty"`       // the rooms this added host serves (host.set_limits); none means every room
 	GPUs         []GPU                `json:"gpus,omitempty"`        // its cards, each with the VRAM boxes have requested of it
@@ -795,11 +804,39 @@ type Harness string
 
 const (
 	HarnessPig Harness = "pig" // the default, and the empty value of an older profile
-	HarnessAgy Harness = "agy" // Google's Antigravity agent over ACP, on host hermeslab only
+	HarnessAgy Harness = "agy" // Google's Antigravity agent over ACP, on a host that reports agy
 )
 
 // AgyGeminiDir is where a box sees the signed-in agy profile folder.
 const AgyGeminiDir = "/opt/agy/account"
+
+// AgyExitPath is the box-socket route that joins agy's CONNECT to a Google host through the engine host; AgyExitAddr is where the box
+// agent listens for agy's proxy connections.
+const (
+	AgyExitPath = "/agy-exit/"
+	AgyExitAddr = "127.0.0.1:7782"
+)
+
+// agyExitDomains are the domains agy's Google traffic goes to: the host and every name below it.
+var agyExitDomains = []string{"googleapis.com", "google.com", "gstatic.com", "googleusercontent.com"}
+
+// AgyExitHost says a CONNECT target host is Google's, and returns its normal form (lower case, no trailing dot). The box's listener sends
+// such a host through the engine's exit and the engine serves no other, so the one function decides both: an address, an empty label
+// or a name with anything but letters, digits and hyphens is not Google's.
+func AgyExitHost(host string) (string, bool) {
+	host = strings.TrimSuffix(strings.ToLower(host), ".")
+	for _, label := range strings.Split(host, ".") {
+		if label == "" || strings.Trim(label, "abcdefghijklmnopqrstuvwxyz0123456789-") != "" {
+			return "", false
+		}
+	}
+	for _, domain := range agyExitDomains {
+		if host == domain || strings.HasSuffix(host, "."+domain) {
+			return host, true
+		}
+	}
+	return "", false
+}
 
 // GitHubAgyPath is where the box socket serves GitHub's tools as agy declares them (short descriptions, help behind github_help); /github/ is the full listing.
 const GitHubAgyPath = "/github-agy/"
@@ -808,6 +845,9 @@ const GitHubAgyPath = "/github-agy/"
 type BoxAgy struct {
 	Binary    string `json:"binary"`
 	GeminiDir string `json:"geminiDir"`
+	// Exit is the engine route agy reaches Google through (AgyExitPath); a hello without it is from an engine that has none, and the box
+	// then does not open agy, which has no exit to be pointed at.
+	Exit string `json:"exit,omitempty"`
 }
 
 type ThinkingLevel string

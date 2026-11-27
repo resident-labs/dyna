@@ -146,3 +146,25 @@ func TestAdmissionKeepsAPlacedBoxOnItsCard(t *testing.T) {
 		t.Fatalf("its card is full and the other is free: %+v", got)
 	}
 }
+
+// A box of an agy session waits for a host that reports agy; a box already on a host keeps it.
+func TestAdmissionPlacesAnAgyBoxOnAHostWithAgy(t *testing.T) {
+	size, _ := box.Size(contract.BoxSizeAgent)
+	plain, with := gpuHost("a"), gpuHost("b")
+	with.Agy = true
+	request := box.Box{ID: "x", Room: "room", Size: size, State: contract.BoxPending, Agy: true}
+	if p := box.Admit([]box.Host{plain, with}, nil, request); p.Host != "b" {
+		t.Fatalf("placed on %q", p.Host)
+	}
+	if p := box.Admit([]box.Host{plain}, nil, request); p.Host != "" || p.Reason != box.PendingNoAgy {
+		t.Fatalf("no host has agy: %+v", p)
+	}
+	request.Agy = false
+	if p := box.Admit([]box.Host{plain}, nil, request); p.Host != "a" {
+		t.Fatalf("a pig box needs no agy: %+v", p)
+	}
+	request.Agy, request.Host = true, "a"
+	if p := box.Admit([]box.Host{plain}, []box.Box{request}, request); p.Host != "a" {
+		t.Fatalf("a box that already has its host: %+v", p)
+	}
+}
