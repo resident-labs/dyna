@@ -478,10 +478,11 @@ func TestDisabledCodexRejectedRefreshTokenDoesNotSpin(t *testing.T) {
 	if job == nil {
 		t.Fatal("expected markRefreshPending to create job when NextRefreshAfter is in the past")
 	}
-	if !m.beginRefreshJob(ctx, job) {
+	release := m.beginRefreshJob(ctx, job)
+	if release == nil {
 		t.Fatal("expected beginRefreshJob to succeed")
 	}
-	_, _ = m.refreshAuthForRequestAtEpoch(ctx, a.ID, "", epoch)
+	_, _ = m.refreshAuthForRequestAtEpoch(ctx, a.ID, "", epoch, release)
 	m.finishRefreshJob(job, time.Time{}, false)
 
 	afterJob, _ := m.GetByID(a.ID)

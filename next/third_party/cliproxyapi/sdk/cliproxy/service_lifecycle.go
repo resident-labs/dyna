@@ -244,9 +244,8 @@ func (s *Service) Run(ctx context.Context) error {
 	}
 }
 
-// Shutdown stops background workers and immediately closes the HTTP server.
-// It ensures all resources are properly cleaned up and connections are closed.
-// The shutdown is idempotent and can be called multiple times safely.
+// Shutdown gives scheduled credential saves a short grace period, then tears
+// down the service without draining HTTP requests. Teardown runs once.
 //
 // Parameters:
 //   - ctx: The context for controlling the shutdown timeout
@@ -257,12 +256,20 @@ func (s *Service) Shutdown(ctx context.Context) error {
 	if s == nil {
 		return nil
 	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	var refreshErr error
+	if s.coreManager != nil {
+		// The Dyna supervisor can kill the proxy 2s after SIGTERM. Leave time
+		// for teardown rather than spending the full service shutdown budget.
+		refreshCtx, cancel := context.WithTimeout(ctx, time.Second)
+		refreshErr = s.coreManager.DrainAutoRefresh(refreshCtx)
+		cancel()
+	}
+
 	var shutdownErr error
 	s.shutdownOnce.Do(func() {
-		if ctx == nil {
-			ctx = context.Background()
-		}
-
 		s.homeMu.Lock()
 		runCancel := s.runCancel
 		s.homeMu.Unlock()
@@ -391,7 +398,7 @@ func (s *Service) Shutdown(ctx context.Context) error {
 
 		usage.StopDefault()
 	})
-	return shutdownErr
+	return errors.Join(refreshErr, shutdownErr)
 }
 
 func (s *Service) ensureAuthDir() error {

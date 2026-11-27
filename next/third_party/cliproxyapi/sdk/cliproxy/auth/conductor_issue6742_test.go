@@ -147,13 +147,15 @@ func TestIssue6742_RejectedUnexpiredJWTRecoversViaBackgroundRefreshAfterTransien
 	executor.mu.Unlock()
 
 	loop := newAuthAutoRefreshLoop(m, 5*time.Second, 1)
+	m.refreshLoop = loop
 	loop.handleDueAuth(context.Background(), retryTime, primary.ID)
 	select {
 	case job := <-loop.jobs:
-		if !m.beginRefreshJob(context.Background(), job) {
+		release := m.beginRefreshJob(context.Background(), job)
+		if release == nil {
 			t.Fatal("beginRefreshJob returned false")
 		}
-		if _, errRefresh := m.refreshAuthForRequestAtEpoch(context.Background(), job.id, "", job.registrationEpoch); errRefresh != nil {
+		if _, errRefresh := m.refreshAuthForRequestAtEpoch(context.Background(), job.id, "", job.registrationEpoch, release); errRefresh != nil {
 			t.Fatalf("background refreshAuthForRequestAtEpoch error = %v", errRefresh)
 		}
 		m.finishRefreshJob(job, time.Time{}, false)
@@ -281,13 +283,15 @@ func TestIssue6742_InStreamUnauthorizedMarksRejectedTokenAndSchedulesRefresh(t *
 
 	// Background refresh loop must pick it up and recover the credential.
 	loop := newAuthAutoRefreshLoop(m, 5*time.Second, 1)
+	m.refreshLoop = loop
 	loop.handleDueAuth(context.Background(), time.Now(), primary.ID)
 	select {
 	case job := <-loop.jobs:
-		if !m.beginRefreshJob(context.Background(), job) {
+		release := m.beginRefreshJob(context.Background(), job)
+		if release == nil {
 			t.Fatal("beginRefreshJob returned false")
 		}
-		if _, errRefresh := m.refreshAuthForRequestAtEpoch(context.Background(), job.id, "", job.registrationEpoch); errRefresh != nil {
+		if _, errRefresh := m.refreshAuthForRequestAtEpoch(context.Background(), job.id, "", job.registrationEpoch, release); errRefresh != nil {
 			t.Fatalf("background refresh error = %v", errRefresh)
 		}
 		m.finishRefreshJob(job, time.Time{}, false)

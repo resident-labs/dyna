@@ -60,10 +60,11 @@ func TestDisabledRefreshOutcomeJobCycle(t *testing.T) {
 				if job == nil {
 					t.Fatal("refresh was not queued")
 				}
-				if !m.beginRefreshJob(ctx, job) {
+				release := m.beginRefreshJob(ctx, job)
+				if release == nil {
 					t.Fatal("refresh did not begin")
 				}
-				refreshed, err := m.refreshAuthForRequestAtEpoch(ctx, a.ID, "", job.registrationEpoch)
+				refreshed, err := m.refreshAuthForRequestAtEpoch(ctx, a.ID, "", job.registrationEpoch, release)
 				if err != nil {
 					t.Fatal(err)
 				}

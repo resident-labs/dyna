@@ -48,23 +48,16 @@ func (m *Manager) StartAutoRefresh(parent context.Context, interval time.Duratio
 		interval = refreshCheckInterval
 	}
 
+	ctx, cancelCtx := context.WithCancel(parent)
+	loop := newAuthAutoRefreshLoop(m, interval, m.refreshWorkers())
 	m.mu.Lock()
 	cancelPrev := m.refreshCancel
-	m.refreshCancel = nil
-	m.refreshLoop = nil
+	m.refreshCancel = cancelCtx
+	m.refreshLoop = loop
 	m.mu.Unlock()
 	if cancelPrev != nil {
 		cancelPrev()
 	}
-
-	ctx, cancelCtx := context.WithCancel(parent)
-	workers := m.refreshWorkers()
-	loop := newAuthAutoRefreshLoop(m, interval, workers)
-
-	m.mu.Lock()
-	m.refreshCancel = cancelCtx
-	m.refreshLoop = loop
-	m.mu.Unlock()
 
 	loop.rebuild(time.Now())
 	go loop.run(ctx)
@@ -73,19 +66,40 @@ func (m *Manager) StartAutoRefresh(parent context.Context, interval time.Duratio
 // StopAutoRefresh cancels the background refresh loop, if running.
 // It also stops the selector if it implements StoppableSelector.
 func (m *Manager) StopAutoRefresh() {
+	m.stopAutoRefreshLoop()
+	// Stop selector if it implements StoppableSelector (e.g., SessionAffinitySelector)
+	sel := m.Selector()
+	if stoppable, ok := sel.(StoppableSelector); ok && stoppable != nil {
+		stoppable.Stop()
+	}
+}
+
+// DrainAutoRefresh stops scheduling and waits for accepted jobs to finish their
+// credential save attempts, not their post-save hooks. It leaves the selector
+// running for the service's normal teardown.
+func (m *Manager) DrainAutoRefresh(ctx context.Context) error {
+	idle := m.stopAutoRefreshLoop()
+	if idle == nil {
+		return nil
+	}
+	select {
+	case <-idle:
+		return nil
+	case <-ctx.Done():
+		return fmt.Errorf("drain auth auto-refresh: %w", ctx.Err())
+	}
+}
+
+func (m *Manager) stopAutoRefreshLoop() <-chan struct{} {
 	m.mu.Lock()
-	cancel := m.refreshCancel
+	cancel, idle := m.refreshCancel, m.refreshIdle
 	m.refreshCancel = nil
 	m.refreshLoop = nil
 	m.mu.Unlock()
 	if cancel != nil {
 		cancel()
 	}
-	// Stop selector if it implements StoppableSelector (e.g., SessionAffinitySelector)
-	sel := m.Selector()
-	if stoppable, ok := sel.(StoppableSelector); ok && stoppable != nil {
-		stoppable.Stop()
-	}
+	return idle
 }
 
 func (m *Manager) queueRefreshReschedule(authID string) {
@@ -387,15 +401,29 @@ func (m *Manager) markRefreshPending(loop *authAutoRefreshLoop, id string, regis
 	return job
 }
 
-func (m *Manager) beginRefreshJob(ctx context.Context, job *authRefreshJob) bool {
+// beginRefreshJob returns the release for an accepted job's save attempt.
+// The loop check and enrollment share the lock with stopAutoRefreshLoop.
+func (m *Manager) beginRefreshJob(ctx context.Context, job *authRefreshJob) func() {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	auth := m.auths[job.id]
-	if ctx.Err() != nil || m.refreshJobs[job.id] != job || auth == nil || auth.RegistrationEpoch != job.registrationEpoch {
-		return false
+	if ctx.Err() != nil || m.refreshLoop != job.loop || m.refreshJobs[job.id] != job || auth == nil || auth.RegistrationEpoch != job.registrationEpoch {
+		return nil
 	}
 	job.running = true
-	return true
+	if m.refreshSaves == 0 {
+		m.refreshIdle = make(chan struct{})
+	}
+	m.refreshSaves++
+	return sync.OnceFunc(func() {
+		m.mu.Lock()
+		defer m.mu.Unlock()
+		m.refreshSaves--
+		if m.refreshSaves == 0 {
+			close(m.refreshIdle)
+			m.refreshIdle = nil
+		}
+	})
 }
 
 func (m *Manager) finishRefreshJob(job *authRefreshJob, retryAt time.Time, queuedOnly bool) {
@@ -1178,7 +1206,7 @@ func (m *Manager) refreshAuth(ctx context.Context, id string) {
 // failedAccessToken lets concurrent callers reuse a refresh that already replaced the
 // access token that produced the unauthorized response.
 func (m *Manager) refreshAuthForRequest(ctx context.Context, id, failedAccessToken string) (*Auth, error) {
-	return m.refreshAuthForRequestAtEpoch(ctx, id, failedAccessToken, 0)
+	return m.refreshAuthForRequestAtEpoch(ctx, id, failedAccessToken, 0, nil)
 }
 
 type forceRefreshContextKey struct{}
@@ -1226,7 +1254,11 @@ func (m *Manager) markRejectedAccessToken(id, failedAccessToken string) {
 	m.mu.Unlock()
 }
 
-func (m *Manager) refreshAuthForRequestAtEpoch(ctx context.Context, id, failedAccessToken string, registrationEpoch uint64) (*Auth, error) {
+func (m *Manager) refreshAuthForRequestAtEpoch(ctx context.Context, id, failedAccessToken string, registrationEpoch uint64, savedOrAborted func()) (*Auth, error) {
+	if savedOrAborted != nil {
+		// Release even if the refresh never reaches the save path.
+		defer savedOrAborted()
+	}
 	if m == nil {
 		return nil, errors.New("auth manager is nil")
 	}
@@ -1651,7 +1683,7 @@ func (m *Manager) refreshAuthForRequestAtEpoch(ctx context.Context, id, failedAc
 	}
 	// A successful refresh may have rotated upstream tokens after cancellation.
 	// Commit its result with context values intact; keep epoch checks and save ordering.
-	saved, errUpdate := m.UpdateRefreshedAuth(context.WithoutCancel(ctx), base, updated)
+	saved, errUpdate := m.updateInternal(context.WithoutCancel(ctx), base, updated, updateModeRefresh, savedOrAborted)
 	if errUpdate != nil {
 		// Warn, not debug: a restart after a lost persist fails with invalid_grant.
 		log.WithFields(log.Fields{"auth_id": auth.ID, "credential": auth.ID, "provider": auth.Provider}).Warnf("persist refreshed auth %s (%s) failed: %v", auth.Provider, auth.ID, errUpdate)
