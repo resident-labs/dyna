@@ -29,16 +29,16 @@ echo "dyna-agy-arch $(uname -s -m)"
 `
 
 // agyPackScript writes a tar of the members named after $1 (paths below $1) to stdout, leaving out by path what agy writes in a running
-// session: the conversations and their per-conversation brain (nearly all of an account folder's size), the logs, and the mcp, cache,
-// implicit and annotations state, which each session recreates. The sign-in and the config stay. A file that changes while tar reads it
-// (tar status 1) ends the pack with status 19 and not as a good archive, and then a second tar that holds only an empty .dyna-complete: an archive without it was cut short, which tar alone
-// cannot tell at a member boundary. Its stderr is dropped so that only the archive is on stdout. Nothing of the archive is written to a file.
+// session: the conversations and their per-conversation brain (nearly all of an account folder's size), the logs, and the annotations (per
+// session artifacts). The sign-in, the config and the mcp, cache and implicit state stay. A file that changes while tar reads it (tar
+// status 1) ends the pack with status 19 and not as a good archive. Then a second tar holds only an empty .dyna-complete: an archive
+// without it was cut short, which tar alone cannot tell at a member boundary. Its stderr is dropped so that only the archive is on stdout. Nothing of the archive is written to a file.
 const agyPackScript = `set -eu
 cd -- "$1"
 shift
 acp=accounts/main/antigravity-acp
 excludes=""
-for d in brain conversations log mcp cache implicit annotations; do excludes="$excludes --exclude=$acp/$d"; done
+for d in brain conversations log annotations; do excludes="$excludes --exclude=$acp/$d"; done
 marker=$(mktemp)
 trap 'rm -f -- "$marker"' EXIT
 st=0
