@@ -574,7 +574,10 @@ func (s *Store) EndTurn(ctx context.Context, session contract.SessionID, output 
 							}
 						}
 					}
-					if (reply.Reply.Target.Kind == contract.PrincipalSession || reply.Reply.Home.Kind == contract.ConversationDiscord && output.Final == "") && reply.Posted == "" && !slices.ContainsFunc(later, func(to contract.ReplyChannel) bool { return answers(to)(reply) }) {
+					// A mid-turn post to a session is not the result of the work still in progress.
+					owesSession := reply.Reply.Target.Kind == contract.PrincipalSession && len(ended) == 0
+					owesDiscord := reply.Reply.Home.Kind == contract.ConversationDiscord && output.Final == "" && reply.Posted == ""
+					if (owesSession || owesDiscord) && !slices.ContainsFunc(later, func(to contract.ReplyChannel) bool { return answers(to)(reply) }) {
 						later = append(later, reply.Reply)
 					}
 				}
@@ -650,11 +653,12 @@ func (s *Store) EndTurn(ctx context.Context, session contract.SessionID, output 
 					return err
 				}
 			}
-			// A post already answered, and the text of a turn that still waits adds no result to it.
+			// If the target got a post, a turn that still waits has no result to add.
 			if waiting && reply.Posted != "" && len(ended) == 0 {
 				continue
 			}
-			d := contract.Delivery{To: reply.Reply.Target, Surface: contract.SurfaceSession, Reply: contract.ReplyChannel{Kind: contract.ReplyPost, Target: event.From, Home: reply.Reply.Home}, Wake: reply.Posted == ""}
+			// The target may already have read the post; if not, dispatch can take both together.
+			d := contract.Delivery{To: reply.Reply.Target, Surface: contract.SurfaceSession, Reply: contract.ReplyChannel{Kind: contract.ReplyPost, Target: event.From, Home: reply.Reply.Home}, Wake: true}
 			// The engine opened this channel, so reach does not apply, but a reply to a parent that can't receive goes up.
 			if _, err := reroute(ctx, tx, event.From, &d); err != nil {
 				return err
