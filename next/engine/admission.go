@@ -153,6 +153,8 @@ func admissionReason(reason string) string {
 		return "GPU memory is reserved"
 	case box.PendingNoGPU:
 		return "no ready host has a GPU"
+	case box.PendingNoAgy:
+		return "no ready host has agy installed and signed in"
 	case box.PendingPoolNode:
 		return "waiting for a pool node"
 	case box.PendingPoolFailed:

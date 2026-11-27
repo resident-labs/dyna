@@ -64,29 +64,68 @@ func agySetup(t *testing.T) (*Service, contract.RoomID, contract.SessionID, cont
 	if err := s.store.AddHost(ctx, box.Host{Name: "hermeslab", State: box.HostReady, CPUs: 32, MemBytes: 64 * box.GiB, DiskBytes: 100 * box.GiB, CheckedAt: s.now()}); err != nil {
 		t.Fatal(err)
 	}
+	if err := s.store.SetHostAgy(ctx, "hermeslab", true); err != nil {
+		t.Fatal(err)
+	}
 	return s, room, worker, contract.Principal{Kind: contract.PrincipalOwner}
 }
 
-func TestAgySessionRunsOnHermeslabOnly(t *testing.T) {
-	s, room, _, owner := agySetup(t)
+func TestAgySessionRunsOnAHostThatHasAgy(t *testing.T) {
+	s, room, root, owner := agySetup(t)
 	ctx := t.Context()
-	for _, req := range []contract.SessionStartRequest{
-		{Room: room, Name: "a", Profile: "gem", Host: "host"},
-		{Room: room, Name: "b", Profile: "gem", SameHost: true},
-	} {
-		if _, e := s.SessionStart(ctx, owner, req); e == nil || !strings.Contains(e.Message, "runs only on host hermeslab") || !strings.Contains(e.Message, "pick a pig profile") {
-			t.Fatalf("%+v: %v", req, e)
-		}
+	start := func(name string, req contract.SessionStartRequest) *contract.Error {
+		req.Room, req.Name, req.Profile, req.Parent = room, name, "gem", root
+		_, e := s.SessionStart(ctx, owner, req)
+		return e
 	}
-	if _, e := s.SessionStart(ctx, owner, contract.SessionStartRequest{Room: room, Name: "c", Profile: "gem"}); e != nil {
+	// "host" has no agy: a requested host without it is refused with the next step, and one that has it is taken.
+	if e := start("a", contract.SessionStartRequest{Host: "host"}); e == nil || !strings.Contains(e.Message, "host host does not have agy installed and signed in") || !strings.Contains(e.Message, "host list") {
+		t.Fatalf("host without agy: %v", e)
+	}
+	if e := start("b", contract.SessionStartRequest{SameHost: true}); e == nil || !strings.Contains(e.Message, "does not have agy") {
+		t.Fatalf("sameHost beside a parent on a host without agy: %v", e)
+	}
+	if e := start("c", contract.SessionStartRequest{}); e != nil {
 		t.Fatal(e)
 	}
-	if _, e := s.SessionStart(ctx, owner, contract.SessionStartRequest{Room: room, Name: "d", Profile: "gem", Host: "hermeslab"}); e != nil {
+	if e := start("d", contract.SessionStartRequest{Host: "hermeslab"}); e != nil {
 		t.Fatal(e)
 	}
 	// A pig profile still goes where it is told.
 	if _, e := s.SessionStart(ctx, owner, contract.SessionStartRequest{Room: room, Name: "e", Profile: "other", Host: "host"}); e != nil {
 		t.Fatal(e)
+	}
+	// Once the other host has agy, it is taken, and sameHost works beside a parent there.
+	if err := s.store.SetHostAgy(ctx, "host", true); err != nil {
+		t.Fatal(err)
+	}
+	if e := start("f", contract.SessionStartRequest{Host: "host"}); e != nil {
+		t.Fatalf("host with agy: %v", e)
+	}
+	if e := start("g", contract.SessionStartRequest{SameHost: true}); e != nil {
+		t.Fatalf("sameHost on a host with agy: %v", e)
+	}
+}
+
+// With no host naming agy, a new agy session is refused, and the placement's choice is among the hosts that have it.
+func TestAgySessionWithNoAgyHostIsRefused(t *testing.T) {
+	s, room, _, owner := agySetup(t)
+	ctx := t.Context()
+	if err := s.store.SetHostAgy(ctx, "hermeslab", false); err != nil {
+		t.Fatal(err)
+	}
+	if _, e := s.SessionStart(ctx, owner, contract.SessionStartRequest{Room: room, Name: "x", Profile: "gem"}); e == nil || !strings.Contains(e.Message, "no host") || !strings.Contains(e.Message, "signs in to Antigravity") {
+		t.Fatalf("%v", e)
+	}
+	// An exec-only host or one with agents off never counts, even if it reports agy.
+	if err := s.store.AddHost(ctx, box.Host{Name: "exec", State: box.HostReady, ExecOnly: true, NoAgents: true, CheckedAt: s.now()}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.store.SetHostAgy(ctx, "exec", true); err != nil {
+		t.Fatal(err)
+	}
+	if _, e := s.SessionStart(ctx, owner, contract.SessionStartRequest{Room: room, Name: "y", Profile: "gem"}); e == nil || !strings.Contains(e.Message, "no host") {
+		t.Fatalf("an exec-only host with agy: %v", e)
 	}
 }
 
@@ -146,7 +185,7 @@ func TestAgyProfileShownInContext(t *testing.T) {
 			text = sec.Text
 		}
 	}
-	if !strings.Contains(text, "gem:") || !strings.Contains(text, "harness agy: Google's agent with its own tools plus Dyna's, hermeslab only") || strings.Contains(text, "other: taste 0, diagnostics 0, intelligence 0, cost 0; agy") {
+	if !strings.Contains(text, "gem:") || !strings.Contains(text, "harness agy: Google's agent with its own tools plus Dyna's, on the hosts that host list marks agy") || strings.Contains(text, "other: taste 0, diagnostics 0, intelligence 0, cost 0; agy") {
 		t.Fatalf("profiles section %q", text)
 	}
 }
@@ -192,6 +231,9 @@ func TestDiscordRouteRefusesAnAgySession(t *testing.T) {
 	f.s.profiles = config
 	owner := contract.Principal{Kind: contract.PrincipalOwner}
 	if err := f.s.store.AddHost(f.ctx, box.Host{Name: "hermeslab", State: box.HostReady, CPUs: 32, MemBytes: 64 * box.GiB, DiskBytes: 100 * box.GiB, CheckedAt: f.s.now()}); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.s.store.SetHostAgy(f.ctx, "hermeslab", true); err != nil {
 		t.Fatal(err)
 	}
 	if _, e := f.s.SessionStart(f.ctx, owner, contract.SessionStartRequest{Room: f.room, Name: "gemini", Profile: "gem"}); e != nil {

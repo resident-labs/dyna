@@ -6,7 +6,7 @@ import (
 	"strconv"
 )
 
-const schemaVersion = 132
+const schemaVersion = 133
 
 const agentsTable = `CREATE TABLE agents (id TEXT PRIMARY KEY, session TEXT NOT NULL REFERENCES sessions(id), turn TEXT NOT NULL, name TEXT NOT NULL, state TEXT NOT NULL, transcript TEXT NOT NULL DEFAULT '', start_offset INTEGER NOT NULL DEFAULT 0, started_at INTEGER NOT NULL, ended_at INTEGER NOT NULL DEFAULT 0, model TEXT NOT NULL DEFAULT '', input_tokens INTEGER NOT NULL DEFAULT 0, output_tokens INTEGER NOT NULL DEFAULT 0, cache_read_tokens INTEGER NOT NULL DEFAULT 0, cache_write_tokens INTEGER NOT NULL DEFAULT 0)`
 
@@ -15,6 +15,11 @@ const agentsTable = `CREATE TABLE agents (id TEXT PRIMARY KEY, session TEXT NOT 
 var steps = map[int][]string{
 	// A GitHub poll may outlive deletion and re-creation of a repository registration.
 	131: {`CREATE TABLE IF NOT EXISTS repo_registrations (repo TEXT PRIMARY KEY REFERENCES repos(repo) ON DELETE CASCADE, generation TEXT NOT NULL)`, `INSERT INTO repo_registrations(repo,generation) SELECT repo,lower(hex(randomblob(16))) FROM repos WHERE true ON CONFLICT(repo) DO NOTHING`},
+	// agy on any host that has it: a host reports whether agy is installed and signed in there, and a box of an agy session waits for such a host.
+	132: {
+		`ALTER TABLE hosts ADD COLUMN agy INTEGER NOT NULL DEFAULT 0`,
+		`ALTER TABLE boxes ADD COLUMN agy INTEGER NOT NULL DEFAULT 0`,
+	},
 	// agy: the events seq from which a session's fresh conversation needs a handoff (it changed harness), what its box said at its last
 	// hello (the handoff generation its container was made for, the harness it was told, and whether it can hand a conversation over),
 	// and the harness of the box each turn was dispatched on, which is the one that serves it.

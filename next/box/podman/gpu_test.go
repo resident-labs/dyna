@@ -115,3 +115,98 @@ func TestGPUScriptEndsWhenAToolHangs(t *testing.T) {
 		t.Fatalf("%q after %v: %v", out, time.Since(started), err)
 	}
 }
+
+func TestParseAgy(t *testing.T) {
+	yes, no := true, false
+	for _, tc := range []struct {
+		name, out string
+		want      *bool
+	}{
+		{"has agy", "dyna-agy 1\n", &yes},
+		{"has none", "dyna-agy 0\n", &no},
+		{"an older script prints no line: not probed", "dyna-gpu-cdi 0\n", nil},
+		{"noise", "warning\ndyna-agy x\ndyna-agy 1\n", &yes},
+	} {
+		if got := parseAgy([]byte(tc.out)); !reflect.DeepEqual(got, tc.want) {
+			t.Errorf("%s: %v, want %v", tc.name, got, tc.want)
+		}
+	}
+}
+
+// agyScript only stats: a program that is an executable file and a folder that is a directory make a host with agy, and nothing else does.
+func TestAgyScriptStatsTheProgramAndTheFolder(t *testing.T) {
+	dir := t.TempDir()
+	program, account := dir+"/antigravity", dir+"/accounts-main"
+	run := func(beat string) string {
+		out, err := exec.Command("bash", "-c", agyScript, "dyna", "/data", "/mount", beat, "/bin/dyna", program, account).CombinedOutput()
+		if err != nil {
+			t.Fatal(err, string(out))
+		}
+		return strings.TrimSpace(string(out))
+	}
+	if got := run("gpu"); got != "dyna-agy 0" {
+		t.Fatalf("nothing there: %q", got)
+	}
+	if err := os.WriteFile(program, []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(account, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if got := run("gpu"); got != "dyna-agy 0" {
+		t.Fatalf("a program that is not executable: %q", got)
+	}
+	if err := os.Chmod(program, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if got := run("gpu"); got != "dyna-agy 1" {
+		t.Fatalf("both there: %q", got)
+	}
+	if got := run("-"); got != "" {
+		t.Fatalf("a beat that does not probe printed %q", got)
+	}
+	if err := os.Remove(account); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(account, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if got := run("gpu"); got != "dyna-agy 0" {
+		t.Fatalf("the folder is a file: %q", got)
+	}
+}
+
+// The agy fact rides the GPU probe's beats; a host whose script says nothing of agy (an older binary) stays "not probed".
+func TestHeartbeatReportsAgyOnTheProbeBeat(t *testing.T) {
+	for _, tc := range []struct {
+		name, body string
+		want       *bool
+	}{{"says yes", "dyna-agy 1\n", ptr(true)}, {"says no", "dyna-agy 0\n", ptr(false)}, {"says nothing", "dyna-gpu-cdi 0\n", nil}} {
+		t.Run(tc.name, func(t *testing.T) {
+			h := newTestHost(t, &runner{body: tc.body})
+			ctx, cancel := context.WithCancel(context.Background())
+			ticks := make(chan time.Time)
+			loads := make(chan Load, 8)
+			done := make(chan struct{})
+			go func() {
+				defer close(done)
+				h.Heartbeat(ctx, ticks, box.Layout{HostData: "/data"}, func(ok bool, l Load) { loads <- l }, func(string, contract.PressureKind) {})
+			}()
+			for i := range 3 {
+				ticks <- time.Unix(1000, 0).Add(time.Duration(i) * 10 * time.Second)
+			}
+			cancel()
+			<-done
+			close(loads)
+			var got []*bool
+			for l := range loads {
+				got = append(got, l.Agy)
+			}
+			if len(got) < 2 || !reflect.DeepEqual(got[0], tc.want) || got[1] != nil {
+				t.Fatalf("Agy on the two beats: %v, want %v then not probed", got, tc.want)
+			}
+		})
+	}
+}
+
+func ptr[T any](v T) *T { return &v }

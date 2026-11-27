@@ -71,3 +71,34 @@ INSERT INTO hosts(name,ssh,state,cpus,mem_bytes,disk_bytes,checked_at) VALUES('h
 		t.Fatalf("after a restart: %+v, %v", got, err)
 	}
 }
+
+func TestHostKeepsItsAgyAndABoxItsNeedForOne(t *testing.T) {
+	ctx := context.Background()
+	s, err := Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = s.Close() }()
+	if _, err := s.writer.Exec(`INSERT INTO rooms(id,name,created_at,cpus,mem_bytes) VALUES('r','r',0,0,0);
+INSERT INTO hosts(name,ssh,state,cpus,mem_bytes,disk_bytes,checked_at) VALUES('h','ssh','ready',8,1,1,1)`); err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []bool{false, true, false} {
+		if err := s.SetHostAgy(ctx, "h", want); err != nil {
+			t.Fatal(err)
+		}
+		if hosts, err := s.Hosts(ctx); err != nil || len(hosts) != 1 || hosts[0].Agy != want {
+			t.Fatalf("after setting %v: %+v, %v", want, hosts, err)
+		}
+	}
+	at := time.Unix(10, 0)
+	event := contract.Event{ID: "e", Room: "r", Time: at, From: contract.Principal{Kind: contract.PrincipalEngine}, Body: contract.SessionStarted{}}
+	boxEvent := contract.Event{ID: "be", Room: "r", Time: at, From: contract.Principal{Kind: contract.PrincipalEngine}, Body: contract.BoxChanged{}}
+	if _, err := s.StartSession(ctx, Session{ID: "s", Room: "r", Name: "s", Profile: "p", Box: "b", Agy: true}, "", contract.BoxSizeAgent, "", event, boxEvent, "", false, "", "", 0); err != nil {
+		t.Fatal(err)
+	}
+	boxes, err := s.Boxes(ctx)
+	if err != nil || len(boxes) != 1 || !boxes[0].Agy {
+		t.Fatalf("boxes %+v, %v", boxes, err)
+	}
+}

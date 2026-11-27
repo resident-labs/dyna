@@ -53,10 +53,16 @@ type heartbeatRecord struct {
 type recordingHeartbeats struct {
 	records []heartbeatRecord
 	gpus    [][]contract.GPU
+	agy     []bool
 }
 
 func (r *recordingHeartbeats) SetHostGPUs(_ context.Context, _ contract.HostName, gpus []contract.GPU) error {
 	r.gpus = append(r.gpus, gpus)
+	return nil
+}
+
+func (r *recordingHeartbeats) SetHostAgy(_ context.Context, _ contract.HostName, agy bool) error {
+	r.agy = append(r.agy, agy)
 	return nil
 }
 
@@ -309,5 +315,24 @@ func TestReportHeartbeatStoresGPUsOnlyWhenProbed(t *testing.T) {
 	b.reportHeartbeat(context.Background(), "host", false, podman.Load{GPUs: &cards}, time.Time{})
 	if !reflect.DeepEqual(records.gpus, [][]contract.GPU{cards, none}) {
 		t.Fatalf("stored GPUs %+v, want the two probes of a reachable host", records.gpus)
+	}
+}
+
+func TestReportHeartbeatStoresAgyOnlyWhenProbed(t *testing.T) {
+	st, err := store.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+	records := &recordingHeartbeats{}
+	b := &Boxes{HeartbeatStore: records, Pressure: engine.New(st, nil, nil, time.Now)}
+	yes, no := true, false
+	b.reportHeartbeat(context.Background(), "host", true, podman.Load{}, time.Time{})
+	b.reportHeartbeat(context.Background(), "host", true, podman.Load{Agy: &yes}, time.Time{})
+	b.reportHeartbeat(context.Background(), "host", true, podman.Load{Agy: &no}, time.Time{})
+	b.reportHeartbeat(context.Background(), "host", false, podman.Load{Agy: &yes}, time.Time{})
+	b.reportHeartbeat(context.Background(), "host", true, podman.Load{Probe: podman.ProbeFailed, Agy: &yes}, time.Time{})
+	if !reflect.DeepEqual(records.agy, []bool{true, false}) {
+		t.Fatalf("stored agy %v, want the two probes of a reachable host", records.agy)
 	}
 }

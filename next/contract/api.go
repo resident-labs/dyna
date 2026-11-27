@@ -502,6 +502,7 @@ type HostSummary struct {
 	CIScale      int                  `json:"ciScale,omitempty"`
 	CI           bool                 `json:"ci,omitempty"`          // the CI pool may start runners on this added host
 	ExecOnly     bool                 `json:"execOnly,omitempty"`    // added exec only: host-exec runs, no boxes or runners
+	Agy          bool                 `json:"agy,omitempty"`         // agy is installed and signed in here, so sessions on an agy profile may run here
 	Runners      int                  `json:"runners,omitempty"`     // the CI runners on this added host now
 	Rooms        []RoomID             `json:"rooms,omitempty"`       // the rooms this added host serves (host.set_limits); none means every room
 	GPUs         []GPU                `json:"gpus,omitempty"`        // its cards, each with the VRAM boxes have requested of it
@@ -795,7 +796,7 @@ type Harness string
 
 const (
 	HarnessPig Harness = "pig" // the default, and the empty value of an older profile
-	HarnessAgy Harness = "agy" // Google's Antigravity agent over ACP, on host hermeslab only
+	HarnessAgy Harness = "agy" // Google's Antigravity agent over ACP, on a host that reports agy
 )
 
 // AgyGeminiDir is where a box sees the signed-in agy profile folder.
