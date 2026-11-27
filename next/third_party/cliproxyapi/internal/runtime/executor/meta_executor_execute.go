@@ -210,25 +210,30 @@ func (e *MetaExecutor) translateMetaCompleted(ctx context.Context, req cliproxye
 			continue
 		}
 		eventData := bytes.TrimSpace(trimmedLine[len(dataTag):])
-		eventType := gjson.GetBytes(eventData, "type").String()
+		if !gjson.ValidBytes(eventData) {
+			if filteringSubscriptionUsage {
+				continue
+			}
+			break
+		}
+		root := gjson.ParseBytes(eventData)
+		eventType := root.Get("type").String()
 		if isMetaSubscriptionUsageEvent(eventType, eventData) {
 			filteringSubscriptionUsage = false
 			continue
 		}
 		if filteringSubscriptionUsage {
 			if eventType == "" {
-				if gjson.ValidBytes(eventData) {
-					filteringSubscriptionUsage = false
-				}
+				filteringSubscriptionUsage = false
 				continue
 			}
 			filteringSubscriptionUsage = false
 		}
 		upstreamUsage.ObserveResponsesStream(eventData)
-		if errEvent := metaStreamEventError(eventData); errEvent != nil {
+		if errEvent := metaStreamEventError(eventData, root, eventType); errEvent != nil {
 			return metaCompletedTranslation{}, errEvent
 		}
-		if isMetaTerminalResponseEvent(eventType) && !validMetaTerminalEnvelope(eventData) {
+		if isMetaTerminalResponseEvent(eventType) && !root.Get("response").IsObject() {
 			break
 		}
 		events, errBridge := prepared.applyPatch.Transform(eventData)
@@ -255,27 +260,32 @@ func (e *MetaExecutor) translateMetaCompleted(ctx context.Context, req cliproxye
 		}
 	}
 
-	if errEvent := metaStreamEventError(bytes.TrimSpace(data)); errEvent != nil {
-		upstreamUsage.ObserveResponsesStream(data)
-		return metaCompletedTranslation{}, errEvent
-	}
-	if completedData, ok := metaAsCompletedEvent(data); ok {
-		if detail, okUsage := helps.ParseCodexUsage(completedData); okUsage {
-			upstreamUsage.Observe(detail, true)
+	trimmed := bytes.TrimSpace(data)
+	if gjson.ValidBytes(trimmed) {
+		root := gjson.ParseBytes(trimmed)
+		eventType := root.Get("type").String()
+		if errEvent := metaStreamEventError(trimmed, root, eventType); errEvent != nil {
+			upstreamUsage.ObserveResponsesStream(data)
+			return metaCompletedTranslation{}, errEvent
 		}
-		completedData = patchCodexCompletedOutput(completedData, outputItemsByIndex, outputItemsFallback)
-		var errBridge error
-		completedData, errBridge = prepared.applyPatch.Bridge.TransformNonStream(completedData)
-		if errBridge != nil {
-			errBridge = statusErr{code: http.StatusBadGateway, msg: helps.ApplyPatchUpstreamErrorMessage}
-			return metaCompletedTranslation{}, errBridge
+		if completedData, ok := metaAsCompletedEvent(trimmed, root, eventType); ok {
+			if detail, okUsage := helps.ParseCodexUsage(completedData); okUsage {
+				upstreamUsage.Observe(detail, true)
+			}
+			completedData = patchCodexCompletedOutput(completedData, outputItemsByIndex, outputItemsFallback)
+			var errBridge error
+			completedData, errBridge = prepared.applyPatch.Bridge.TransformNonStream(completedData)
+			if errBridge != nil {
+				errBridge = statusErr{code: http.StatusBadGateway, msg: helps.ApplyPatchUpstreamErrorMessage}
+				return metaCompletedTranslation{}, errBridge
+			}
+			var param any
+			out := sdktranslator.TranslateNonStream(ctx, prepared.to, prepared.responseFormat, req.Model, prepared.originalPayload, prepared.body, completedData, &param)
+			if helps.ApplyPatchTranslationError(param) != nil || len(out) == 0 {
+				return metaCompletedTranslation{}, statusErr{code: http.StatusBadGateway, msg: helps.ApplyPatchUpstreamErrorMessage}
+			}
+			return metaCompletedTranslation{payload: out, sourceEvent: completedData}, nil
 		}
-		var param any
-		out := sdktranslator.TranslateNonStream(ctx, prepared.to, prepared.responseFormat, req.Model, prepared.originalPayload, prepared.body, completedData, &param)
-		if helps.ApplyPatchTranslationError(param) != nil || len(out) == 0 {
-			return metaCompletedTranslation{}, statusErr{code: http.StatusBadGateway, msg: helps.ApplyPatchUpstreamErrorMessage}
-		}
-		return metaCompletedTranslation{payload: out, sourceEvent: completedData}, nil
 	}
 
 	message := metaIncompleteStreamMessage
@@ -445,14 +455,13 @@ func wrapMetaUpstreamError(statusCode int, body []byte) error {
 	return se
 }
 
-func metaStreamEventError(eventData []byte) error {
-	eventType := gjson.GetBytes(eventData, "type").String()
-	failedDone := eventType == "response.done" && strings.EqualFold(strings.TrimSpace(gjson.GetBytes(eventData, "response.status").String()), "failed")
+func metaStreamEventError(eventData []byte, root gjson.Result, eventType string) error {
+	failedDone := eventType == "response.done" && strings.EqualFold(strings.TrimSpace(root.Get("response.status").String()), "failed")
 	if eventType != "error" && eventType != "response.failed" && !failedDone {
 		return nil
 	}
 	statusCode := http.StatusBadGateway
-	if code := int(gjson.GetBytes(eventData, "error.code").Int()); code >= 400 && code <= 599 {
+	if code := int(root.Get("error.code").Int()); code >= 400 && code <= 599 {
 		statusCode = code
 	}
 	return wrapMetaUpstreamError(statusCode, eventData)
@@ -460,10 +469,6 @@ func metaStreamEventError(eventData []byte) error {
 
 func isMetaTerminalResponseEvent(eventType string) bool {
 	return eventType == "response.completed" || eventType == "response.incomplete" || eventType == "response.done"
-}
-
-func validMetaTerminalEnvelope(data []byte) bool {
-	return gjson.ValidBytes(data) && gjson.GetBytes(data, "response").IsObject()
 }
 
 func normalizeMetaTerminalEvent(eventData []byte, eventType string) (string, []byte) {
@@ -481,13 +486,7 @@ func normalizeMetaTerminalEvent(eventData []byte, eventType string) (string, []b
 	return target, normalized
 }
 
-func metaAsCompletedEvent(data []byte) ([]byte, bool) {
-	trimmed := bytes.TrimSpace(data)
-	if !gjson.ValidBytes(trimmed) {
-		return nil, false
-	}
-	root := gjson.ParseBytes(trimmed)
-	eventType := root.Get("type").String()
+func metaAsCompletedEvent(trimmed []byte, root gjson.Result, eventType string) ([]byte, bool) {
 	if isMetaTerminalResponseEvent(eventType) {
 		if !root.Get("response").IsObject() {
 			return nil, false

@@ -306,19 +306,28 @@ func TestMetaTruncationDoesNotReplayOrCool(t *testing.T) {
 
 func TestMetaAcceptedBodyValidation(t *testing.T) {
 	done := strings.Replace(metaTerminalDisconnectCompleted, "response.completed", "response.done", 1)
+	const partialError = `{"type":"error","response":{"usage":{"input_tokens":99}},"error":{"code":429,"message":`
+	const intactError = `{"type":"error","error":{"code":429,"message":"too many requests"}}`
 	const patch = `{"input":"hello","tools":[{"type":"custom","name":"apply_patch"}]}`
 	for _, tc := range []struct {
 		name, body, payload string
 		stream, cut, fail   bool
+		providerStatus      int
 		tokens              int64
 	}{
-		{"bare_done_stream", "event: response.done\ndata: {\"type\":\"response.done\"}\n\n", patch, true, false, true, 0},
-		{"bare_done_sse", "data: {\"type\":\"response.done\"}\n\n", patch, false, false, true, 0},
-		{"bare_done_json", `{"type":"response.done"}`, patch, false, false, true, 0},
-		{"invalid_terminal_json", "data: {\"type\":\"response.done\",\"response\":{}\n\n", patch, false, false, true, 0},
-		{"raw_response", `{"object":"response","status":"completed","output":[],"usage":{"input_tokens":10,"output_tokens":5}}`, `{"input":"hello"}`, false, false, false, 10},
-		{"terminal_before_cut", done + "event: response.subscription_usage\ndata: {", `{"input":"hello"}`, false, true, false, 10},
-		{"progress_before_cut", metaProgressUsage, `{"input":"hello"}`, false, true, true, 10},
+		{"bare_done_stream", "event: response.done\ndata: {\"type\":\"response.done\"}\n\n", patch, true, false, true, 0, 0},
+		{"bare_done_sse", "data: {\"type\":\"response.done\"}\n\n", patch, false, false, true, 0, 0},
+		{"bare_done_json", `{"type":"response.done"}`, patch, false, false, true, 0, 0},
+		{"invalid_terminal_json", "data: {\"type\":\"response.done\",\"response\":{}\n\n", patch, false, false, true, 0, 0},
+		{"raw_response", `{"object":"response","status":"completed","output":[],"usage":{"input_tokens":10,"output_tokens":5}}`, `{"input":"hello"}`, false, false, false, 0, 10},
+		{"terminal_before_cut", done + "event: response.subscription_usage\ndata: {", `{"input":"hello"}`, false, true, false, 0, 10},
+		{"progress_before_cut", metaProgressUsage, `{"input":"hello"}`, false, true, true, 0, 10},
+		{"error_cut_stream", metaProgressUsage + "data: " + partialError, patch, true, true, true, 0, 10},
+		{"error_cut_sse", metaProgressUsage + "data: " + partialError, patch, false, true, true, 0, 10},
+		{"error_cut_json", partialError, patch, false, true, true, 0, 0},
+		{"intact_error_stream", metaProgressUsage + "data: " + intactError + "\n\n", patch, true, true, true, 429, 10},
+		{"intact_error_sse", metaProgressUsage + "data: " + intactError + "\n\n", patch, false, true, true, 429, 10},
+		{"intact_error_json", intactError, patch, false, false, true, 429, 0},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -335,23 +344,34 @@ func TestMetaAcceptedBodyValidation(t *testing.T) {
 			exec := NewMetaExecutor(&config.Config{})
 			req := cliproxyexecutor.Request{Model: "muse-wonder-1.0", Payload: []byte(tc.payload)}
 			opts := cliproxyexecutor.Options{SourceFormat: sdktranslator.FormatOpenAIResponse, Stream: tc.stream}
+			assertError := func(err error) {
+				t.Helper()
+				if tc.providerStatus == 0 {
+					assertMetaTruncation(t, err)
+					return
+				}
+				status, ok := errors.AsType[statusErr](err)
+				if !ok || status.IsStreamTruncated() || status.StatusCode() != tc.providerStatus {
+					t.Fatalf("expected provider status %d, got %v", tc.providerStatus, err)
+				}
+			}
 			if tc.stream {
 				result, err := exec.ExecuteStream(t.Context(), auth, req, opts)
 				if err != nil {
 					t.Fatal(err)
 				}
-				chunk, ok := <-result.Chunks
-				if !ok || len(chunk.Payload) != 0 {
-					t.Fatalf("unexpected malformed terminal output: %+v", chunk)
+				var streamErr error
+				for chunk := range result.Chunks {
+					if streamErr != nil || (len(chunk.Payload) != 0 && !strings.Contains(string(chunk.Payload), "response.in_progress")) {
+						t.Fatalf("unexpected terminal output: %+v", chunk)
+					}
+					streamErr = chunk.Err
 				}
-				assertMetaTruncation(t, chunk.Err)
-				if chunk, ok := <-result.Chunks; ok {
-					t.Fatalf("unexpected chunk after truncation: %+v", chunk)
-				}
+				assertError(streamErr)
 			} else {
 				result, err := exec.Execute(t.Context(), auth, req, opts)
 				if tc.fail {
-					assertMetaTruncation(t, err)
+					assertError(err)
 					if len(result.Payload) != 0 {
 						t.Fatalf("unexpected response on truncation: %s", result.Payload)
 					}
@@ -361,7 +381,9 @@ func TestMetaAcceptedBodyValidation(t *testing.T) {
 			}
 			select {
 			case record := <-capture.records:
-				if record.Failed != tc.fail || record.Detail.InputTokens != tc.tokens {
+				if record.Failed != tc.fail || record.Detail.InputTokens != tc.tokens ||
+					(tc.providerStatus != 0 && record.Fail.StatusCode != tc.providerStatus) ||
+					(tc.fail && tc.providerStatus == 0 && record.Fail.Code != usage.FailureStreamTruncatedCode) {
 					t.Fatalf("unexpected usage outcome: %+v", record)
 				}
 			case <-time.After(5 * time.Second):

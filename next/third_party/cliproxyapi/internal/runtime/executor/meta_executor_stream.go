@@ -195,10 +195,22 @@ func (e *MetaExecutor) ExecuteStream(ctx context.Context, auth *cliproxyauth.Aut
 				continue
 			}
 			eventData := bytes.TrimSpace(trimmedLine[len(dataTag):])
-			if !terminalDelivered && bytes.Equal(eventData, []byte("[DONE]")) {
+			if bytes.Equal(eventData, []byte("[DONE]")) {
+				if !terminalDelivered || !emitTranslatedLine([]byte("data: [DONE]")) {
+					break
+				}
+				continue
+			}
+			if !gjson.ValidBytes(eventData) {
+				if filteringSubscriptionUsage {
+					pendingEventLine = nil
+					skipFilteredBlankLine = true
+					continue
+				}
 				break
 			}
-			eventType := gjson.GetBytes(eventData, "type").String()
+			root := gjson.ParseBytes(eventData)
+			eventType := root.Get("type").String()
 			if isMetaSubscriptionUsageEvent(eventType, eventData) {
 				helps.ObserveMetaSubscriptionUsage(ctx, eventData)
 				pendingEventLine = nil
@@ -209,9 +221,7 @@ func (e *MetaExecutor) ExecuteStream(ctx context.Context, auth *cliproxyauth.Aut
 			if filteringSubscriptionUsage {
 				if eventType == "" {
 					pendingEventLine = nil
-					if gjson.ValidBytes(eventData) {
-						filteringSubscriptionUsage = false
-					}
+					filteringSubscriptionUsage = false
 					skipFilteredBlankLine = true
 					continue
 				}
@@ -226,12 +236,12 @@ func (e *MetaExecutor) ExecuteStream(ctx context.Context, auth *cliproxyauth.Aut
 			if detail, ok := helps.ParseCodexUsageWithOutputItems(eventData, outputItemsByIndex, outputItemsFallback); ok {
 				streamUsage.Observe(detail, true)
 			}
-			if errEvent := metaStreamEventError(eventData); errEvent != nil {
+			if errEvent := metaStreamEventError(eventData, root, eventType); errEvent != nil {
 				fail(errEvent)
 				return
 			}
 			terminal := isMetaTerminalResponseEvent(eventType)
-			if terminal && !validMetaTerminalEnvelope(eventData) {
+			if terminal && !root.Get("response").IsObject() {
 				break
 			}
 			if terminal {
