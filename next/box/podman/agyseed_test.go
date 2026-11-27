@@ -2,6 +2,7 @@ package podman
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"io"
 	"os"
@@ -11,6 +12,8 @@ import (
 	"syscall"
 	"testing"
 	"time"
+
+	"github.com/resident-labs/dyna/box"
 )
 
 func shell(t *testing.T, input []byte, script string, args ...string) ([]byte, error) {
@@ -550,5 +553,86 @@ func TestAgyPackOfAFileThatChangesIsNotAGoodArchive(t *testing.T) {
 	}
 	if _, err := os.Lstat(dst + "/accounts/main"); err == nil {
 		t.Fatal("an account was published")
+	}
+}
+
+// streamRecorder is a host driver that streams nothing and keeps the command it was given.
+type streamRecorder struct {
+	*runner
+	argv []string
+}
+
+func (s *streamRecorder) RunStream(_ context.Context, _ io.Reader, _ io.Writer, args ...string) error {
+	s.argv = args
+	return nil
+}
+
+// Packing the account first only stops the program delaying the account read; it does not shorten tar's per-file changed-while-reading window.
+func TestPackAgyReadsTheAccountBeforeTheProgram(t *testing.T) {
+	rec := &streamRecorder{runner: &runner{}}
+	h := newTestHost(t, rec.runner)
+	h.runner = rec
+	if err := h.PackAgy(context.Background(), box.Layout{}, true, true, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	command := rec.argv[len(rec.argv)-1]
+	if !strings.HasSuffix(command, "accounts/main' 'antigravity'") {
+		t.Fatalf("members in order: %q", command)
+	}
+}
+
+// What a live session rewrites every few seconds is left out, so the seed succeeds while sessions run; a kept file that changes still ends
+// it with the changed status.
+func TestAgyPackLeavesOutWhatChangesEverySecondsAndKeepsTheRest(t *testing.T) {
+	src := agyFolder(t)
+	acp := src + "/accounts/main/antigravity-acp/"
+	for _, name := range []string{"conversation_summaries.db", "conversation_summaries.db-shm", "conversation_summaries.db-wal", "jetbox_summaries_proto.pb", "bin/agentapi"} {
+		write(t, acp+name, "LIVE", 0o600)
+	}
+	write(t, acp+"installation_id", "KEPT", 0o600)
+	write(t, acp+"bin/other", "KEPT", 0o755)
+	pack, err := shell(t, nil, agyPackScript, src, "accounts/main", "antigravity")
+	if err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.Command("tar", "-t", "-i", "-f", "-")
+	cmd.Stdin = bytes.NewReader(pack)
+	out, err := cmd.Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, never := range []string{"conversation_summaries", "jetbox_summaries", "agentapi"} {
+		if strings.Contains(string(out), never) {
+			t.Errorf("the pack holds %s: %s", never, out)
+		}
+	}
+	for _, want := range []string{"installation_id", "bin/other"} {
+		if !strings.Contains(string(out), want) {
+			t.Errorf("the pack lacks %s: %s", want, out)
+		}
+	}
+}
+
+// A stub tar that, like the real one, calls a file changed while it is read (status 1) only when the file is among the members: a file
+// under an --exclude is not read. The live files are excluded, so the pack succeeds; a kept one ends it with the changed status.
+func TestAgyPackWithALiveFileChangingSucceedsOnlyWhenItIsExcluded(t *testing.T) {
+	for name, want := range map[string]int{
+		"conversation_summaries.db-wal": 0, "jetbox_summaries_proto.pb": 0, "bin/agentapi": 0, "annotations/x": 0, "brain/c1/y": 0,
+		"antigravity-oauth-token": agyPackExitChanged, "mcp/dyna/schema.json": agyPackExitChanged,
+	} {
+		src := agyFolder(t)
+		write(t, src+"/accounts/main/antigravity-acp/"+name, "LIVE", 0o600)
+		bin := t.TempDir()
+		write(t, bin+"/tar", "#!/bin/bash\ncase \"$*\" in *dyna-complete*) exec /usr/bin/tar \"$@\" ;; esac\nfor a; do p=${a#--exclude=accounts/main/antigravity-acp/}; if [ \"$p\" != \"$a\" ]; then case \""+name+"\" in \"$p\"|\"$p\"/*) exec /usr/bin/tar \"$@\" ;; esac; fi; done\n/usr/bin/tar \"$@\"; exit 1\n", 0o755)
+		cmd := exec.Command("bash", "-c", agyPackScript, "dyna", src, "accounts/main", "antigravity")
+		cmd.Env = append(os.Environ(), "PATH="+bin+":"+os.Getenv("PATH"))
+		_, err := cmd.Output()
+		got := 0
+		if err != nil {
+			got = exitCode(err)
+		}
+		if got != want {
+			t.Errorf("%s: exit %d, want %d (%v)", name, got, want, err)
+		}
 	}
 }
