@@ -109,17 +109,6 @@ func TestHandoffOutlastsTheTurnRunningWhenItWasSet(t *testing.T) {
 	}
 }
 
-// A switch onto agy is held to the account's limit in the same transaction.
-func TestHarnessSwitchHoldsTheAgyLimit(t *testing.T) {
-	r := newHandoffRig(t)
-	if err := r.switchTo("g", &HarnessSwitch{Profiles: []contract.ProfileName{"p"}, Limit: 1}); err != ErrProfileFull {
-		t.Fatalf("err = %v", err)
-	}
-	if r.handoff() != 0 {
-		t.Fatal("a refused switch left a handoff")
-	}
-}
-
 // A session that is closing takes no harness switch, checked in the same write.
 func TestHarnessSwitchRefusesAClosingSession(t *testing.T) {
 	r := newHandoffRig(t)

@@ -196,12 +196,8 @@ func (s *Service) startSession(ctx context.Context, caller contract.Principal, r
 	var response contract.SessionStartResponse
 	problem = s.withProfile(req.Profile, func(_ func(contract.ProfileName) contract.Harness) *contract.Error {
 		var err error
-		session.AccountProfiles, session.AccountLimit = s.agyAccount(req.Profile)
 		response, err = s.store.StartSession(ctx, session, parent, sizeName, req.Goal, event, initial, "", req.SameHost, req.Host, req.ClientID, s.maxDepth)
 		if err != nil {
-			if errors.Is(err, store.ErrProfileFull) {
-				return &contract.Error{Code: contract.ErrConflict, Message: fmt.Sprintf("the agy account allows %d open sessions at once across every agy profile, and they are open; close one, or ask the owner to raise max-concurrent on the agy profiles", session.AccountLimit)}
-			}
 			var treeErr *store.TreeError
 			if errors.As(err, &treeErr) {
 				return invalid(treeErr.Error())
@@ -782,12 +778,8 @@ func (s *Service) SessionSetProfile(ctx context.Context, caller contract.Princip
 				return problem
 			}
 			harness = &store.HarnessSwitch{RequireHandoff: true}
-			harness.Profiles, harness.Limit = s.agyAccount(req.Profile)
 		}
 		if err := s.store.SetSessionProfile(ctx, target.ID, target.Profile, req.Profile, event, harness); err != nil {
-			if errors.Is(err, store.ErrProfileFull) {
-				return &contract.Error{Code: contract.ErrConflict, Message: fmt.Sprintf("the agy account allows %d open sessions at once across every agy profile, and they are open; close one, or ask the owner to raise max-concurrent on the agy profiles", harness.Limit)}
-			}
 			if harness != nil && errors.Is(err, store.ErrSessionClosing) {
 				return &contract.Error{Code: contract.ErrConflict, Message: "session is closing"}
 			}

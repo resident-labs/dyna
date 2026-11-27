@@ -66,18 +66,6 @@ func TestHarnessSwitchToAgyNeedsHermeslab(t *testing.T) {
 	}
 }
 
-func TestHarnessSwitchHoldsTheAgyAccountLimit(t *testing.T) {
-	s, room, _, owner := agySetup(t)
-	startOn(t, s, room, "a1", "gem", "")
-	startOn(t, s, room, "a2", "gem", "")
-	sid := startOn(t, s, room, "third", "other", "hermeslab")
-	readySession(t, s, sid)
-	_, e := s.SessionSetProfile(t.Context(), owner, contract.SessionSetProfileRequest{Session: sid, Profile: "gem"})
-	if e == nil || e.Code != contract.ErrConflict || !strings.Contains(e.Message, "allows 2 open sessions") {
-		t.Fatalf("err = %v", e)
-	}
-}
-
 // An agy turn that was running when the owner moved the session to Pi ends under agy's rules: one wake at its reset, no Pi ladder,
 // no account rotation, and the handoff stays for the restart on Pi.
 func TestRunningAgyTurnEndsUnderAgyAfterASwitchToPig(t *testing.T) {
