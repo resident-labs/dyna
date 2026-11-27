@@ -78,7 +78,7 @@ func RunArgs(a contract.HostexecRunArgs, op contract.OpID) []string {
 		script = `cd -- "$1" || exit 254; u=$2; t=$3; shift 3; DYNA_ARGV=$(printf '%q ' "$@") systemd-run --quiet --user --scope --unit="$u" -p "RuntimeMaxSec=$t" -p TimeoutStopSec=5 -- bash -c '` + runWords + `' | { head -c 8388609; cat >/dev/null; }; exit "${PIPESTATUS[0]}"`
 	default:
 		// The prelude and the cd sit inside the merge, so a failed mkdir or a missing cwd shows in the output like the command's own errors.
-		// The runner is detached (setsid, in a subshell so that its end is reaped and tail's --pid sees it), which is why the call can go away.
+		// The runner is detached (setsid, in a subshell so that its end is reaped), which is why the call can go away.
 		script = `{ ` + prelude(a, op) + `cd -- "$1" || exit 254; u=$2; t=$3; shift 3; export DYNA_ARGV=$(printf '%q ' "$@"); r=$d.run; mkdir -m 0700 -- "$r" || exit 254; (umask 077; : >"$r/log"); ( setsid bash -c "$(printf %s ` + base64.StdEncoding.EncodeToString([]byte(runner)) + ` | base64 -d)" dyna-runner "$u" "$t" "$r" </dev/null >/dev/null 2>&1 & (umask 077; echo $! >"$r/pid") ); } 2>&1; ` + follow
 	}
 	args := []string{"bash", "-c", script, "dyna-hostexec", cwd, "dyna-hostexec-" + string(op), fmt.Sprintf("%g", float64(a.Timeout)/1000)}

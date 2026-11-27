@@ -30,7 +30,8 @@ echo "dyna-agy-arch $(uname -s -m)"
 
 // agyPackScript writes a tar of the members named after $1 (paths below $1) to stdout, leaving out by path what agy writes in a running
 // session: the conversations and their per-conversation brain (nearly all of an account folder's size), the logs, and the annotations (per
-// session artifacts). The sign-in, the config and the mcp, cache and implicit state stay. A file that changes while tar reads it (tar
+// session artifacts), and what changes every few seconds in a live session: the live SQLite index of the conversations
+// (conversation_summaries.db with its -shm and -wal, jetbox_summaries_proto.pb) and bin/agentapi. The sign-in, the config and the mcp, cache and implicit state stay. A file that changes while tar reads it (tar
 // status 1) ends the pack with status 19 and not as a good archive. Then a second tar holds only an empty .dyna-complete: an archive
 // without it was cut short, which tar alone cannot tell at a member boundary. Its stderr is dropped so that only the archive is on stdout. Nothing of the archive is written to a file.
 const agyPackScript = `set -eu
@@ -38,7 +39,8 @@ cd -- "$1"
 shift
 acp=accounts/main/antigravity-acp
 excludes=""
-for d in brain conversations log annotations; do excludes="$excludes --exclude=$acp/$d"; done
+for d in brain conversations log annotations conversation_summaries.db conversation_summaries.db-shm conversation_summaries.db-wal jetbox_summaries_proto.pb; do excludes="$excludes --exclude=$acp/$d"; done
+excludes="$excludes --exclude=accounts/main/antigravity-acp/bin/agentapi"
 marker=$(mktemp)
 trap 'rm -f -- "$marker"' EXIT
 st=0
@@ -169,12 +171,14 @@ func (h *Host) stream(ctx context.Context, in io.Reader, out io.Writer, argv ...
 // PackAgy writes the program and the account folder as an opaque archive to w, as the host has them. The caller only hands it on to
 // UnpackAgy, through a pipe, so the engine holds no more of it than the pipe's one write at a time.
 func (h *Host) PackAgy(ctx context.Context, layout box.Layout, binary, account bool, w io.Writer) error {
+	// The account goes first: tar notices a changed file only while it reads it, so a token refresh has the second the small account takes to
+	// be read, and not the minute behind the program's 274 MB.
 	members := []string{}
-	if binary {
-		members = append(members, "antigravity")
-	}
 	if account {
 		members = append(members, "accounts/main")
+	}
+	if binary {
+		members = append(members, "antigravity")
 	}
 	if err := h.stream(ctx, nil, w, append([]string{"bash", "-c", agyPackScript, "dyna-agy-pack", agyDir(layout)}, members...)...); err != nil {
 		if ctx.Err() != nil {
