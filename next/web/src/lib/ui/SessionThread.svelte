@@ -28,7 +28,7 @@
   import QuestionCard from "./QuestionCard.svelte";
   import RequestCard from "./RequestCard.svelte";
   import EngineRestartNotice from "./EngineRestartNotice.svelte";
-  import { attemptFailedNote, compactionNote, deriveTimelineGroups, engineEventsNote, finalTimelineItem, foldInputRuns, ownPost, postDestination, mergeTimelineInputs, mergeTimelineItems, queuedTimelinePosts, steerInput, timelineInput, timelineInputText, timelineItemRunning, timelineSegments, pendingStartBrief, workFoldLabel, workingLine, type TimelineFeed } from "../timeline.ts";
+  import { attemptFailedNote, compactionNote, deriveTimelineGroups, engineEventsNote, finalTimelineItem, foldInputRuns, ownPost, postDestination, mergeTimelineInputs, mergeTimelineItems, timelineTailPosts, steerInput, timelineInput, timelineInputText, timelineItemRunning, timelineSegments, pendingStartBrief, workFoldLabel, workingLine, type TimelineFeed } from "../timeline.ts";
 
   // With step, the thread reads one worker of a crew: its transcript alone, and nothing that was sent to the crew.
   let { hasRoom, session, step, roomName, store, admin = false, operate, unsent, onunsent, onsettled, onpostlocation, navigate, startingBrief, clock = Date.now }: { hasRoom: (room: RoomID) => boolean; startingBrief?: string; session: string; step?: string; roomName: string; store: RoomStore; admin?: boolean; operate: boolean; unsent: PostRequest[]; onunsent: (request: PostRequest) => void; onsettled: (request: PostRequest) => void; onpostlocation: (room: string, seq: number) => void; navigate: (event: MouseEvent & { currentTarget: HTMLAnchorElement }) => void; clock?: () => number } = $props();
@@ -43,7 +43,7 @@
   // A sent message shows at the end, so the thread goes there with it.
   export async function send(request: PostRequest) { atBottom = true; await view.post(request); }
   // A closed session can have a transcript with no DM events, so the thread is empty only when neither has anything.
-  export const empty = () => view.ready && !view.ordered.length && !loading && !turns.length;
+  export const empty = () => view.ready && !view.ordered.length && loaded && !turns.length;
   let asking = $derived(step ? [] : store.pendingQuestions(session));
   // What the session waits on the owner to approve: the header says Needs you, so the thread shows what for.
   let requesting = $derived(step ? [] : [...store.requests.values()].filter(request => needsOwner(request) && request.by.session === session));
@@ -115,10 +115,10 @@
   let loaded = $state(false);
   let destroyed = false;
   const readTranscript = transcriptReader(() => !destroyed);
-  let queuedPosts = $derived(step ? [] : queuedTimelinePosts(view.posts(), turns));
+  let tailPosts = $derived(step ? [] : timelineTailPosts(view.posts(), loaded ? turns : failed ? null : undefined, liveTurn));
   let pendingPosts = $derived(step ? [] : [...view.pendingPosts.values()]);
   // The owner's words a failed last turn read, so one press sends them again; only while nothing newer waits.
-  let resendable = $derived(!operate || step || closed || queuedPosts.length || pendingPosts.length || turns.at(-1)?.outcome !== "failed" ? []
+  let resendable = $derived(!operate || step || closed || tailPosts.length || pendingPosts.length || turns.at(-1)?.outcome !== "failed" ? []
     : (turns.at(-1)?.inputs ?? []).filter(input => input.from.kind === "owner" && timelineInput(input).kind === "message"));
   // A long message arrives cut, so its whole text loads first; if it cannot, nothing is sent and the text's own Try again shows.
   let resending = $state(false);
@@ -129,9 +129,9 @@
     resending = false;
     if (loaded.every(Boolean)) for (const input of inputs) void send({ room: store.room, home: { kind: "dm", session }, text: timelineInput(input, chunks["input:" + input.id + "/text"]).text, attachments: input.attachments?.length ? input.attachments : undefined });
   }
-  let quiet = $derived(!turns.length && !queuedPosts.length && !pendingPosts.length && !pendingBrief && !asking.length && !requesting.length && !clearedAt);
+  let quiet = $derived(!turns.length && !tailPosts.length && !pendingPosts.length && !pendingBrief && !asking.length && !requesting.length && !clearedAt);
   // The first message after a turn may start a new day. It waits outside any turn, so its day mark is here too.
-  let waitingSince = $derived(queuedPosts[0]?.at ?? pendingPosts[0]?.at);
+  let waitingSince = $derived(tailPosts[0]?.post.at ?? pendingPosts[0]?.at);
 
   async function load(older = false) {
     if (loading) { if (!older) pending = true; return; }
@@ -299,7 +299,7 @@
     ...(turn.inputs ?? []).map(input => ({ key: input.id, event: input.id, room: input.room, from: input.from, at: input.at, attachments: input.attachments ?? [] })),
     ...(turn.items ?? []).flatMap(item => item.image ? [readMedia(session, turn.id, item.at, titleOf(item).full, item.image)] : []),
     ...(turn.items ?? []).flatMap(item => [item, ...(item.posts ?? [])]).map(item => ({ key: item.id, event: item.event ?? item.id, room: item.room ?? store.room, from: item.from ?? { kind: "engine" as const }, at: item.at, attachments: item.attachments ?? [] })),
-  ]).concat(queuedPosts.map(post => ({ key: post.id, event: post.id, room: post.room ?? store.room, from: post.from, at: post.at, attachments: post.body.attachments ?? [] })))
+  ]).concat(tailPosts.map(({ post }) => ({ key: post.id, event: post.id, room: post.room ?? store.room, from: post.from, at: post.at, attachments: post.body.attachments ?? [] })))
     .concat(pendingPosts.map(post => ({ key: pendingKey(post.id), event: pendingKey(post.id), room: store.room, from: { kind: "owner" as const }, at: post.at, attachments: post.request.attachments ?? [] }))));
   let media = $derived(conversationMedia([...mediaRows].sort((a, b) => a.at.localeCompare(b.at))));
   let mediaIndex: number | undefined = $state();
@@ -499,10 +499,10 @@
     {#each decided as request (request.id)}<div class="question"><RequestCard {admin} {request} {store} {now} /></div>{/each}
     {#each requesting as request (request.id)}<div class="question"><RequestCard {admin} {request} {store} {now} feed /></div>{/each}
     {#if waitingSince}{@render dayMark(waitingSince, turns.at(-1)?.started)}{/if}
-    {#each queuedPosts as post (post.id)}
+    {#each tailPosts as { post, queued } (post.id)}
       {#snippet body()}{@render message(post.id, post.body.text, post.body.attachments, post.id, post.at, post.body.data, undefined, post.body.dataAttachment, post.from)}{/snippet}
-      {#snippet queued()}<p class="owner-note queued">{queuedNote}</p>{/snippet}
-      {#if post.from.kind === "owner"}{@render ownerMessage(post.id, post.at, false, body, closed ? undefined : queued)}
+      {#snippet note()}<p class="owner-note queued">{queuedNote}</p>{/snippet}
+      {#if post.from.kind === "owner"}{@render ownerMessage(post.id, post.at, false, body, queued && !closed ? note : undefined)}
       {:else if post.from.kind === "session" && post.from.session === session}<div class="agent-message" data-media-key={post.id}>{@render body()}</div>
       {:else}{@render inbound(post.id, post.from, post.at, body, !!post.body.attachments?.length, post.body.source)}{/if}
     {/each}
