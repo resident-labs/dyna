@@ -42,8 +42,7 @@ import (
 type hostRegistrar interface {
 	AddHost(context.Context, contract.HostAddRequest) (bool, error)
 	HostLoad(context.Context, []contract.HostSummary) error
-	SeedAgy(context.Context, contract.HostName, bool) error
-	AgyBarrier(context.Context, contract.HostName) error
+	SeedAgy(context.Context, contract.HostName) error
 }
 
 type serviceWithHosts struct {
@@ -65,31 +64,16 @@ func (s *serviceWithHosts) HostList(ctx context.Context, caller contract.Princip
 	return s.Service.HostListWithLoad(ctx, caller, req, s.boxes.HostLoad)
 }
 
-// HostAgySeed is the owner's `dyna agy seed`: the service says whether the host may be seeded, the boxes do the copy.
+// HostAgySeed is the owner's `dyna agy seed`: the service says whether the host may be seeded at all, the boxes do the copy, which refuses a
+// host that has an account folder.
 func (s *serviceWithHosts) HostAgySeed(ctx context.Context, caller contract.Principal, req contract.HostAgySeedRequest) (contract.HostAgySeedResponse, *contract.Error) {
 	if problem := s.Service.AgySeedProblem(ctx, caller, req.Host); problem != nil {
 		return contract.HostAgySeedResponse{}, problem
 	}
-	// A mark left by an earlier seed is taken over only once the barrier shows its unpack is over; otherwise it is running, or the host
-	// cannot say, and this seed does not start.
-	old, err := s.Service.AgySeedMark(ctx, req.Host)
-	if err != nil {
-		return contract.HostAgySeedResponse{}, &contract.Error{Code: contract.ErrUnavailable, Message: "the seed state of the host could not be read"}
-	}
-	if old != "" {
-		if err := s.boxes.AgyBarrier(ctx, req.Host); err != nil {
-			return contract.HostAgySeedResponse{}, &contract.Error{Code: contract.ErrConflict, Message: fmt.Sprintf("a seed of host %s may still be running, or the host did not answer; try again shortly", req.Host)}
-		}
-	}
-	token := rand.Text()
-	if problem := s.Service.BeginAgySeed(ctx, req.Host, token, old); problem != nil {
-		return contract.HostAgySeedResponse{}, problem
-	}
-	copyErr := s.boxes.SeedAgy(ctx, req.Host, req.Replace)
-	s.Service.EndAgySeedAfter(req.Host, token, copyErr == nil, s.boxes.AgyBarrier)
-	if err := copyErr; err != nil {
+	if err := s.boxes.SeedAgy(ctx, req.Host); err != nil {
 		code := contract.ErrUnavailable
-		if errors.Is(err, ErrAgyArch) {
+		var seeded SeededError
+		if errors.Is(err, ErrAgyArch) || errors.As(err, &seeded) {
 			code = contract.ErrConflict
 		}
 		return contract.HostAgySeedResponse{}, &contract.Error{Code: code, Message: err.Error()}
@@ -284,7 +268,6 @@ func Run(ctx context.Context, cfg Config) error {
 	}()
 	shutdown.cleanup("model proxy", func() { stopProxy(); <-done })
 	boxes.Mirror = mirror
-	go service.ReleaseAgySeeds(boxCtx, boxes.AgyBarrier)
 	boxes.Images = &images.Builder{Recorder: service, Now: time.Now}
 	apiServer := api.New(&serviceWithHosts{Service: service, boxes: boxes, quotas: quotas, AccountActions: accounts}, func(c api.Caller) http.Handler {
 		return drain.Wrap(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

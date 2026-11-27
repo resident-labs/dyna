@@ -2,6 +2,7 @@ package podman
 
 import (
 	"bytes"
+	"errors"
 	"io"
 	"os"
 	"os/exec"
@@ -64,7 +65,7 @@ func TestAgyPackLeavesOutConversationsAndLogsByPath(t *testing.T) {
 	}
 }
 
-func TestAgyUnpackPlacesTheFolderPrivatelyAndNeverOverwritesUnlessAsked(t *testing.T) {
+func TestAgyUnpackPlacesTheFolderPrivatelyAndRefusesASeededHost(t *testing.T) {
 	src := agyFolder(t)
 	pack, err := shell(t, nil, agyPackScript, src, "antigravity", "accounts/main")
 	if err != nil {
@@ -73,7 +74,7 @@ func TestAgyUnpackPlacesTheFolderPrivatelyAndNeverOverwritesUnlessAsked(t *testi
 	sum, _ := shell(t, nil, `sha256sum < "$1" | cut -d ' ' -f 1`, src+"/antigravity")
 	want := strings.TrimSpace(string(sum))
 	dst := t.TempDir() + "/agy"
-	if _, err := shell(t, pack, agyUnpackScript, dst, want, "0"); err != nil {
+	if _, err := shell(t, pack, agyUnpackScript, dst, want); err != nil {
 		t.Fatal(err)
 	}
 	info, err := os.Stat(dst + "/accounts/main")
@@ -89,21 +90,15 @@ func TestAgyUnpackPlacesTheFolderPrivatelyAndNeverOverwritesUnlessAsked(t *testi
 	if left, _ := filepath.Glob(dst + "/.seed.*"); len(left) != 1 { // only the lock file stays
 		t.Fatalf("temporaries left: %v", left)
 	}
-	// A second seed of a changed source leaves the folder alone.
+	// A second seed of a changed source leaves the folder alone, and says so.
 	write(t, src+"/accounts/main/token.json", "TOKEN-TWO", 0o600)
 	pack, _ = shell(t, nil, agyPackScript, src, "accounts/main")
-	if _, err := shell(t, pack, agyUnpackScript, dst, "-", "0"); err != nil {
-		t.Fatal(err)
+	_, err = shell(t, pack, agyUnpackScript, dst, "-")
+	if exit := (*exec.ExitError)(nil); !errors.As(err, &exit) || exit.ExitCode() != agyUnpackExitSeeded {
+		t.Fatalf("a seeded host: %v", err)
 	}
 	if got, _ := os.ReadFile(dst + "/accounts/main/token.json"); string(got) != "TOKEN-ONE" {
 		t.Fatalf("an existing folder was overwritten: %q", got)
-	}
-	// Asked to replace, it is replaced.
-	if _, err := shell(t, pack, agyUnpackScript, dst, "-", "1"); err != nil {
-		t.Fatal(err)
-	}
-	if got, _ := os.ReadFile(dst + "/accounts/main/token.json"); string(got) != "TOKEN-TWO" {
-		t.Fatalf("replace kept %q", got)
 	}
 }
 
@@ -111,7 +106,7 @@ func TestAgyUnpackWithAWrongChecksumPlacesNothing(t *testing.T) {
 	src := agyFolder(t)
 	pack, _ := shell(t, nil, agyPackScript, src, "antigravity", "accounts/main")
 	dst := t.TempDir() + "/agy"
-	if _, err := shell(t, pack, agyUnpackScript, dst, strings.Repeat("0", 64), "0"); err == nil {
+	if _, err := shell(t, pack, agyUnpackScript, dst, strings.Repeat("0", 64)); err == nil {
 		t.Fatal("a wrong checksum was accepted")
 	}
 	for _, path := range []string{"/antigravity", "/accounts/main"} {
@@ -195,7 +190,7 @@ func TestAgyArchiveNeverRestsUnderTmp(t *testing.T) {
 	// The unpack is handed the stream a little at a time, and TMPDIR is scanned while it is still waiting for the rest.
 	reader, writer := io.Pipe()
 	done := make(chan error, 1)
-	go func() { done <- shellIn(t, tmp, reader, agyUnpackScript, dst, strings.TrimSpace(string(sum)), "0") }()
+	go func() { done <- shellIn(t, tmp, reader, agyUnpackScript, dst, strings.TrimSpace(string(sum))) }()
 	buffer := make([]byte, 512)
 	n, _ := io.ReadFull(out, buffer)
 	writer.Write(buffer[:n])
@@ -227,7 +222,7 @@ func TestAgyUnpackOfACutStreamInstallsNothing(t *testing.T) {
 	pack, _ := shell(t, nil, agyPackScript, src, "antigravity", "accounts/main")
 	cut := pack[:len(pack)-10240] // the marker's tar, one padded record, is the last of the stream
 	dst := t.TempDir() + "/agy"
-	if err := shellIn(t, t.TempDir(), bytes.NewReader(cut), agyUnpackScript, dst, "-", "0"); err == nil {
+	if err := shellIn(t, t.TempDir(), bytes.NewReader(cut), agyUnpackScript, dst, "-"); err == nil {
 		t.Fatal("a cut stream was installed")
 	}
 	for _, path := range []string{"/antigravity", "/accounts/main"} {
@@ -248,7 +243,7 @@ func TestAgyUnpackKilledLeavesNothingUnderTmpAndTheNextSeedSweeps(t *testing.T) 
 	tmp := t.TempDir()
 	dst := t.TempDir() + "/agy"
 	reader, writer := io.Pipe()
-	cmd := exec.Command("bash", "-c", agyUnpackScript, "dyna", dst, "-", "0")
+	cmd := exec.Command("bash", "-c", agyUnpackScript, "dyna", dst, "-")
 	cmd.Env = append(os.Environ(), "TMPDIR="+tmp)
 	cmd.Stdin = reader
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
@@ -272,7 +267,7 @@ func TestAgyUnpackKilledLeavesNothingUnderTmpAndTheNextSeedSweeps(t *testing.T) 
 	if found := holdsSentinel(t, tmp, "SENTINEL-KILLED-BYTES"); len(found) != 0 {
 		t.Fatalf("archive bytes under TMPDIR after a killed copy: %v", found)
 	}
-	if err := shellIn(t, tmp, bytes.NewReader(pack), agyUnpackScript, dst, "-", "0"); err != nil {
+	if err := shellIn(t, tmp, bytes.NewReader(pack), agyUnpackScript, dst, "-"); err != nil {
 		t.Fatal(err)
 	}
 	if left, _ := filepath.Glob(dst + "/.seed.??????"); len(left) != 0 {
@@ -280,7 +275,7 @@ func TestAgyUnpackKilledLeavesNothingUnderTmpAndTheNextSeedSweeps(t *testing.T) 
 	}
 }
 
-// A program that appeared while the archive was on its way is not replaced, unless the seed was asked to replace.
+// A program that appeared while the archive was on its way is not replaced.
 func TestAgyUnpackLeavesAProgramInstalledMeanwhile(t *testing.T) {
 	src := agyFolder(t)
 	pack, _ := shell(t, nil, agyPackScript, src, "antigravity", "accounts/main")
@@ -288,122 +283,187 @@ func TestAgyUnpackLeavesAProgramInstalledMeanwhile(t *testing.T) {
 	want := strings.TrimSpace(string(sum))
 	dst := t.TempDir() + "/agy"
 	write(t, dst+"/antigravity", "ANOTHER WRITER'S PROGRAM", 0o755)
-	if err := shellIn(t, t.TempDir(), bytes.NewReader(pack), agyUnpackScript, dst, want, "0"); err != nil {
+	if err := shellIn(t, t.TempDir(), bytes.NewReader(pack), agyUnpackScript, dst, want); err != nil {
 		t.Fatal(err)
 	}
 	if got, _ := os.ReadFile(dst + "/antigravity"); string(got) != "ANOTHER WRITER'S PROGRAM" {
 		t.Fatalf("a program installed meanwhile was replaced: %q", got)
 	}
-	if err := shellIn(t, t.TempDir(), bytes.NewReader(pack), agyUnpackScript, dst, want, "1"); err != nil {
-		t.Fatal(err)
-	}
-	if got, _ := os.ReadFile(dst + "/antigravity"); string(got) != "#!/bin/sh\n" {
-		t.Fatalf("replace kept %q", got)
-	}
 }
 
-// stallBeforePublishing runs an unpack with --replace whose publishing move blocks, so a test can end it exactly between the old
-// account leaving its place and the new one arriving. It returns when the old folder has been moved aside.
-func stallBeforePublishing(t *testing.T, dst string, pack []byte) *exec.Cmd {
+func exitCode(err error) int {
+	var exit *exec.ExitError
+	if errors.As(err, &exit) {
+		return exit.ExitCode()
+	}
+	return -1
+}
+
+// agyArchive packs the test folder and returns the archive and the program's checksum.
+func agyArchive(t *testing.T, token string) ([]byte, string) {
+	t.Helper()
+	src := agyFolder(t)
+	write(t, src+"/accounts/main/token.json", token, 0o600)
+	pack, err := shell(t, nil, agyPackScript, src, "antigravity", "accounts/main")
+	if err != nil {
+		t.Fatal(err)
+	}
+	sum, _ := shell(t, nil, `sha256sum < "$1" | cut -d ' ' -f 1`, src+"/antigravity")
+	return pack, strings.TrimSpace(string(sum))
+}
+
+// stubMv puts a stand-in for mv first on PATH that runs body (bash, with $main the account path) when the move is the one that publishes
+// the account, and then the real mv. It returns the PATH to run the script with.
+func stubMv(t *testing.T, dst, body string) string {
 	t.Helper()
 	real, _ := exec.LookPath("mv")
 	bin := t.TempDir()
-	ready := bin + "/ready"
-	write(t, bin+"/mv", "#!/bin/bash\ncase \"$*\" in *\".seed.\"*accounts/main*) : > "+ready+"; sleep 60 ;; esac\nexec "+real+" \"$@\"\n", 0o755)
-	cmd := exec.Command("bash", "-c", agyUnpackScript, "dyna", dst, "-", "1")
-	cmd.Env = append(os.Environ(), "PATH="+bin+":"+os.Getenv("PATH"))
+	write(t, bin+"/mv", "#!/bin/bash\nmain="+dst+"/accounts/main\ncase \"$*\" in *\".seed.\"*accounts/main*) "+body+" ;; esac\nexec "+real+" \"$@\"\n", 0o755)
+	return bin + ":" + os.Getenv("PATH")
+}
+
+// stallBeforePublishing starts an unpack whose move of the account blocks until the test writes to the returned fifo, and returns once
+// it has got there: the stub writes a ready file and then waits, so the test acts only after that, never after a guess.
+func stallBeforePublishing(t *testing.T, dst, want string, pack []byte) (cmd *exec.Cmd, release string) {
+	t.Helper()
+	dir := t.TempDir()
+	ready, release := dir+"/ready", dir+"/release"
+	if err := syscall.Mkfifo(release, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	path := stubMv(t, dst, ": > "+ready+"; read -r _ < "+release)
+	cmd = exec.Command("bash", "-c", agyUnpackScript, "dyna", dst, want)
+	cmd.Env = append(os.Environ(), "PATH="+path)
 	cmd.Stdin = bytes.NewReader(pack)
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	if err := cmd.Start(); err != nil {
 		t.Fatal(err)
 	}
-	deadline := time.Now().Add(10 * time.Second)
-	for {
-		// The stub writes the file only once it is the publishing move and blocks: the signal goes after that, never before.
+	for deadline := time.Now().Add(10 * time.Second); ; time.Sleep(10 * time.Millisecond) {
 		if _, err := os.Stat(ready); err == nil {
-			return cmd
+			return cmd, release
 		}
 		if time.Now().After(deadline) {
 			syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
-			t.Fatal("the replace never reached its publishing move")
+			t.Fatal("the seed never reached its publishing move")
 		}
-		time.Sleep(10 * time.Millisecond)
 	}
 }
 
-// A signal after the old account has left its place and before the new one is in it puts the old one back; it is never deleted.
-func TestAgyReplaceSignalledBeforePublishingRestoresTheOldAccount(t *testing.T) {
-	src := agyFolder(t)
-	write(t, src+"/accounts/main/token.json", "NEW-ACCOUNT", 0o600)
-	pack, _ := shell(t, nil, agyPackScript, src, "accounts/main")
+// An account folder at the target, or a dangling link at its path, ends the seed with the seeded status before anything is extracted, and
+// nothing changes.
+func TestAgyUnpackRefusesWhateverIsAtTheAccountPath(t *testing.T) {
+	pack, want := agyArchive(t, "NEW")
+	for name, make := range map[string]func(main string){
+		"a folder":        func(main string) { write(t, main+"/token.json", "OLD", 0o600) },
+		"a dangling link": func(main string) { os.MkdirAll(filepath.Dir(main), 0o700); os.Symlink("/nowhere/at/all", main) },
+		"a file":          func(main string) { write(t, main, "OLD", 0o600) },
+	} {
+		dst := t.TempDir() + "/agy"
+		make(dst + "/accounts/main")
+		before, _ := os.Lstat(dst + "/accounts/main")
+		err := shellIn(t, t.TempDir(), bytes.NewReader(pack), agyUnpackScript, dst, want)
+		if exitCode(err) != agyUnpackExitSeeded {
+			t.Fatalf("%s: %v", name, err)
+		}
+		after, lerr := os.Lstat(dst + "/accounts/main")
+		if lerr != nil || !os.SameFile(before, after) {
+			t.Fatalf("%s: the path changed: %v", name, lerr)
+		}
+		if _, err := os.Stat(dst + "/antigravity"); err == nil {
+			t.Fatalf("%s: a refused seed installed the program", name)
+		}
+		if left, _ := filepath.Glob(dst + "/.seed.*"); len(left) != 1 {
+			t.Fatalf("%s: left %v", name, left)
+		}
+	}
+}
+
+// A seed killed after it published the program and before it published the account leaves no account folder at all, and the host does not
+// report agy; the next seed finds the program already there, keeps it, sweeps the killed seed's folder and publishes the account.
+func TestAgyInterruptedSeedLeavesNoAccountAndTheNextOneCompletesIt(t *testing.T) {
+	pack, want := agyArchive(t, "TOKEN")
 	dst := t.TempDir() + "/agy"
-	write(t, dst+"/accounts/main/token.json", "OLD-ACCOUNT", 0o600)
-	cmd := stallBeforePublishing(t, dst, pack)
-	if err := syscall.Kill(-cmd.Process.Pid, syscall.SIGTERM); err != nil {
+	cmd, _ := stallBeforePublishing(t, dst, want, pack)
+	syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+	_ = cmd.Wait()
+	if _, err := os.Lstat(dst + "/accounts/main"); err == nil {
+		t.Fatal("an interrupted seed left an account folder")
+	}
+	if info, err := os.Stat(dst + "/antigravity"); err != nil || info.Mode().Perm()&0o100 == 0 {
+		t.Fatalf("the program is published first: %v %v", info, err)
+	}
+	probe := func() string {
+		out, err := exec.Command("bash", "-c", agyScript, "dyna", "/data", "/mount", "gpu", "/bin/dyna", dst+"/antigravity", dst+"/accounts/main").CombinedOutput()
+		if err != nil {
+			t.Fatal(err, string(out))
+		}
+		return strings.TrimSpace(string(out))
+	}
+	if got := probe(); got != "dyna-agy 0" {
+		t.Fatalf("the probe before the account is published: %q", got)
+	}
+	state, _ := shell(t, nil, agyStateScript, dst)
+	if !strings.Contains(string(state), "dyna-agy-binary") || strings.Contains(string(state), "dyna-agy-account") {
+		t.Fatalf("state: %q", state)
+	}
+	// The program is on the host, so the next seed does not send it: it is asked for the account only.
+	if err := shellIn(t, t.TempDir(), bytes.NewReader(pack), agyUnpackScript, dst, "-"); err != nil {
 		t.Fatal(err)
 	}
-	_ = cmd.Wait()
-	if got, _ := os.ReadFile(dst + "/accounts/main/token.json"); string(got) != "OLD-ACCOUNT" {
-		t.Fatalf("the old account after a signal: %q", got)
+	if got, _ := os.ReadFile(dst + "/accounts/main/token.json"); string(got) != "TOKEN" {
+		t.Fatalf("the account: %q", got)
 	}
-	if _, err := os.Stat(dst + "/accounts/.main.old"); err == nil {
-		t.Fatal("a stray .main.old remains beside a restored account")
+	if left, _ := filepath.Glob(dst + "/.seed.??????"); len(left) != 0 {
+		t.Fatalf("the killed seed's folder was not swept: %v", left)
+	}
+	if got := probe(); got != "dyna-agy 1" {
+		t.Fatalf("the probe after publication: %q", got)
 	}
 }
 
-// A kill that leaves no chance to clean up leaves the old account at .main.old, and the next seed, whatever it is asked, puts it back
-// instead of deleting it.
-func TestAgyReplaceKilledBeforePublishingIsRestoredByTheNextSeed(t *testing.T) {
-	src := agyFolder(t)
-	write(t, src+"/accounts/main/token.json", "NEW-ACCOUNT", 0o600)
-	pack, _ := shell(t, nil, agyPackScript, src, "accounts/main")
+// Of two seeds on one target, the one that takes the lock first publishes, and the other, started while it holds the lock, ends with the
+// seeded status and changes nothing, whatever its source did.
+func TestAgyTwoSeedsOnOneTargetPublishOnce(t *testing.T) {
+	first, want := agyArchive(t, "FIRST")
+	second, _ := agyArchive(t, "SECOND")
 	dst := t.TempDir() + "/agy"
-	write(t, dst+"/accounts/main/token.json", "OLD-ACCOUNT", 0o600)
-	cmd := stallBeforePublishing(t, dst, pack)
-	if err := syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL); err != nil {
+	a, release := stallBeforePublishing(t, dst, want, first)
+	b := exec.Command("bash", "-c", agyUnpackScript, "dyna", dst, want)
+	b.Stdin = bytes.NewReader(second)
+	if err := b.Start(); err != nil {
 		t.Fatal(err)
 	}
-	_ = cmd.Wait()
-	if _, err := os.Stat(dst + "/accounts/main"); err == nil {
-		t.Fatal("the kill left an account in place; the test did not stop between the moves")
-	}
-	if err := shellIn(t, t.TempDir(), bytes.NewReader(pack), agyUnpackScript, dst, "-", "0"); err != nil {
+	if err := os.WriteFile(release, []byte("go\n"), 0o600); err != nil { // the fifo's reader is the stub, which is waiting for it
 		t.Fatal(err)
 	}
-	if got, _ := os.ReadFile(dst + "/accounts/main/token.json"); string(got) != "OLD-ACCOUNT" {
-		t.Fatalf("the next seed did not restore the old account: %q", got)
+	errA, errB := a.Wait(), b.Wait()
+	if errA != nil || exitCode(errB) != agyUnpackExitSeeded {
+		t.Fatalf("first: %v, second: %v", errA, errB)
 	}
-	if _, err := os.Stat(dst + "/accounts/.main.old"); err == nil {
-		t.Fatal("a stray .main.old remains")
+	if got, _ := os.ReadFile(dst + "/accounts/main/token.json"); string(got) != "FIRST" {
+		t.Fatalf("the account: %q", got)
+	}
+	if left, _ := filepath.Glob(dst + "/.seed.??????"); len(left) != 0 {
+		t.Fatalf("left: %v", left)
 	}
 }
 
-// The barrier returns only when the seed lock is free: while a script holds it, as an unpack does for its whole run, the barrier waits and
-// then fails; once the script has ended it passes. A host that cannot be reached fails it too.
-func TestAgyBarrierWaitsForTheUnpackToLetGo(t *testing.T) {
-	dir := t.TempDir() + "/agy"
-	holder := exec.Command("bash", "-c", `mkdir -p "$1"; exec 9> "$1/.seed.lock"; flock -x 9; : > "$1/held"; sleep 60`, "dyna", dir)
-	holder.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-	if err := holder.Start(); err != nil {
-		t.Fatal(err)
+// mv -n succeeds when it declines, so a folder that appears between the last check and the rename ends the seed as seeded, found by the
+// identity of the folder at the path and not by the move's status; what appeared stays.
+func TestAgyAnAccountThatAppearsBeforeTheRenameIsNotTakenForOurs(t *testing.T) {
+	pack, want := agyArchive(t, "OURS")
+	dst := t.TempDir() + "/agy"
+	cmd := exec.Command("bash", "-c", agyUnpackScript, "dyna", dst, want)
+	cmd.Env = append(os.Environ(), "PATH="+stubMv(t, dst, `mkdir -p "$main"; echo THEIRS > "$main/token.json"`))
+	cmd.Stdin = bytes.NewReader(pack)
+	if err := cmd.Run(); exitCode(err) != agyUnpackExitSeeded {
+		t.Fatalf("err = %v", err)
 	}
-	defer func() { _ = syscall.Kill(-holder.Process.Pid, syscall.SIGKILL); _ = holder.Wait() }()
-	for deadline := time.Now().Add(10 * time.Second); ; time.Sleep(10 * time.Millisecond) {
-		if _, err := os.Stat(dir + "/held"); err == nil {
-			break
-		}
-		if time.Now().After(deadline) {
-			t.Fatal("the holder never took the lock")
-		}
+	if got, _ := os.ReadFile(dst + "/accounts/main/token.json"); string(got) != "THEIRS\n" {
+		t.Fatalf("the account: %q", got)
 	}
-	if err := shellIn(t, t.TempDir(), nil, agyBarrierScript, dir, "1"); err == nil {
-		t.Fatal("the barrier passed while the lock was held")
-	}
-	if err := syscall.Kill(-holder.Process.Pid, syscall.SIGKILL); err != nil {
-		t.Fatal(err)
-	}
-	_ = holder.Wait()
-	if err := shellIn(t, t.TempDir(), nil, agyBarrierScript, dir, "5"); err != nil {
-		t.Fatalf("the barrier failed with the lock free: %v", err)
+	if left, _ := filepath.Glob(dst + "/.seed.??????"); len(left) != 0 {
+		t.Fatalf("left: %v", left)
 	}
 }

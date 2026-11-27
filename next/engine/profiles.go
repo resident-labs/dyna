@@ -12,7 +12,6 @@ import (
 	"slices"
 	"strings"
 	"sync"
-	"time"
 
 	"github.com/MichaelKinsy/PiG/ai"
 	"github.com/resident-labs/dyna/box"
@@ -508,7 +507,7 @@ func (s *Service) agyPlacement(ctx context.Context, room contract.RoomID, profil
 		return "", failure(err)
 	}
 	for _, h := range hosts {
-		if h.Agy && !h.Seeding && s.validateSessionHost(ctx, room, h.Name) == nil {
+		if h.Agy && s.validateSessionHost(ctx, room, h.Name) == nil {
 			return "", nil
 		}
 	}
@@ -521,10 +520,7 @@ func (s *Service) agyHostProblem(ctx context.Context, profile contract.ProfileNa
 	if err != nil {
 		return failure(err)
 	}
-	if index := slices.IndexFunc(hosts, func(h box.Host) bool { return h.Name == name && h.Agy }); index >= 0 {
-		if hosts[index].Seeding {
-			return &contract.Error{Code: contract.ErrConflict, Message: fmt.Sprintf("host %s is being seeded with agy; try again shortly", name)}
-		}
+	if slices.ContainsFunc(hosts, func(h box.Host) bool { return h.Name == name && h.Agy }) {
 		return nil
 	}
 	return invalid(fmt.Sprintf("profile %s runs on agy, and host %s does not have agy installed and signed in; host list shows which hosts do, and the owner signs in to Antigravity on %s", profile, name, name))
@@ -563,9 +559,6 @@ func (s *Service) checkHarnessSwitch(ctx context.Context, target store.Session, 
 			return &contract.Error{Code: contract.ErrConflict, Message: fmt.Sprintf("session %s's box has no host yet, and agy needs the host its files are on; try again once its box has started", target.Name)}
 		}
 		if problem := s.agyHostProblem(ctx, profile, current.Host); problem != nil {
-			if problem.Code == contract.ErrConflict {
-				return problem // the host is being seeded, and the text says so
-			}
 			problem.Code = contract.ErrConflict
 			problem.Message = fmt.Sprintf("session %s runs on host %q, which does not have agy installed and signed in, and its files cannot move to another host; the owner can sign in to Antigravity on %s, or start a new session on profile %s", target.Name, current.Host, current.Host, profile)
 			return problem
@@ -592,8 +585,8 @@ func (s *Service) sameHostAgy(ctx context.Context, profile contract.ProfileName,
 	return s.agyHostProblem(ctx, profile, b.Host)
 }
 
-// AgySeedProblem says why the owner may not seed a host at all, or nil: only the owner seeds, never the source itself, an exec-only host
-// or one with agents off. Whether agy runs on it now is decided in the transaction that marks it, by BeginAgySeed.
+// AgySeedProblem says why the owner may not seed a host, or nil: only the owner seeds, never the source itself, an exec-only host or one
+// with agents off. A host that is seeded already, or that has agy sessions, has an account folder, which the copy refuses to touch.
 func (s *Service) AgySeedProblem(ctx context.Context, caller contract.Principal, name contract.HostName) *contract.Error {
 	if caller.Kind != contract.PrincipalOwner {
 		return forbidden()
@@ -613,61 +606,4 @@ func (s *Service) AgySeedProblem(ctx context.Context, caller contract.Principal,
 		return invalid(fmt.Sprintf("host %s is exec-only or has agents off, so it never runs agy sessions", name))
 	}
 	return nil
-}
-
-// BeginAgySeed marks the host as held by the seed with this token. In the same transaction it refuses when a box on the host is, or
-// wants to be, agy: that box has the account folder mounted, or will, and a copy would change it from beneath it. While the mark stands no
-// agy box starts on the host, and a switch to agy there is refused, each in its own transaction.
-func (s *Service) BeginAgySeed(ctx context.Context, name contract.HostName, token, replaces string) *contract.Error {
-	busy, err := s.store.BeginAgySeed(ctx, name, token, replaces)
-	if errors.Is(err, store.ErrHostSeeding) {
-		return &contract.Error{Code: contract.ErrConflict, Message: fmt.Sprintf("host %s is being seeded already", name)}
-	}
-	if err != nil {
-		return failure(err)
-	}
-	if len(busy) > 0 {
-		return &contract.Error{Code: contract.ErrConflict, Message: fmt.Sprintf("agy sessions run on host %s (%s); close them, or let them end, before seeding it", name, strings.Join(busy, ", "))}
-	}
-	return nil
-}
-
-// AgySeedMark is the token of the seed holding the host, or "" when none does.
-func (s *Service) AgySeedMark(ctx context.Context, name contract.HostName) (string, error) {
-	return s.store.AgySeedMark(ctx, name)
-}
-
-// EndAgySeedAfter ends a seed's hold on the host on every way out of it, on a context of its own so that a cancelled request still ends it.
-// A copy that reported its result ended; any other end is unknown, since an ssh cut or cancelled after the stream's completion marker does
-// not show that the remote unpack stopped before it published. That one clears the mark only after the barrier shows it is over, and
-// otherwise leaves it: the host stays closed to agy, and the next seed of it runs the barrier first.
-func (s *Service) EndAgySeedAfter(name contract.HostName, token string, known bool, barrier func(context.Context, contract.HostName) error) {
-	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
-	defer cancel()
-	if !known {
-		if err := barrier(ctx, name); err != nil {
-			log.Printf("agy seed: host %s stays marked: %v", name, err)
-			return
-		}
-	}
-	if err := s.store.EndAgySeed(ctx, name, token); err != nil {
-		log.Printf("agy seed: host %s could not be released: %v", name, err)
-	}
-}
-
-// ReleaseAgySeeds runs at engine start: a mark that survived the process that held it is of an unknown end, so each marked host is let go
-// only once the barrier shows its unpack is over, and left marked, with one line logged, when the host cannot say.
-func (s *Service) ReleaseAgySeeds(ctx context.Context, barrier func(context.Context, contract.HostName) error) {
-	hosts, err := s.store.SeededHosts(ctx)
-	if err != nil {
-		log.Printf("agy seed: marked hosts could not be read: %v", err)
-		return
-	}
-	for _, name := range hosts {
-		token, err := s.store.AgySeedMark(ctx, name)
-		if err != nil {
-			continue
-		}
-		s.EndAgySeedAfter(name, token, false, barrier)
-	}
 }

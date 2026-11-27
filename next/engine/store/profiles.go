@@ -78,25 +78,6 @@ func (s *Store) SetSessionProfile(ctx context.Context, target contract.SessionID
 					return ErrNoHandoff
 				}
 			}
-			var host sql.NullString
-			if err := tx.QueryRowContext(ctx, "SELECT host FROM boxes WHERE session=?", target).Scan(&host); err != nil {
-				return err
-			}
-			if harness.To == contract.HarnessAgy && host.Valid {
-				if seeding, err := hostSeeding(ctx, tx, contract.HostName(host.String)); err != nil || seeding {
-					if err == nil {
-						err = ErrHostSeeding
-					}
-					return err
-				}
-			}
-			wanted := 0
-			if harness.To == contract.HarnessAgy {
-				wanted = 1
-			}
-			if _, err := tx.ExecContext(ctx, "UPDATE boxes SET agy=? WHERE session=?", wanted, target); err != nil {
-				return err
-			}
 			// The handoff is due from the next turn, not from one already running.
 			if _, err := tx.ExecContext(ctx, "UPDATE sessions SET handoff=MAX(1,(SELECT COALESCE(MAX(seq),0) FROM events)) WHERE id=?", target); err != nil {
 				return err
@@ -155,9 +136,6 @@ func (s *Store) setProfile(ctx context.Context, tx *sql.Tx, target contract.Sess
 type HarnessSwitch struct {
 	// RequireHandoff holds the switch to a box that said it can hand a conversation over, read in the same transaction.
 	RequireHandoff bool
-	// To is the harness the session moves to. The box's wanted harness is written in the same transaction, and a move to agy is refused
-	// there while a seed holds the box's host.
-	To contract.Harness
 }
 
 // TurnHarness is the harness of the box a turn was dispatched on, which is the one that served it: dispatch waits for a box made

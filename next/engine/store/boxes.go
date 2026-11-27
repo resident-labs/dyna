@@ -127,11 +127,6 @@ func (s *Store) TransitionBox(ctx context.Context, b box.Box, to contract.BoxSta
 		if next.Host != "" {
 			host = &next.Host
 		}
-		if admission {
-			if err := refuseSeeded(ctx, tx, b.ID, host); err != nil {
-				return err
-			}
-		}
 		result, err := tx.ExecContext(ctx, "UPDATE boxes SET host=?,image=?,size=?,state=?,reason=?,slice=?,updated_at=?,due_at=CASE WHEN ?='ready' THEN 0 ELSE due_at END WHERE id=? AND state=? AND (want='run' OR ?!='ready') AND (?!='ready' OR ? NOT IN ('creating','starting') OR due_at=0 OR due_at>?) AND (?!='lost' OR ?!='ready' OR EXISTS (SELECT 1 FROM hosts WHERE name=boxes.host AND state!='unreachable' AND state!='removed'))", host, next.Image, next.Size.Name, next.State, next.Reason, next.Slice, event.Time.UnixMilli(), next.State, next.ID, b.State, next.State, next.State, b.State, event.Time.UnixMilli(), b.State, next.State)
 		if err := noRows(result, err, sql.ErrNoRows); err != nil {
 			return err
@@ -182,11 +177,6 @@ func (s *Store) SetBoxLifecycle(ctx context.Context, old, next box.Box, due time
 		admission := (old.State == contract.BoxPending || old.State == contract.BoxStopped) && next.State != contract.BoxClosing && next.State != contract.BoxStopped
 		if s.volumeRemovals[old.ID] != nil && (admission || next.State == contract.BoxReady) {
 			return nil
-		}
-		if admission {
-			if err := refuseSeeded(ctx, tx, old.ID, host); err != nil {
-				return err
-			}
 		}
 		// created_at is the allocation time for disk accounting, not the waiter's enqueue time.
 		// A stored Stop is not host loss, even when an old run snapshot races it.

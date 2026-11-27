@@ -8,6 +8,7 @@ import (
 	"io"
 	"log"
 	"os"
+	"os/exec"
 	"strings"
 	"sync"
 	"testing"
@@ -20,14 +21,14 @@ import (
 
 // agyHostFake answers the seeding scripts of one host: its state over the framed path, and the pack it makes and the unpack it is handed as streams.
 type agyHostFake struct {
-	mu       sync.Mutex
-	state    string
-	pack     string
-	failPack bool
-	packs    []string // the members the pack script was asked for
-	unpacked [][]byte
-	replaces []string
-	failUnp  bool
+	mu         sync.Mutex
+	state      string
+	pack       string
+	failPack   bool
+	packs      []string // the members the pack script was asked for
+	unpacked   [][]byte
+	unpackCmds []string
+	unpackErr  error // what the unpack ends with
 }
 
 func (f *agyHostFake) Run(_ context.Context, input []byte, args ...string) ([]byte, error) {
@@ -71,11 +72,8 @@ func (f *agyHostFake) RunStream(_ context.Context, in io.Reader, out io.Writer, 
 			return err
 		}
 		f.unpacked = append(f.unpacked, got)
-		f.replaces = append(f.replaces, command[strings.Index(command, "dyna-agy-unpack"):])
-		if f.failUnp {
-			return errors.New("exit status 2")
-		}
-		return nil
+		f.unpackCmds = append(f.unpackCmds, command[strings.Index(command, "dyna-agy-unpack"):])
+		return f.unpackErr
 	}
 	return errors.New("unexpected stream command")
 }
@@ -105,7 +103,7 @@ func TestSeedAgyCarriesTheFilesAndOnlyThere(t *testing.T) {
 	source := &agyHostFake{state: signedIn, pack: sentinel}
 	target := &agyHostFake{state: "dyna-agy-arch Linux x86_64\n"}
 	b := seedRig(t, source, target)
-	if err := b.SeedAgy(t.Context(), "other", false); err != nil {
+	if err := b.SeedAgy(t.Context(), "other"); err != nil {
 		t.Fatal(err)
 	}
 	if len(target.unpacked) != 1 || string(target.unpacked[0]) != sentinel {
@@ -114,15 +112,15 @@ func TestSeedAgyCarriesTheFilesAndOnlyThere(t *testing.T) {
 	if len(source.packs) != 1 || !strings.Contains(source.packs[0], "antigravity") || !strings.Contains(source.packs[0], "accounts/main") {
 		t.Fatalf("the source packed %v: a host with neither gets both", source.packs)
 	}
-	if !strings.Contains(target.replaces[0], "0123abcd") {
-		t.Fatalf("the program's checksum did not go to the target: %s", target.replaces[0])
+	if !strings.Contains(target.unpackCmds[0], "0123abcd") {
+		t.Fatalf("the program's checksum did not go to the target: %s", target.unpackCmds[0])
 	}
 	// The source failing to pack, and the target failing to unpack, each give a fixed text.
 	for name, rig := range map[string][2]*agyHostFake{
 		"pack":   {{state: signedIn, pack: sentinel, failPack: true}, {state: "dyna-agy-arch Linux x86_64\n"}},
-		"unpack": {{state: signedIn, pack: sentinel}, {state: "dyna-agy-arch Linux x86_64\n", failUnp: true}},
+		"unpack": {{state: signedIn, pack: sentinel}, {state: "dyna-agy-arch Linux x86_64\n", unpackErr: errors.New("exit status 2")}},
 	} {
-		if err := seedRig(t, rig[0], rig[1]).SeedAgy(t.Context(), "other", false); err == nil || strings.Contains(err.Error(), sentinel) {
+		if err := seedRig(t, rig[0], rig[1]).SeedAgy(t.Context(), "other"); err == nil || strings.Contains(err.Error(), sentinel) {
 			t.Fatalf("%s: err = %v", name, err)
 		}
 	}
@@ -131,31 +129,32 @@ func TestSeedAgyCarriesTheFilesAndOnlyThere(t *testing.T) {
 	}
 }
 
-func TestSeedAgyLeavesWhatIsThereAndGuardsTheArchitecture(t *testing.T) {
-	// A host with both is left alone, with nothing packed.
+func TestSeedAgyRefusesASeededHostAndGuardsTheArchitecture(t *testing.T) {
+	// A host that has an account folder is refused with the way to seed it again, and nothing is packed or sent.
 	source := &agyHostFake{state: signedIn, pack: "x"}
 	both := &agyHostFake{state: signedIn}
-	if err := seedRig(t, source, both).SeedAgy(t.Context(), "other", false); err != nil || len(source.packs) != 0 || len(both.unpacked) != 0 {
-		t.Fatalf("a host that has agy was seeded: %v %v %v", err, source.packs, both.unpacked)
+	err := seedRig(t, source, both).SeedAgy(t.Context(), "other")
+	var seeded SeededError
+	if !errors.As(err, &seeded) || len(source.packs) != 0 || len(both.unpacked) != 0 {
+		t.Fatalf("a seeded host: %v %v %v", err, source.packs, both.unpacked)
 	}
-	// With replace, its account folder is replaced and its program is not sent.
-	if err := seedRig(t, source, both).SeedAgy(t.Context(), "other", true); err != nil || len(both.unpacked) != 1 || strings.Contains(source.packs[0], " 'antigravity'") {
-		t.Fatalf("replace: %v %v", err, source.packs)
+	if !strings.Contains(err.Error(), "/data/agy/accounts/main") || !strings.Contains(err.Error(), "remove") || !strings.Contains(err.Error(), "every agy process") {
+		t.Fatalf("the refusal does not say how to seed again: %v", err)
 	}
 	// A host with the program and no account gets the account only.
 	account := &agyHostFake{state: "dyna-agy-binary\ndyna-agy-arch Linux aarch64\n"}
 	source = &agyHostFake{state: signedIn, pack: "x"}
-	if err := seedRig(t, source, account).SeedAgy(t.Context(), "other", false); err != nil || strings.Contains(source.packs[0], " 'antigravity'") {
+	if err := seedRig(t, source, account).SeedAgy(t.Context(), "other"); err != nil || strings.Contains(source.packs[0], " 'antigravity'") {
 		t.Fatalf("account only: %v %v", err, source.packs)
 	}
 	// A host without the program and of another kind gets nothing, and it is not a fault of the source.
 	source = &agyHostFake{state: signedIn, pack: "x"}
 	arm := &agyHostFake{state: "dyna-agy-arch Linux aarch64\n"}
-	if err := seedRig(t, source, arm).SeedAgy(t.Context(), "other", false); !errors.Is(err, ErrAgyArch) || len(source.packs) != 0 || len(arm.unpacked) != 0 {
+	if err := seedRig(t, source, arm).SeedAgy(t.Context(), "other"); !errors.Is(err, ErrAgyArch) || len(source.packs) != 0 || len(arm.unpacked) != 0 {
 		t.Fatalf("arch: %v %v", err, source.packs)
 	}
-	// A source without agy has nothing to copy.
-	if err := seedRig(t, &agyHostFake{state: "dyna-agy-arch Linux x86_64\n"}, &agyHostFake{state: "dyna-agy-arch Linux x86_64\n"}).SeedAgy(t.Context(), "other", false); err == nil {
+	// A host with the program and no account gets the account only, and the program is not sent.
+	if err := seedRig(t, &agyHostFake{state: "dyna-agy-arch Linux x86_64\n"}, &agyHostFake{state: "dyna-agy-arch Linux x86_64\n"}).SeedAgy(t.Context(), "other"); err == nil {
 		t.Fatal("seeded from a source with no agy")
 	}
 }
@@ -164,10 +163,21 @@ func TestSeedAgyLeavesWhatIsThereAndGuardsTheArchitecture(t *testing.T) {
 func TestSeedAgyAFailedPackIsNeverACleanEndForTheTarget(t *testing.T) {
 	source := &agyHostFake{state: signedIn, pack: "PARTIAL", failPack: true}
 	target := &agyHostFake{state: "dyna-agy-arch Linux x86_64\n"}
-	if err := seedRig(t, source, target).SeedAgy(t.Context(), "other", false); err == nil {
+	if err := seedRig(t, source, target).SeedAgy(t.Context(), "other"); err == nil {
 		t.Fatal("a failed pack was a good seed")
 	}
 	if len(target.unpacked) != 0 {
 		t.Fatalf("the target took a cut archive: %q", target.unpacked)
+	}
+}
+
+// A seed that loses to another one ends with the seeded answer, not with the broken pipe its source gets when the target stops reading.
+func TestSeedAgyALosingSeedSaysSeededNotBrokenPipe(t *testing.T) {
+	lost := exec.Command("bash", "-c", "exit 17").Run() // a real exit status, as ssh hands the remote script's on
+	source := &agyHostFake{state: signedIn, pack: "ARCHIVE"}
+	target := &agyHostFake{state: "dyna-agy-arch Linux x86_64\n", unpackErr: lost}
+	err := seedRig(t, source, target).SeedAgy(t.Context(), "other")
+	if !errors.As(err, new(SeededError)) {
+		t.Fatalf("err = %v", err)
 	}
 }

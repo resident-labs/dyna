@@ -155,8 +155,6 @@ func admissionReason(reason string) string {
 		return "no ready host has a GPU"
 	case box.PendingNoAgy:
 		return "no ready host has agy installed and signed in"
-	case box.PendingAgySeeding:
-		return "the host is being seeded with agy; the box starts when the seed ends"
 	case box.PendingPoolNode:
 		return "waiting for a pool node"
 	case box.PendingPoolFailed:

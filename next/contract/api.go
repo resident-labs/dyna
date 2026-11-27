@@ -424,10 +424,9 @@ type HostSetLimitsRequest struct {
 type HostSetLimitsResponse struct{}
 
 // HostAgySeedRequest copies the signed-in agy account folder, and the program if the host has none, to a host from the one the owner
-// signed in on. A folder already there stays unless Replace is set. Refused while a session on an agy profile runs on the host.
+// signed in on, once: a host that already has an account folder is refused, and the folder is never replaced in place.
 type HostAgySeedRequest struct {
-	Host    HostName `json:"host"`
-	Replace bool     `json:"replace,omitempty"`
+	Host HostName `json:"host"`
 }
 type HostAgySeedResponse struct{}
 

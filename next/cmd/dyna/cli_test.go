@@ -1050,14 +1050,10 @@ func TestServiceSendCLI(t *testing.T) {
 	}
 }
 
-func TestAgySeedMapsHostAndReplace(t *testing.T) {
+func TestAgySeedMapsHost(t *testing.T) {
 	f := &fakeClient{}
 	runCLI(t, f, "agy", "seed", "node")
-	if f.agySeed == nil || f.agySeed.Host != "node" || f.agySeed.Replace {
-		t.Fatalf("%+v", f.agySeed)
-	}
-	runCLI(t, f, "agy", "seed", "node", "--replace")
-	if !f.agySeed.Replace {
+	if f.agySeed == nil || f.agySeed.Host != "node" {
 		t.Fatalf("%+v", f.agySeed)
 	}
 }

@@ -6,7 +6,6 @@ import (
 	"database/sql"
 	"encoding/hex"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -347,7 +346,7 @@ func (s *Store) Hosts(ctx context.Context) ([]box.Host, error) {
 }
 
 func (s *Store) hosts(ctx context.Context, where string) ([]box.Host, error) {
-	rows, err := s.Read().QueryContext(ctx, `SELECT h.name, h.ssh, h.state, h.cpus, h.mem_bytes, h.disk_bytes, h.disk_floor, h.disk_total, h.checked_at, h.maintained_at, h.engine_host, h.pool, h.box, h.agents, h.ci, h.ci_scale, h.create_problem, h.exec_only, h.gpus, h.agy, h.seeding != '', hr.room FROM hosts h LEFT JOIN host_rooms hr ON hr.host=h.name WHERE `+where+` ORDER BY h.name,hr.room`)
+	rows, err := s.Read().QueryContext(ctx, `SELECT h.name, h.ssh, h.state, h.cpus, h.mem_bytes, h.disk_bytes, h.disk_floor, h.disk_total, h.checked_at, h.maintained_at, h.engine_host, h.pool, h.box, h.agents, h.ci, h.ci_scale, h.create_problem, h.exec_only, h.gpus, h.agy, hr.room FROM hosts h LEFT JOIN host_rooms hr ON hr.host=h.name WHERE `+where+` ORDER BY h.name,hr.room`)
 	if err != nil {
 		return nil, err
 	}
@@ -359,7 +358,7 @@ func (s *Store) hosts(ctx context.Context, where string) ([]box.Host, error) {
 		var room sql.NullString
 		var agents bool
 		var gpus string
-		if err := rows.Scan(&h.Name, &h.SSH, &h.State, &h.CPUs, &h.MemBytes, &h.DiskBytes, &h.DiskFloor, &h.DiskTotal, &checked, &maintained, &h.EngineHost, &h.Pool, &h.Box, &agents, &h.CI, &h.CIScale, &h.Problem, &h.ExecOnly, &gpus, &h.Agy, &h.Seeding, &room); err != nil {
+		if err := rows.Scan(&h.Name, &h.SSH, &h.State, &h.CPUs, &h.MemBytes, &h.DiskBytes, &h.DiskFloor, &h.DiskTotal, &checked, &maintained, &h.EngineHost, &h.Pool, &h.Box, &agents, &h.CI, &h.CIScale, &h.Problem, &h.ExecOnly, &gpus, &h.Agy, &room); err != nil {
 			return nil, err
 		}
 		if len(hosts) == 0 || hosts[len(hosts)-1].Name != h.Name {
@@ -437,108 +436,6 @@ func (s *Store) SetHostGPUs(ctx context.Context, host contract.HostName, gpus []
 		_, err := tx.ExecContext(ctx, "UPDATE hosts SET gpus=? WHERE name=?", text, host)
 		return err
 	})
-}
-
-// ErrHostSeeding says an agy box was refused because its host is being seeded with agy.
-var ErrHostSeeding = errors.New("the host is being seeded with agy")
-
-// hostSeeding says the host is marked by a seed, read inside the transaction that decides on an agy box.
-func hostSeeding(ctx context.Context, tx *sql.Tx, host contract.HostName) (bool, error) {
-	var token string
-	err := tx.QueryRowContext(ctx, "SELECT seeding FROM hosts WHERE name=?", host).Scan(&token)
-	if errors.Is(err, sql.ErrNoRows) {
-		return false, nil
-	}
-	return token != "", err
-}
-
-// refuseSeeded refuses, in the transaction that would start a box on a host, a box that wants agy there while a seed holds the host.
-func refuseSeeded(ctx context.Context, tx *sql.Tx, id contract.BoxID, host *contract.HostName) error {
-	if host == nil {
-		return nil
-	}
-	var wants bool
-	if err := tx.QueryRowContext(ctx, "SELECT agy FROM boxes WHERE id=?", id).Scan(&wants); err != nil || !wants {
-		if errors.Is(err, sql.ErrNoRows) {
-			return nil
-		}
-		return err
-	}
-	if seeding, err := hostSeeding(ctx, tx, *host); err != nil || seeding {
-		if err == nil {
-			err = ErrHostSeeding
-		}
-		return err
-	}
-	return nil
-}
-
-// BeginAgySeed marks a host as held by the seed whose token this is, in one transaction with its check that no box on the host is, or
-// is about to be, agy: a box whose agent said at its last hello that it serves agy, or that wants agy, in creating, starting, ready,
-// closing or lost, or pending with a host. It returns the names of such sessions, and marks nothing, when there are any. A mark already there is taken over only
-// by a caller that read it as replaces, after the barrier that shows its seed ended: a different mark is another seed's, which is running.
-func (s *Store) BeginAgySeed(ctx context.Context, host contract.HostName, token, replaces string) ([]string, error) {
-	var busy []string
-	err := s.Write(ctx, func(tx *sql.Tx) error {
-		busy = nil
-		rows, err := tx.QueryContext(ctx, "SELECT s.name FROM boxes b JOIN sessions s ON s.id=b.session WHERE b.host=? AND b.state IN (?,?,?,?,?,?) AND (b.harness=? OR b.agy=1) ORDER BY s.name", host, contract.BoxPending, contract.BoxCreating, contract.BoxStarting, contract.BoxReady, contract.BoxClosing, contract.BoxLost, contract.HarnessAgy)
-		if err != nil {
-			return err
-		}
-		defer rows.Close()
-		for rows.Next() {
-			var name string
-			if err := rows.Scan(&name); err != nil {
-				return err
-			}
-			busy = append(busy, name)
-		}
-		if err := rows.Err(); err != nil || len(busy) > 0 {
-			return err
-		}
-		result, err := tx.ExecContext(ctx, "UPDATE hosts SET seeding=? WHERE name=? AND seeding=?", token, host, replaces)
-		if err != nil {
-			return err
-		}
-		if n, _ := result.RowsAffected(); n == 0 {
-			return ErrHostSeeding
-		}
-		return nil
-	})
-	return busy, err
-}
-
-// EndAgySeed clears the mark of the seed with this token, and no other's.
-func (s *Store) EndAgySeed(ctx context.Context, host contract.HostName, token string) error {
-	return s.Write(ctx, func(tx *sql.Tx) error {
-		_, err := tx.ExecContext(ctx, "UPDATE hosts SET seeding='' WHERE name=? AND seeding=?", host, token)
-		return err
-	})
-}
-
-// AgySeedMark is the token of the seed that holds the host, or "".
-func (s *Store) AgySeedMark(ctx context.Context, host contract.HostName) (string, error) {
-	var token string
-	err := s.Read().QueryRowContext(ctx, "SELECT seeding FROM hosts WHERE name=?", host).Scan(&token)
-	return token, err
-}
-
-// SeededHosts names the hosts a seed holds.
-func (s *Store) SeededHosts(ctx context.Context) ([]contract.HostName, error) {
-	rows, err := s.Read().QueryContext(ctx, "SELECT name FROM hosts WHERE seeding!='' ORDER BY name")
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var hosts []contract.HostName
-	for rows.Next() {
-		var host contract.HostName
-		if err := rows.Scan(&host); err != nil {
-			return nil, err
-		}
-		hosts = append(hosts, host)
-	}
-	return hosts, rows.Err()
 }
 
 // SetHostAgy records whether a host's latest probe found agy installed and signed in.

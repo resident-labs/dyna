@@ -4,10 +4,9 @@ import (
 	"context"
 	"errors"
 	"io"
+	"os/exec"
 	"path/filepath"
-	"strconv"
 	"strings"
-	"time"
 
 	"github.com/resident-labs/dyna/box"
 )
@@ -25,7 +24,7 @@ type AgyState struct {
 
 // agyStateScript prints what is at $1 (the agy folder). It stats and hashes the program and never opens the account folder.
 const agyStateScript = `if [ -f "$1/antigravity" ] && [ -x "$1/antigravity" ]; then echo dyna-agy-binary; echo "dyna-agy-sum $(sha256sum < "$1/antigravity" | cut -d ' ' -f 1)"; fi
-if [ -d "$1/accounts/main" ]; then echo dyna-agy-account; fi
+if [ -e "$1/accounts/main" ] || [ -L "$1/accounts/main" ]; then echo dyna-agy-account; fi
 echo "dyna-agy-arch $(uname -s -m)"
 `
 
@@ -40,47 +39,46 @@ trap 'rm -f -- "$marker"' EXIT
 tar -c -f - --exclude=accounts/main/antigravity-acp/conversations --exclude=accounts/main/antigravity-acp/log -- "$@" 2>/dev/null
 tar -c -f - --transform='s,.*,.dyna-complete,' -- "$marker" 2>/dev/null`
 
-// agyUnpackScript extracts the tar on stdin under a temporary folder in the agy folder $1, on the folder's own filesystem and never under /tmp,
-// requires the complete marker, checks the program's checksum $2 (or "-" for none), and moves each piece into place, so a half copy is
-// never at the final path. The temporary folder is 0700 and goes on every way out, even a signal; one left by a kill is swept at the next
-// seed, under the lock. The account folder is 0700. A present account folder is left alone unless $3 is 1. A replaced one is kept at
-// accounts/.main.old, outside the temporary folder, from the moment it leaves its place until the new one is in it and complete: any way
-// out in between (a signal, a failed move) puts it back, and a kill leaves it for the next seed, which puts it back when accounts/main
-// is missing and removes it only when accounts/main is there. The old copy is never deleted while accounts/main is not. The program is published only if the path is still free once the lock is held, or when $3 is 1.
+// agyUnpackExitSeeded is the unpack script's exit status for a host that has an account folder: nothing was changed.
+const agyUnpackExitSeeded = 17
+
+// ErrAgySeeded says the host has an account folder, so the seed copied nothing. It is a fact about the host, not a fault.
+var ErrAgySeeded = errors.New("the host has an agy account folder already")
+
+// agyUnpackScript extracts the tar on stdin under a temporary folder in the agy folder $1, on the folder's own filesystem and never under
+// /tmp, and publishes it: the program first, only if there is none, after its checksum $2 (or "-" for none) matches, and the account
+// folder last, by one no-clobber rename of the complete folder. All of it, the sweep of an earlier seed's temporary folder included, runs
+// under one flock, so two seeds never interleave. An existing accounts/main, a dangling link at that path too, ends it with status 17
+// before anything is extracted and again just before the rename; the rename's result is checked by the folder's identity (a stat, never a
+// read of its contents), because mv -n succeeds when it declines. The temporary folder is 0700 and goes on every way out, even a signal;
+// one left by a kill is swept by the next seed. A kill after the program is published leaves the program and no account folder, which a
+// later seed completes. Dyna reads nothing inside the account folder.
 const agyUnpackScript = `set -eu
-dir=$1 want=$2 replace=$3
+dir=$1 want=$2
+main=$dir/accounts/main
+seeded() { [ -e "$main" ] || [ -L "$main" ]; }
 mkdir -p -m 0700 -- "$dir"
 exec 9> "$dir/.seed.lock"
 flock -x 9
-main=$dir/accounts/main old=$dir/accounts/.main.old
-if [ -e "$old" ]; then
- if [ -e "$main" ]; then rm -rf -- "$old"; else mv -T -- "$old" "$main"; fi
-fi
 rm -rf -- "$dir"/.seed.??????
+if seeded; then exit 17; fi
 tmp=$(mktemp -d "$dir/.seed.XXXXXX")
-trap 'if [ -e "$old" ] && [ ! -e "$main" ]; then mv -T -- "$old" "$main"; fi; rm -rf -- "$tmp"' EXIT
+trap 'rm -rf -- "$tmp"' EXIT
 trap 'exit 1' HUP INT TERM
 tar -x -i -p --no-same-owner -C "$tmp" -f -
 [ -f "$tmp/.dyna-complete" ]
+[ -d "$tmp/accounts/main" ]
 if [ "$want" != - ]; then
  test "$(sha256sum < "$tmp/antigravity" | cut -d ' ' -f 1)" = "$want"
  chmod 0755 "$tmp/antigravity"
- if [ "$replace" = 1 ]; then
-  mv -f -T -- "$tmp/antigravity" "$dir/antigravity"
- elif [ ! -e "$dir/antigravity" ]; then
-  mv -T -- "$tmp/antigravity" "$dir/antigravity"
- fi
+ if [ ! -e "$dir/antigravity" ]; then mv -T -- "$tmp/antigravity" "$dir/antigravity"; fi
 fi
-if [ -d "$tmp/accounts/main" ]; then
- chmod 0700 "$tmp/accounts/main"
- mkdir -p -m 0700 -- "$dir/accounts"
- if [ -e "$main" ]; then
-  [ "$replace" = 1 ] || exit 0
-  mv -T -- "$main" "$old"
- fi
- mv -T -- "$tmp/accounts/main" "$main"
- rm -rf -- "$old"
-fi`
+chmod 0700 "$tmp/accounts/main"
+mkdir -p -m 0700 -- "$dir/accounts"
+identity=$(stat -c %d:%i -- "$tmp/accounts/main")
+if seeded; then exit 17; fi
+mv -T -n -- "$tmp/accounts/main" "$main"
+[ "$(stat -c %d:%i -- "$main")" = "$identity" ] || exit 17`
 
 func agyDir(layout box.Layout) string { return filepath.Dir(layout.HostAgyBinary()) }
 
@@ -104,21 +102,6 @@ func (h *Host) AgyState(ctx context.Context, layout box.Layout) (AgyState, error
 		}
 	}
 	return state, nil
-}
-
-// agyBarrierScript returns when no unpack on the host is running: it takes the lock the unpack holds, and fails if that takes longer than
-// $2 seconds. A script that was cut off, its ssh gone, holds the lock until it has ended or died, so this is the proof that it has.
-const agyBarrierScript = `set -eu
-mkdir -p -m 0700 -- "$1"
-exec 9> "$1/.seed.lock"
-flock -x -w "$2" 9`
-
-// AgyBarrier waits, up to wait, for a seed's unpack on this host to be over, on a fresh ssh command of its own.
-func (h *Host) AgyBarrier(ctx context.Context, layout box.Layout, wait time.Duration) error {
-	if _, err := h.run(ctx, "bash", "-c", agyBarrierScript, "dyna-agy-barrier", agyDir(layout), strconv.Itoa(int(wait.Seconds()))); err != nil {
-		return errors.New("could not tell whether a seed of the agy files has ended on the host")
-	}
-	return nil
 }
 
 // stream runs a command on the host with its input and output as streams, over the host's own connection and under its gates. A driver that
@@ -171,19 +154,20 @@ func (h *Host) PackAgy(ctx context.Context, layout box.Layout, binary, account b
 	return nil
 }
 
-// UnpackAgy installs the archive from PackAgy that r delivers under this host's own agy folder. binarySum is the program's checksum on
-// the source, or "" when the archive holds no program. replace puts the archive's account folder over one that is there.
-func (h *Host) UnpackAgy(ctx context.Context, layout box.Layout, r io.Reader, binarySum string, replace bool) error {
-	want, swap := binarySum, "0"
+// UnpackAgy installs the archive from PackAgy that r delivers under this host's own agy folder, and says ErrAgySeeded when the host has an
+// account folder already. binarySum is the program's checksum on the source, or "" when the archive holds no program.
+func (h *Host) UnpackAgy(ctx context.Context, layout box.Layout, r io.Reader, binarySum string) error {
+	want := binarySum
 	if want == "" {
 		want = "-"
 	}
-	if replace {
-		swap = "1"
-	}
-	if err := h.stream(ctx, r, nil, "bash", "-c", agyUnpackScript, "dyna-agy-unpack", agyDir(layout), want, swap); err != nil {
+	if err := h.stream(ctx, r, nil, "bash", "-c", agyUnpackScript, "dyna-agy-unpack", agyDir(layout), want); err != nil {
 		if ctx.Err() != nil {
 			return ctx.Err()
+		}
+		var exit *exec.ExitError
+		if errors.As(err, &exit) && exit.ExitCode() == agyUnpackExitSeeded {
+			return ErrAgySeeded
 		}
 		return errors.New("could not unpack the agy files on the target host")
 	}
