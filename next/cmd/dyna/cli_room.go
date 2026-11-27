@@ -177,6 +177,10 @@ func roomCommand(getClient func() client) *cobra.Command {
 	}}
 	addRepo.Flags().BoolVar(&makeDefault, "default", false, "Make this the room default")
 	addRepo.Flags().StringVar(&prEvents, "pr-events", "off", "Room-wide PR events: on or off; left as it is when omitted.")
+	removeRepo := &cobra.Command{Use: "remove ROOM REPO", Short: "Remove a repository from the room", Long: "Remove the room's repository link, PR event snapshots and closed tracking entries. Refuses the room default or a repository used by open sessions, PRs or issues. Other rooms keep their links; if none remain, Dyna stops its CI runners and drops its repository polling state.", Args: cobra.ExactArgs(2), RunE: func(cmd *cobra.Command, args []string) error {
+		_, err := getClient().RoomRepoRemove(cmd.Context(), contract.RoomRepoRemoveRequest{Room: contract.RoomID(args[0]), Repo: contract.RepoName(args[1])})
+		return err
+	}}
 	listRepos := &cobra.Command{Use: "list ROOM", Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
 		r, err := getClient().RoomRepos(cmd.Context(), contract.RoomReposRequest{Room: contract.RoomID(args[0])})
 		if err != nil {
@@ -214,7 +218,7 @@ func roomCommand(getClient func() client) *cobra.Command {
 	repoCI.MarkFlagsOneRequired("on", "off")
 	repoCI.MarkFlagsMutuallyExclusive("on", "off")
 	repoCI.MarkFlagsMutuallyExclusive("off", "max")
-	repo.AddCommand(addRepo, listRepos, repoCI)
+	repo.AddCommand(addRepo, removeRepo, listRepos, repoCI)
 	room.AddCommand(create, deleteRoom, log, repo)
 	return room
 }

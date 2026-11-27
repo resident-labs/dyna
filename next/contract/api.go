@@ -73,6 +73,7 @@ const (
 	MethodRoomCreate              Method = "room.create"
 	MethodRoomDelete              Method = "room.delete"
 	MethodRoomRepoAdd             Method = "room.repo.add"
+	MethodRoomRepoRemove          Method = "room.repo.remove"
 	MethodRoomRepos               Method = "room.repos"
 	MethodRepoCISet               Method = "repo.ci.set"
 	MethodSessionStart            Method = "session.start"
@@ -538,6 +539,13 @@ type RoomRepoAddRequest struct {
 	PREvents *bool    `json:"prEvents,omitempty"`
 }
 type RoomRepoAddResponse struct{}
+
+type RoomRepoRemoveRequest struct {
+	Room RoomID   `json:"room"`
+	Repo RepoName `json:"repo"`
+}
+type RoomRepoRemoveResponse struct{}
+
 type RoomReposRequest struct {
 	Room RoomID `json:"room"`
 }

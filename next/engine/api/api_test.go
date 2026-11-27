@@ -29,11 +29,12 @@ func (f *fakeService) SessionList(context.Context, contract.Principal, contract.
 
 type fakeService struct {
 	Service
-	caller  contract.Principal
-	request contract.SessionCloseRequest
-	restart contract.SessionRestartRequest
-	refresh contract.SessionRefreshRequest
-	post    contract.PostRequest
+	caller     contract.Principal
+	request    contract.SessionCloseRequest
+	restart    contract.SessionRestartRequest
+	refresh    contract.SessionRefreshRequest
+	post       contract.PostRequest
+	repoRemove contract.RoomRepoRemoveRequest
 }
 
 func (f *fakeService) SessionStart(_ context.Context, c contract.Principal, r contract.SessionStartRequest) (contract.SessionStartResponse, *contract.Error) {
@@ -60,6 +61,11 @@ func (f *fakeService) Post(_ context.Context, _ contract.Principal, r contract.P
 func (f *fakeService) TurnOutput(_ context.Context, c contract.Principal, _ contract.TurnOutputRequest) (contract.TurnOutputResponse, *contract.Error) {
 	f.caller = c
 	return contract.TurnOutputResponse{}, nil
+}
+
+func (f *fakeService) RoomRepoRemove(_ context.Context, c contract.Principal, r contract.RoomRepoRemoveRequest) (contract.RoomRepoRemoveResponse, *contract.Error) {
+	f.caller, f.repoRemove = c, r
+	return contract.RoomRepoRemoveResponse{}, nil
 }
 
 func request(h http.Handler, path, body string) *httptest.ResponseRecorder {
@@ -190,6 +196,22 @@ func TestOwnerOnlyMethodRejectsBox(t *testing.T) {
 	w := request(New(&fakeService{}, nil).handler(boxCaller()), "/v1/room.repo.add", `{"room":"room-a","repo":"a/b"}`)
 	if w.Code != http.StatusForbidden {
 		t.Fatalf("status = %d", w.Code)
+	}
+}
+
+func TestRoomRepoRemoveRequiresOwnerAdmin(t *testing.T) {
+	f := &fakeService{}
+	a := New(f, nil)
+	const path = "/v1/room.repo.remove"
+	const body = `{"room":"room-a","repo":"a/b"}`
+	for _, c := range []Caller{boxCaller(), {Principal: contract.Principal{Kind: contract.PrincipalOwner}, Web: true, Scopes: []contract.Scope{contract.ScopeRead}}} {
+		if w := request(a.handler(c), path, body); w.Code != http.StatusForbidden {
+			t.Fatalf("unprivileged remove: %d %s", w.Code, w.Body.String())
+		}
+	}
+	c := Caller{Principal: contract.Principal{Kind: contract.PrincipalOwner}}
+	if w := request(a.handler(c), path, body); w.Code != http.StatusOK || f.caller != c.Principal || f.repoRemove.Room != "room-a" || f.repoRemove.Repo != "a/b" {
+		t.Fatalf("owner remove: %d %s %+v", w.Code, w.Body.String(), f.repoRemove)
 	}
 }
 

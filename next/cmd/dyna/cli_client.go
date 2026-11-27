@@ -69,6 +69,7 @@ type client interface {
 	RoomCreate(context.Context, contract.RoomCreateRequest) (contract.RoomCreateResponse, error)
 	RoomDelete(context.Context, contract.RoomDeleteRequest) (contract.RoomDeleteResponse, error)
 	RoomRepoAdd(context.Context, contract.RoomRepoAddRequest) (contract.RoomRepoAddResponse, error)
+	RoomRepoRemove(context.Context, contract.RoomRepoRemoveRequest) (contract.RoomRepoRemoveResponse, error)
 	RepoCISet(context.Context, contract.RepoCISetRequest) (contract.RepoCISetResponse, error)
 	RoomRepos(context.Context, contract.RoomReposRequest) (contract.RoomReposResponse, error)
 	SessionStart(context.Context, contract.SessionStartRequest) (contract.SessionStartResponse, error)
@@ -298,6 +299,10 @@ func (c *socketClient) RepoCISet(ctx context.Context, q contract.RepoCISetReques
 
 func (c *socketClient) RoomRepoAdd(ctx context.Context, q contract.RoomRepoAddRequest) (contract.RoomRepoAddResponse, error) {
 	return call[contract.RoomRepoAddRequest, contract.RoomRepoAddResponse](ctx, c, contract.MethodRoomRepoAdd, q)
+}
+
+func (c *socketClient) RoomRepoRemove(ctx context.Context, q contract.RoomRepoRemoveRequest) (contract.RoomRepoRemoveResponse, error) {
+	return call[contract.RoomRepoRemoveRequest, contract.RoomRepoRemoveResponse](ctx, c, contract.MethodRoomRepoRemove, q)
 }
 
 func (c *socketClient) RoomRepos(ctx context.Context, q contract.RoomReposRequest) (contract.RoomReposResponse, error) {

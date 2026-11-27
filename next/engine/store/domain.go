@@ -108,6 +108,16 @@ func (s *Store) StartSession(ctx context.Context, session Session, parent contra
 				return err
 			}
 		}
+		// The service picks the repository before this transaction. Removal may have won the race.
+		if session.Repo != "" {
+			var listed bool
+			if err := tx.QueryRowContext(ctx, "SELECT EXISTS(SELECT 1 FROM room_repos WHERE room=? AND repo=?)", session.Room, session.Repo).Scan(&listed); err != nil {
+				return err
+			}
+			if !listed {
+				return fmt.Errorf("%w: %s is not listed in this room", ErrRepoNotFound, session.Repo)
+			}
+		}
 		if parent != "" {
 			tree, err := loadTree(ctx, tx, session.Room)
 			if err != nil {

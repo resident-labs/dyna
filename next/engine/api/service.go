@@ -120,6 +120,7 @@ type Service interface {
 	OwnerTimezone(context.Context, contract.Principal, contract.OwnerTimezoneRequest) (contract.OwnerTimezoneResponse, *contract.Error)
 	RoomSet(context.Context, contract.Principal, contract.RoomSetRequest) (contract.RoomSetResponse, *contract.Error)
 	RoomRepoAdd(context.Context, contract.Principal, contract.RoomRepoAddRequest) (contract.RoomRepoAddResponse, *contract.Error)
+	RoomRepoRemove(context.Context, contract.Principal, contract.RoomRepoRemoveRequest) (contract.RoomRepoRemoveResponse, *contract.Error)
 	RoomRepos(context.Context, contract.Principal, contract.RoomReposRequest) (contract.RoomReposResponse, *contract.Error)
 	RepoCISet(context.Context, contract.Principal, contract.RepoCISetRequest) (contract.RepoCISetResponse, *contract.Error)
 	SessionStart(context.Context, contract.Principal, contract.SessionStartRequest) (contract.SessionStartResponse, *contract.Error)

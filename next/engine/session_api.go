@@ -206,7 +206,7 @@ func (s *Service) startSession(ctx context.Context, caller contract.Principal, r
 			if errors.As(err, &treeErr) {
 				return invalid(treeErr.Error())
 			}
-			if errors.Is(err, store.ErrParentHostAbsent) {
+			if errors.Is(err, store.ErrParentHostAbsent) || errors.Is(err, store.ErrRepoNotFound) {
 				return invalid(err.Error())
 			}
 			return failure(err)
