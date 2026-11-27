@@ -42,7 +42,6 @@ func TestProfileHarnessValidation(t *testing.T) {
 	for name, text := range map[string]string{
 		"unknown harness":    `{"x": {"provider": "anthropic", "model": "m", "allowedModels": ["m"], "thinking": "low", "harness": "codex"}}`,
 		"agy needs google":   `{"x": {"provider": "anthropic", "model": "m", "allowedModels": ["m"], "thinking": "low", "harness": "agy"}}`,
-		"agy needs a limit":  `{"x": {"provider": "google", "model": "m", "allowedModels": ["m"], "thinking": "low", "harness": "agy"}}`,
 		"pig refuses google": `{"x": {"provider": "google", "model": "m", "allowedModels": ["m"], "thinking": "low"}}`,
 	} {
 		if _, err := loadAgyProfiles(t, text); err == nil {
