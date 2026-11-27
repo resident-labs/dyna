@@ -528,7 +528,7 @@ func (s *Service) agyHostProblem(ctx context.Context, profile contract.ProfileNa
 
 // The agy program and the signed-in profile directory are mounted into the box by the host's root, the directory read-write.
 // Dyna never reads or copies a file in it.
-var agyMount = contract.BoxAgy{Binary: box.AgyBinary, GeminiDir: contract.AgyGeminiDir}
+var agyMount = contract.BoxAgy{Binary: box.AgyBinary, GeminiDir: contract.AgyGeminiDir, Exit: contract.AgyExitPath}
 
 // AgyProfile says a profile runs on the agy harness.
 func (s *Service) AgyProfile(name contract.ProfileName) bool {

@@ -32,9 +32,14 @@ const agyDynaPath = "/dyna-agy/"
 
 // openAgy opens the session's agy harness in place of PiG: the dyna tools, and GitHub's when the engine serves them, are its MCP servers.
 // The profile directory is the host's own, mounted read-write: the box never reads or copies a file in it.
-func openAgy(ctx context.Context, hello contract.BoxHelloResponse, workdir, sessions string, contextFiles []string, activity *activity, notice func(string)) (*agy.Harness, error) {
+func openAgy(ctx context.Context, hello contract.BoxHelloResponse, proxy, workdir, sessions string, contextFiles []string, activity *activity, notice func(string)) (*agy.Harness, error) {
 	if hello.Agy == nil {
 		return nil, errors.New("the hello names the agy harness without its files")
+	}
+	// agy reaches Google only through the engine's exit. Without the engine's word that it has one, or without the box's own listener,
+	// agy would connect from this box's host, so it is not started.
+	if hello.Agy.Exit == "" || proxy == "" {
+		return nil, errors.New("agy is not started: the engine serves no agy exit, so agy would connect from this host; update the engine")
 	}
 	// Read before agy opens, which adds its own mirror file to the folder.
 	var history string
@@ -58,6 +63,7 @@ func openAgy(ctx context.Context, hello contract.BoxHelloResponse, workdir, sess
 		ProjectInstructions: agyProjectInstructions(contextFiles),
 		ModelInstructions:   hello.ModelInstructions,
 		MCPServers:          servers,
+		Proxy:               proxy,
 		New:                 hello.Fresh || hello.Handoff,
 		Handoff:             history,
 		HandoffGen:          hello.HandoffGen,

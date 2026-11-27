@@ -811,6 +811,13 @@ const (
 // AgyGeminiDir is where a box sees the signed-in agy profile folder.
 const AgyGeminiDir = "/opt/agy/account"
 
+// AgyExitPath is the box-socket route that joins agy's CONNECT to a Google host through the engine host; AgyExitAddr is where the box
+// agent listens for agy's proxy connections.
+const (
+	AgyExitPath = "/agy-exit/"
+	AgyExitAddr = "127.0.0.1:7782"
+)
+
 // GitHubAgyPath is where the box socket serves GitHub's tools as agy declares them (short descriptions, help behind github_help); /github/ is the full listing.
 const GitHubAgyPath = "/github-agy/"
 
@@ -818,6 +825,9 @@ const GitHubAgyPath = "/github-agy/"
 type BoxAgy struct {
 	Binary    string `json:"binary"`
 	GeminiDir string `json:"geminiDir"`
+	// Exit is the engine route agy reaches Google through (AgyExitPath); a hello without it is from an engine that has none, and the box
+	// then does not open agy, which would otherwise connect from the box's own host.
+	Exit string `json:"exit,omitempty"`
 }
 
 type ThinkingLevel string

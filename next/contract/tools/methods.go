@@ -87,7 +87,7 @@ var methodTable = []MethodEntry{
 		act("host", "limit", typ[contract.HostSetLimitsRequest](), "Set the rooms a host serves; no rooms means every room", "host limit"),
 	),
 	method(contract.MethodHostAgySeed, contract.ScopeAdmin, OwnerAccess,
-		act("agy", "seed", typ[contract.HostAgySeedRequest](), "Copy the signed-in agy account folder, and the program if the host has none, to a host from the one the owner signed in on. It carries the files as they are and never reads them. A folder already on the host stays unless replace is set. Refused while a session on an agy profile runs on the host, and for an exec-only host or one with agents off.", "agy seed"),
+		act("host", "agy_seed", typ[contract.HostAgySeedRequest](), "Copy the signed-in agy account folder, and the program if the host has none, to a host from the one the owner signed in on. It carries the files as they are and never reads them. A folder already on the host stays unless replace is set. Refused while a session on an agy profile runs on the host, and for an exec-only host or one with agents off.", "agy seed"),
 	),
 	method(contract.MethodHostSet, contract.ScopeAdmin, OwnerAccess,
 		act("host", "set", typ[contract.HostSetRequest](), "Turn a host's agents switch (new session boxes) or ci switch (CI runners) on or off; an omitted one stays. What already runs there stays until it stops. Actual switch changes are audited as host.switches_changed in every existing room's log; an unchanged call writes no switch event and the audit does not wake sessions.", "host set"),

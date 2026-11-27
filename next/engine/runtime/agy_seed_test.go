@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"os"
 	"strings"
 	"sync"
 	"testing"
@@ -82,7 +83,7 @@ func TestSeedAgyCarriesTheFilesAndOnlyThere(t *testing.T) {
 	const sentinel = "SENTINEL-TOKEN-4f9c"
 	var logged bytes.Buffer
 	log.SetOutput(&logged)
-	defer log.SetOutput(nil)
+	defer log.SetOutput(os.Stderr)
 	source := &agyHostFake{state: signedIn, pack: sentinel}
 	target := &agyHostFake{state: "dyna-agy-arch Linux x86_64\n"}
 	b := seedRig(t, source, target)

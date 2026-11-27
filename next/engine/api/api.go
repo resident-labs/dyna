@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"github.com/coder/websocket"
 	"io"
+	"net"
 	"net/http"
 	"reflect"
 	"slices"
@@ -17,6 +18,7 @@ import (
 
 	"github.com/resident-labs/dyna/contract"
 	"github.com/resident-labs/dyna/contract/tools"
+	"github.com/resident-labs/dyna/engine/agyexit"
 	"github.com/resident-labs/dyna/engine/connect"
 	"github.com/resident-labs/dyna/engine/githubwrites"
 	"github.com/resident-labs/dyna/engine/store"
@@ -791,6 +793,7 @@ func (a *API) handler(c Caller) http.Handler {
 		for _, path := range []string{"/github/", contract.GitHubAgyPath} {
 			mux.HandleFunc(path, func(w http.ResponseWriter, r *http.Request) { a.githubTools(c, w, r) })
 		}
+		mux.Handle(contract.AgyExitPath, agyexit.Handler((&net.Dialer{}).DialContext))
 	}
 	// Never on the web listener, which Connect carries off the host.
 	if owner(c) && !c.Web && a.localModel != nil {

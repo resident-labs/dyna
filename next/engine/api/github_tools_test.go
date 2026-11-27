@@ -134,3 +134,17 @@ func TestBoxSocketServesTheAgyGitHubListing(t *testing.T) {
 		t.Fatalf("full %v\nagy %v", full, agy)
 	}
 }
+
+// A box socket serves the agy exit, and refuses a host that is not Google's before it dials anything.
+func TestBoxSocketServesTheAgyExit(t *testing.T) {
+	server := httptest.NewServer(New(&githubToolsService{}, nil).handler(Caller{Principal: contract.Principal{Kind: contract.PrincipalSession, Session: "ses_a"}, Box: "box_a", Room: "room_a"}))
+	defer server.Close()
+	response, err := http.Post(server.URL+contract.AgyExitPath+"example.com:443", "", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	response.Body.Close()
+	if response.StatusCode != http.StatusForbidden || response.Header.Get("X-Dyna-Exit") == "" {
+		t.Fatalf("%d %q", response.StatusCode, response.Header.Get("X-Dyna-Exit"))
+	}
+}
