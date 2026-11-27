@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import { call } from "../client.ts";
-  import { profileLabel, profileRows, slugName, type ProfileSummary } from "../profiles.ts";
+  import { profileChangeFailure, profileLabel, profileRows, slugName, type ProfileSummary } from "../profiles.ts";
   import Icon from "./Icon.svelte";
   import MenuList from "./MenuList.svelte";
   // A session's profile, and the menu that changes it, with RoomMenu's keys. The row shows the store's profile, which
@@ -35,7 +35,7 @@
     if (name === (profile || NONE)) return;
     busy = true;
     failure = "";
-    await (room ? call("room.set", { room, advisor: name === NONE ? "" : name }) : call("session.set_profile", { session, profile: name })).then(() => onchanged?.(), () => { failure = "The profile did not change. Try again."; });
+    await (room ? call("room.set", { room, advisor: name === NONE ? "" : name }) : call("session.set_profile", { session, profile: name })).then(() => onchanged?.(), error => { failure = profileChangeFailure(error); });
     busy = false;
   }
 </script>

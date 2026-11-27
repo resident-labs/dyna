@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { countField, profileChips, ratingKey, profileColumns, profileForSave, profileLabel, profileLine, profileModels, profileRows, profileText, providerFilter, replacements, sessionCount, slugName, type ProfileSummary } from "./profiles.ts";
+import { APIError } from "./client.ts";
+import { profileChangeFailure, countField, profileChips, ratingKey, profileColumns, profileForSave, profileLabel, profileLine, profileModels, profileRows, profileText, providerFilter, replacements, sessionCount, slugName, type ProfileSummary } from "./profiles.ts";
 import type { Account } from "./contract.gen.ts";
 
 test("saving a profile keeps its hidden limit and allowed models", () => {
@@ -128,4 +129,13 @@ test("a typed count keeps its digits and stays a number the engine takes", () =>
   assert.equal(countField("1,200"), 1200);
   assert.equal(countField(""), 0);
   assert.equal(countField("99999999999999999999"), 2 ** 31 - 1);
+});
+
+test("a refused profile change shows the engine's words, and only a failure with none says to try again", () => {
+  const refusal = "agy runs only on host hermeslab";
+  assert.equal(profileChangeFailure(new APIError({ code: "conflict", message: refusal })), refusal);
+  assert.equal(profileChangeFailure(new APIError({ code: "invalid", message: "profile gone" })), "profile gone");
+  assert.equal(profileChangeFailure(new APIError({ code: "conflict", message: "" })), "The profile did not change. Try again.");
+  assert.equal(profileChangeFailure(new APIError({ code: "unavailable", message: "The engine is not reachable." })), "The profile did not change. Try again.");
+  assert.equal(profileChangeFailure(new TypeError("fetch failed")), "The profile did not change. Try again.");
 });
