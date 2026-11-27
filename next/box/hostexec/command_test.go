@@ -269,6 +269,65 @@ func TestRunSurvivesItsCallAndCanBeFollowed(t *testing.T) {
 	}
 }
 
+// A follower may observe the writer's death before delivering the last log bytes (uutils tail --pid).
+// The runner's exit file and completed log are authoritative, including when attaching after a disconnect.
+func TestAttachReadsFinalLogAndStatus(t *testing.T) {
+	tmp, bin := t.TempDir(), t.TempDir()
+	dir := filepath.Join(tmp, "dyna-out-late.run")
+	if err := os.Mkdir(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	for path, content := range map[string]string{
+		filepath.Join(bin, "tail"): `#!/bin/bash
+r=${!#}; r=${r%/log}; touch "$r/waiting"
+while [ ! -f "$r/exit" ]; do /usr/bin/sleep .01; done
+`,
+		filepath.Join(bin, "sleep"): `#!/bin/bash
+touch "$TMPDIR/dyna-out-late.run/waiting"
+exec /usr/bin/sleep "$@"
+`,
+		filepath.Join(dir, "pid"): strconv.Itoa(os.Getpid()) + "\n",
+		filepath.Join(dir, "log"): "",
+	} {
+		if err := os.WriteFile(path, []byte(content), 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	args := RunArgs(contract.HostexecRunArgs{Attach: true}, "late")
+	cmd := exec.CommandContext(t.Context(), args[0], args[1:]...)
+	cmd.Env = []string{"PATH=" + bin + ":/usr/bin:/bin", "TMPDIR=" + tmp}
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	var out strings.Builder
+	cmd.Stdout, cmd.Stderr = &out, &out
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if cmd.ProcessState == nil {
+			_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+			_ = cmd.Wait()
+		}
+	})
+	testutil.Eventually(t, 5*time.Second, "follower waiting on the writer", func() bool {
+		_, err := os.Stat(filepath.Join(dir, "waiting"))
+		return err == nil
+	})
+	// The writer stays alive when it publishes completion. The follower must not need its PID to disappear.
+	if err := os.WriteFile(filepath.Join(dir, "log"), []byte("final marker\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	exitFile := filepath.Join(dir, "exit")
+	if err := os.WriteFile(exitFile+".tmp", []byte("0\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Rename(exitFile+".tmp", exitFile); err != nil {
+		t.Fatal(err)
+	}
+	if err := cmd.Wait(); err != nil || out.String() != "final marker\n" {
+		t.Fatalf("attach: %v, output %q", err, out.String())
+	}
+}
+
 // Following a run the host holds no files for ends with the status that says so, and prints nothing.
 func TestFollowingARunTheHostLacksEndsWithNoRunStatus(t *testing.T) {
 	cmd, out := runIn(t, t.TempDir(), contract.HostexecRunArgs{Argv: []string{"true"}, Timeout: 1000, Attach: true}, "gone")

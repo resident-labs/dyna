@@ -56,8 +56,13 @@ const runWords = "eval \"exec env -u DYNA_ARGV `printenv DYNA_ARGV`\""
 // It keeps the output (merged, at most OutputLimit and a byte) and the exit status in files, so no connection is needed to keep them.
 const runner = `{ systemd-run --quiet --user --scope --unit="$1" -p "RuntimeMaxSec=$2" -p TimeoutStopSec=5 -- bash -c '` + runWords + `'; } 2>&1 | { head -c 8388609 >"$3/log"; cat >/dev/null; }; c=${PIPESTATUS[0]}; (umask 077; echo "$c" >"$3/exit.tmp") && mv -- "$3/exit.tmp" "$3/exit"`
 
-// follow prints a run's output from its start, until its runner ends, and exits with its status. It needs r, the run's folder.
-const follow = `tail -c +1 -s 0.2 --pid="$(cat "$r/pid")" -f -- "$r/log"; [ -f "$r/exit" ] || { echo '[the runner ended on the host without an exit status]'; exit 255; }; exit "$(cat "$r/exit")"`
+// follow waits for the runner to publish its exit status after closing the log, then reads the completed log once.
+// The transport only delivers output at completion anyway, and tail --pid can exit without draining the final bytes.
+const follow = `read -r p < "$r/pid" || exit 255
+while [ ! -f "$r/exit" ] && kill -0 "$p" 2>/dev/null; do sleep 0.2; done
+cat -- "$r/log" || exit 255
+[ -f "$r/exit" ] && read -r status < "$r/exit" && [ -n "$status" ] || { echo '[the runner ended on the host without an exit status]'; exit 255; }
+exit "$status"`
 
 func RunArgs(a contract.HostexecRunArgs, op contract.OpID) []string {
 	cwd := a.Cwd
