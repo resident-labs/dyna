@@ -80,9 +80,15 @@ func TestParseMetaSubscriptionUsageSSEUsesTheLastEvent(t *testing.T) {
 		"data: {\"type\":\"response.subscription_usage\",\"subscription\":{\"weekly\":{\"used_percent\":5,\"resets_at\":1791763200}}}\n\n" +
 		"event: response.subscription_usage\n" +
 		"data: " + metaSubscriptionUsageEvent + "\n\n"
-	headers := ParseMetaSubscriptionUsageSSE([]byte(body))
-	if headers.Get(MetaQuotaWindowMinutesHeader) != "300" || headers.Get(MetaQuotaTierHeader) != "tier-1" {
-		t.Fatalf("headers = %#v, want the last event", headers)
+	// The retained body may end in an incomplete third quota event whose
+	// inner usage fields are intact. It must not override the last valid one.
+	partial := `data: {"type":"response.subscription_usage","subscription":{"weekly":{"used_percent":99,"resets_at":1791763200}}`
+	headers := ParseMetaSubscriptionUsageSSE([]byte(body + partial))
+	if headers.Get(MetaQuotaWindowMinutesHeader) != "300" || headers.Get(MetaQuotaTierHeader) != "tier-1" || headers.Get(MetaQuotaWeeklyUsedHeader) != "5" {
+		t.Fatalf("headers = %#v, want the last complete event", headers)
+	}
+	if headers := ParseMetaSubscriptionUsageSSE([]byte(partial)); headers != nil {
+		t.Fatalf("partial quota event produced headers: %#v", headers)
 	}
 	if ParseMetaSubscriptionUsageSSE([]byte("data: {\"type\":\"response.completed\"}\n\n")) != nil {
 		t.Fatal("a stream without subscription usage produced headers")
