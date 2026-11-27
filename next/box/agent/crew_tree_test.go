@@ -3,6 +3,7 @@ package agent
 import (
 	"bufio"
 	"context"
+	"encoding/json"
 	"fmt"
 	"net"
 	"os"
@@ -175,12 +176,109 @@ func TestASchemaWorktreeStepKeepsItsOutput(t *testing.T) {
 	}
 }
 
-func TestAWorkerThatChangesNothingStillGetsItsBranch(t *testing.T) {
+func TestAnUnchangedWorktreeStepDoesNotPushAndCanBeRestored(t *testing.T) {
 	h, origin := newTreeHarness(t)
 	h.act = nil
-	got := h.result(crewMeta + `return await agent('idle', { worktree: true })`).(map[string]any)
-	if fmt.Sprint(got["files"]) != "[]" || got["commit"] != gitIn(t, origin, "rev-parse", "main") {
+	script := crewMeta + `return await agent('idle', { worktree: true })`
+	got := h.result(script).(map[string]any)
+	h.base = gitIn(t, origin, "rev-parse", "main")
+	if fmt.Sprint(got["files"]) != "[]" || got["commit"] != h.base || got["unpublished"] != true || !strings.HasPrefix(got["branch"].(string), h.branch+"-") {
 		t.Fatalf("result %v", got)
+	}
+	if refs := gitIn(t, origin, "for-each-ref", "--format=%(refname)"); refs != "refs/heads/main" {
+		t.Fatalf("refs %q", refs)
+	}
+	h.workdir = cloneOrigin(t, origin)
+	if again := h.result(script); fmt.Sprint(again) != fmt.Sprint(got) || h.started.Load() != 1 {
+		t.Fatalf("restored %v after starting %d workers; want %v with one worker", again, h.started.Load(), got)
+	}
+}
+
+func TestAnUnchangedRerunDeletesTheBranchPushedByAnEarlierAttempt(t *testing.T) {
+	h, origin := newTreeHarness(t)
+	script := crewMeta + `return await agent('work', { worktree: true })`
+	first := h.result(script).(map[string]any)
+	clear(h.journal.steps) // The previous attempt's push survived, but its result did not.
+	h.act = nil
+	h.workdir = cloneOrigin(t, origin)
+	got := h.result(script).(map[string]any)
+	if got["branch"] != first["branch"] || got["commit"] != gitIn(t, origin, "rev-parse", "main") || got["unpublished"] != true {
+		t.Fatalf("result %v, previous attempt %v", got, first)
+	}
+	if refs := gitIn(t, origin, "for-each-ref", "--format=%(refname)"); refs != "refs/heads/main" {
+		t.Fatalf("refs %q", refs)
+	}
+}
+
+func TestALegacyStepAtTheBaseStillRestoresItsBranch(t *testing.T) {
+	h, origin := newTreeHarness(t)
+	h.act = nil
+	script := crewMeta + `return await agent('idle', { worktree: true })`
+	got := h.result(script).(map[string]any)
+	branch := "refs/heads/" + got["branch"].(string)
+	gitIn(t, h.workdir, "push", "origin", "HEAD:"+branch)
+	delete(got, "unpublished")
+	legacy, err := json.Marshal(got)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for key, step := range h.journal.steps {
+		step.Result = string(legacy)
+		h.journal.steps[key] = step
+	}
+	h.workdir = cloneOrigin(t, origin)
+	if again := h.result(script); fmt.Sprint(again) != fmt.Sprint(got) || h.started.Load() != 1 {
+		t.Fatalf("restored %v after starting %d workers; want %v with one worker", again, h.started.Load(), got)
+	}
+	if tip := gitIn(t, h.workdir, "rev-parse", branch); tip != got["commit"] {
+		t.Fatalf("restored branch tip %s; want %s", tip, got["commit"])
+	}
+}
+
+func TestAMergeAtThePinnedBaseStillRestoresItsBranch(t *testing.T) {
+	h, origin := newTreeHarness(t)
+	script := crewMeta + `return await merge([])`
+	got := h.result(script).(map[string]any)
+	h.workdir = cloneOrigin(t, origin)
+	if again := h.result(script); fmt.Sprint(again) != fmt.Sprint(got) {
+		t.Fatalf("restored %v; want %v", again, got)
+	}
+	if tip := gitIn(t, h.workdir, "rev-parse", "refs/heads/"+got["branch"].(string)); tip != got["commit"] {
+		t.Fatalf("restored merge branch tip %s; want %s", tip, got["commit"])
+	}
+}
+
+func TestMergeOfAnUnchangedStepIncludesThePinnedCommitOnAnOlderBase(t *testing.T) {
+	h, origin := newTreeHarness(t)
+	h.act = nil
+	writeFile(t, filepath.Join(h.workdir, "pinned.txt"), "at the pinned commit\n")
+	gitIn(t, h.workdir, "add", "pinned.txt")
+	gitIn(t, h.workdir, "commit", "-m", "pin this")
+	got := h.result(crewMeta + `
+		const idle = await agent('idle', { worktree: true, label: 'idle' })
+		return await merge([idle], { base: idle.commit + '^' })`).(map[string]any)
+	if fmt.Sprint(got["merged"]) != "[idle]" || fmt.Sprint(got["conflicts"]) != "[]" {
+		t.Fatalf("result %v", got)
+	}
+	gitIn(t, origin, "merge-base", "--is-ancestor", gitIn(t, h.workdir, "rev-parse", "HEAD"), got["commit"].(string))
+}
+
+func TestMergeCountsUnchangedStepsWithoutAddingCommits(t *testing.T) {
+	h, origin := newTreeHarness(t)
+	h.act = func(dir, prompt string) {
+		if prompt == "change" {
+			writeFile(t, filepath.Join(dir, "change.txt"), prompt)
+		}
+	}
+	got := h.result(crewMeta + `
+		const idle = await agent('idle', { worktree: true, label: 'idle' })
+		const change = await agent('change', { worktree: true, label: 'change' })
+		return await merge([idle, change])`).(map[string]any)
+	if fmt.Sprint(got["merged"]) != "[idle change]" || fmt.Sprint(got["conflicts"]) != "[]" {
+		t.Fatalf("result %v", got)
+	}
+	if log := gitIn(t, origin, "log", "--format=%s", "main.."+got["commit"].(string)); log != "merge change\nchange" {
+		t.Fatalf("commits %q", log)
 	}
 }
 
@@ -235,6 +333,13 @@ func TestAReplacementBoxFindsStoredWorkOnTheRemote(t *testing.T) {
 	}
 	if fmt.Sprint(second) != fmt.Sprint(first) || second["proof"] != "one work" {
 		t.Fatalf("second %v, first %v", second, first)
+	}
+	// Changed steps use the same journal format and branch refs as before the no-push rule.
+	for _, entry := range first["results"].([]any) {
+		step := entry.(map[string]any)
+		if got := gitIn(t, h.workdir, "rev-parse", "refs/heads/"+step["branch"].(string)); got != step["commit"] {
+			t.Fatalf("stored step branch points to %s; want %s", got, step["commit"])
+		}
 	}
 	branch := first["merged"].(map[string]any)["branch"].(string)
 	if gitIn(t, h.workdir, "rev-parse", "refs/heads/"+branch) != gitIn(t, origin, "rev-parse", "refs/heads/"+branch) {

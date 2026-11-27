@@ -22,14 +22,15 @@ const (
 // pushDelay is the wait between attempts. It is a variable so that tests can shorten it.
 var pushDelay = 10 * time.Second
 
-// treeResult is what a worktree step stores. The work itself is on the remote, at Branch and Commit.
+// treeResult is what a worktree step stores. A commit other than the run base is saved on the remote at Branch.
 type treeResult struct {
-	Step   string   `json:"step"`
-	Text   string   `json:"text,omitempty"`
-	Output any      `json:"output,omitempty"`
-	Branch string   `json:"branch"`
-	Commit string   `json:"commit"`
-	Files  []string `json:"files"`
+	Step        string   `json:"step"`
+	Text        string   `json:"text,omitempty"`
+	Output      any      `json:"output,omitempty"`
+	Branch      string   `json:"branch"`
+	Commit      string   `json:"commit"`
+	Files       []string `json:"files"`
+	Unpublished bool     `json:"unpublished,omitempty"` // The commit is already pinned; there is no remote branch to restore.
 }
 
 // treeDir is a step's folder, beside the main tree so that git status there never sees it.
@@ -56,8 +57,8 @@ func (c *Crew) removeTree(ctx context.Context, dir string) {
 	c.dropTree(context.WithoutCancel(ctx), dir)
 }
 
-// treeWorker runs a worker in its own tree and saves what it leaves before the step can be stored, so a stored step always has
-// its work on the remote. The tree goes once its work is saved, so a script finds the same thing here as in a replacement box.
+// treeWorker runs a worker in its own tree and saves any new commits before storing the step.
+// The tree goes once its work is saved.
 func (c *Crew) treeWorker(ctx context.Context, key, name string, profile contract.ProfileName, prompt string, opts agentOpts) stepOutcome {
 	if c.config.Base == "" {
 		return stepOutcome{reason: "worktree: true needs a repository, and this run has none"}
@@ -82,11 +83,12 @@ func (c *Crew) treeWorker(ctx context.Context, key, name string, profile contrac
 		out.value, out.reason = nil, fmt.Sprintf("the worker's work did not reach %s: %s", branch, err)
 		return out
 	}
+	result.Unpublished = result.Commit == c.config.Base
 	out.value = result
 	return out
 }
 
-// saveTree commits what a worker left and pushes its branch. A rerun replaces what a lost attempt pushed there.
+// saveTree commits what a worker left and pushes its branch if it ends at a commit other than the run base.
 func (c *Crew) saveTree(ctx context.Context, dir, name, branch string) (string, []string, error) {
 	git := func(args ...string) (string, error) { return runGit(ctx, dir, "", args...) }
 	if _, err := git("add", "-A"); err != nil {
@@ -104,6 +106,21 @@ func (c *Crew) saveTree(ctx context.Context, dir, name, branch string) (string, 
 	commit, err := git("rev-parse", "HEAD")
 	if err != nil {
 		return "", nil, err
+	}
+	if commit == c.config.Base {
+		// A lost attempt may have pushed this name before its result was stored. Ask origin, not the clone's cache.
+		bound, cancel := context.WithTimeout(ctx, saveTimeout)
+		ref, err := runGit(bound, dir, "", "ls-remote", "--refs", "origin", "refs/heads/"+branch)
+		cancel()
+		if err != nil {
+			return "", nil, err
+		}
+		if ref != "" {
+			if err := c.push(ctx, dir, "", branch); err != nil {
+				return "", nil, err
+			}
+		}
+		return commit, []string{}, nil
 	}
 	changed, err := git("diff", "--name-only", "--no-renames", "-z", c.config.Base, commit)
 	if err != nil {
@@ -125,7 +142,10 @@ func (c *Crew) push(ctx context.Context, dir, commit, branch string) error {
 		bound, cancel := context.WithTimeout(ctx, saveTimeout)
 		_, err = runGit(bound, dir, "", "push", "--no-verify", "--force", "origin", commit+":refs/heads/"+branch)
 		cancel()
-		if err == nil || attempt == pushAttempts {
+		if err == nil || (commit == "" && strings.Contains(err.Error(), "remote ref does not exist")) {
+			return nil
+		}
+		if attempt == pushAttempts {
 			break
 		}
 		select {
@@ -143,10 +163,11 @@ func (c *Crew) restore(ctx context.Context, call crewCall, reply crewReply) crew
 		return reply
 	}
 	var saved struct {
-		Branch string `json:"branch"`
+		Branch      string `json:"branch"`
+		Unpublished bool   `json:"unpublished"` // absent on merge results and in old journals
 	}
 	data, _ := json.Marshal(reply.Value)
-	if err := json.Unmarshal(data, &saved); err != nil || saved.Branch == "" {
+	if err := json.Unmarshal(data, &saved); err != nil || saved.Branch == "" || saved.Unpublished {
 		return reply
 	}
 	c.repo.Lock()
