@@ -11,8 +11,9 @@ import (
 
 func TestContextContactsSection(t *testing.T) {
 	r := newGrantRig(t)
-	for _, section := range []contract.ContextSectionKey{"", contract.ContextContacts} {
-		for _, who := range []contract.Principal{r.root, r.worker} {
+	check := func(who contract.Principal, want string) {
+		t.Helper()
+		for _, section := range []contract.ContextSectionKey{"", contract.ContextContacts} {
 			res, problem := r.s.ContextSnapshot(t.Context(), who, contract.ContextSnapshotRequest{Section: section})
 			if problem != nil {
 				t.Fatal(problem)
@@ -23,15 +24,17 @@ func TestContextContactsSection(t *testing.T) {
 					contacts = append(contacts, sec)
 				}
 			}
-			if who == r.root {
-				if len(contacts) != 0 {
-					t.Fatalf("root has contacts: %+v", contacts)
-				}
-			} else if len(contacts) != 1 || contacts[0].Text != "parent: root (test)" {
-				t.Fatalf("parent-only contacts: %+v", contacts)
+			if len(contacts) != 1 || contacts[0].Text != want {
+				t.Fatalf("contacts = %+v, want %q", contacts, want)
 			}
 		}
 	}
+	check(r.root, "you: test")
+	check(r.worker, "you: test\nparent: root (test)")
+	if _, problem := r.s.SessionSetProfile(t.Context(), r.root, contract.SessionSetProfileRequest{Session: r.worker.Session, Profile: "other"}); problem != nil {
+		t.Fatal(problem)
+	}
+	check(r.worker, "you: other\nparent: root (test)")
 }
 
 func TestContextContactsSiblingCap(t *testing.T) {
@@ -43,6 +46,9 @@ func TestContextContactsSiblingCap(t *testing.T) {
 			// Use the longest allowed names and profiles: the section budget must still fit all 20 entries.
 			profile := strings.Repeat("p", 40)
 			if err := r.s.store.Write(ctx, func(tx *sql.Tx) error {
+				if _, err := tx.ExecContext(ctx, "UPDATE sessions SET profile=? WHERE id IN (?, ?)", profile, r.root.Session, r.worker.Session); err != nil {
+					return err
+				}
 				for i := range n {
 					name := fmt.Sprintf("%02d-%s", i, strings.Repeat("n", 61))
 					if _, err := tx.ExecContext(ctx, `INSERT INTO sessions(id,room,name,profile,state,goal,created_at,parent) VALUES(?,?,?,?,'open','',?,?)`, fmt.Sprint("contact-", i), r.room, name, profile, i, r.root.Session); err != nil {
@@ -59,7 +65,7 @@ func TestContextContactsSiblingCap(t *testing.T) {
 			if n > 20 {
 				names = append(names, fmt.Sprintf("and %d more (session list)", n-20))
 			}
-			want := "parent: root (test)\nsiblings: " + strings.Join(names, ", ")
+			want := fmt.Sprintf("you: %s\nparent: root (%s)\nsiblings: %s", profile, profile, strings.Join(names, ", "))
 			for _, section := range []contract.ContextSectionKey{"", contract.ContextContacts} {
 				res, problem := r.s.ContextSnapshot(ctx, r.worker, contract.ContextSnapshotRequest{Section: section})
 				if problem != nil {
@@ -105,7 +111,7 @@ func TestContextContactsIgnoreSiblingActivity(t *testing.T) {
 		return ""
 	}
 	before := snapshot()
-	if want := "parent: root (test)\nsiblings: sibling (test)"; before != want {
+	if want := "you: test\nparent: root (test)\nsiblings: sibling (test)"; before != want {
 		t.Fatalf("contacts = %q, want %q", before, want)
 	}
 	unchanged := func() {

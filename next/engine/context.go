@@ -88,7 +88,11 @@ func (s *Service) ContextSnapshot(ctx context.Context, caller contract.Principal
 		lines = append(lines, line)
 	}
 	add(contract.ContextChildren, lines, 1000, 8)
-	lines = nil
+	session, err := s.store.Session(ctx, caller.Session)
+	if err != nil {
+		return contract.ContextSnapshotResponse{}, failure(err)
+	}
+	lines = []string{"you: " + string(session.Profile)}
 	if parent := data.Contacts.Parent; parent != nil {
 		lines = append(lines, fmt.Sprintf("parent: %s (%s)", parent.Name, parent.Profile))
 	}
@@ -115,7 +119,7 @@ func (s *Service) ContextSnapshot(ctx context.Context, caller contract.Principal
 	if len(siblings) > 0 {
 		lines = append(lines, "siblings: "+strings.Join(siblings, ", "))
 	}
-	// The budget fits a parent and 20 siblings even at the name and profile length limits.
+	// The budget fits your profile, a parent and 20 siblings even at the name and profile length limits.
 	add(contract.ContextContacts, lines, 3000, 0)
 	lines = nil
 	for _, r := range data.Requests {
@@ -167,10 +171,6 @@ func (s *Service) ContextSnapshot(ctx context.Context, caller contract.Principal
 	}
 	if len(decide) > 0 {
 		lines = append(lines, "Approvals the owner keeps: "+strings.Join(decide, ", "))
-	}
-	session, err := s.store.Session(ctx, caller.Session)
-	if err != nil {
-		return contract.ContextSnapshotResponse{}, failure(err)
 	}
 	account, err := s.store.GitHubAccount(ctx, session.Room)
 	if err != nil {
