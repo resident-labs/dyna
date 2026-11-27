@@ -40,6 +40,36 @@ func TestNeedsGatedSuiteSequence(t *testing.T) {
 	}
 }
 
+// PiG#27: a rerun kept the suite's original creation time but reset it to queued with zero jobs.
+// The rollup showed only successful jobs while the rerun was getting started.
+func TestRerunOfOldSuiteDoesNotPassBeforeJobsAppear(t *testing.T) {
+	c, server, at := client(t)
+	server.Add(fakegithub.Pull{Repo: "owner/repo", Number: 1, Head: sha})
+	green := []fakegithub.Check{{Name: "early", Conclusion: "SUCCESS"}}
+	for _, step := range []struct {
+		name, status, conclusion, workflow, app string
+		checks                                  []fakegithub.Check
+		runs                                    int
+		want                                    contract.PrCI
+	}{
+		{"cancelled", "COMPLETED", "CANCELLED", "CI", "github-actions", append(slices.Clone(green), fakegithub.Check{Name: "verify", Conclusion: "CANCELLED"}), 2, contract.PrCICancelled},
+		{"queued with no jobs", "QUEUED", "", "CI", "github-actions", green, 0, contract.PrCIPending},
+		{"queued with app unavailable", "QUEUED", "", "CI", "", green, 0, contract.PrCIPending},
+		{"queued with workflow unavailable", "QUEUED", "", "", "github-actions", green, 0, contract.PrCIPending},
+		{"in progress with no jobs", "IN_PROGRESS", "", "CI", "github-actions", green, 0, contract.PrCIPending},
+		{"finished", "COMPLETED", "SUCCESS", "CI", "github-actions", append(slices.Clone(green), fakegithub.Check{Name: "verify", Conclusion: "SUCCESS"}), 2, contract.PrCISuccess},
+	} {
+		t.Run(step.name, func(t *testing.T) {
+			suites := []fakegithub.Suite{{Status: step.status, Conclusion: step.conclusion, App: step.app, Workflow: step.workflow, CreatedAt: at.Now().Add(-time.Hour), Runs: step.runs}}
+			server.Edit("owner/repo", 1, func(p *fakegithub.Pull) {
+				p.Rollup, p.Checks, p.Suites = "SUCCESS", step.checks, suites
+			})
+			server.SetCommit("owner/repo", sha, fakegithub.Commit{Rollup: "SUCCESS", Checks: step.checks, Suites: suites})
+			assertBothCI(t, c, step.want)
+		})
+	}
+}
+
 func assertBothCI(t *testing.T, c *Client, want contract.PrCI) {
 	t.Helper()
 	pulls, err := c.Read(t.Context(), "owner/repo", []int{1})
@@ -71,6 +101,7 @@ func TestSuiteSettlementControls(t *testing.T) {
 		{"fresh ghost", 9 * time.Minute, 0, "QUEUED", 1, contract.PrCIPending},
 		{"exact ten minutes", 10 * time.Minute, 0, "QUEUED", 1, contract.PrCIPending},
 		{"old active", time.Hour, 1, "IN_PROGRESS", 1, contract.PrCIPending},
+		{"old in progress without jobs", time.Hour, 0, "IN_PROGRESS", 1, contract.PrCIPending},
 		{"completed", time.Minute, 1, "COMPLETED", 1, contract.PrCISuccess},
 		{"unread suite", time.Hour, 0, "COMPLETED", 2, contract.PrCIPending},
 	} {

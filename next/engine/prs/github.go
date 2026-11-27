@@ -428,7 +428,7 @@ type gqlSuites struct {
 // summarizeCI is shared by tracked PRs and main heads. Never settle from a
 // partial list, or while a suite can still create needs-gated runs. GitHub apps
 // sometimes leave ghost suites queued with no runs; only those older than ten
-// minutes can be ignored. A completed suite that failed fails CI even when its
+// minutes and unrelated to Actions can be ignored. A completed suite that failed fails CI even when its
 // contexts all read success or skipped: a workflow run whose jobs never started
 // (a startup failure or a broken workflow file) leaves only skipped contexts or
 // none, and its suite's conclusion is the only sign of it.
@@ -436,8 +436,11 @@ func summarizeCI(rollup *gqlRollup, suites gqlSuites, rule ciRule, pr int, now t
 	pending := suites.PageInfo.HasNextPage || suites.TotalCount > len(suites.Nodes)
 	var failedSuites []string
 	for _, suite := range suites.Nodes {
-		if suite.Status != "COMPLETED" && !(suite.CheckRuns.TotalCount == 0 && !suite.CreatedAt.IsZero() && now.Sub(suite.CreatedAt) > 10*time.Minute) {
-			pending = true
+		if suite.Status != "COMPLETED" {
+			// An Actions rerun reuses the old suite's creation time and can have zero jobs while queued.
+			ghost := suite.Status == "QUEUED" && suite.WorkflowRun == nil && suite.App.Slug != "github-actions" &&
+				suite.CheckRuns.TotalCount == 0 && !suite.CreatedAt.IsZero() && now.Sub(suite.CreatedAt) > 10*time.Minute
+			pending = pending || !ghost
 			continue
 		}
 		switch suite.Conclusion {
