@@ -559,8 +559,7 @@ func (s *Store) EndTurn(ctx context.Context, session contract.SessionID, output 
 			answers := func(to contract.ReplyChannel) func(contract.FinalReply) bool {
 				return func(r contract.FinalReply) bool { return r.Reply.Target == to.Target && r.Reply.Home == to.Home }
 			}
-			switch {
-			case waiting:
+			if waiting {
 				for _, reply := range body.Replies {
 					// A session is answered again once the wait ends. Discord got this turn's text as its reply, which also settles what
 					// an earlier silent turn left owed to that channel, so only a turn that said nothing still owes it.
@@ -574,12 +573,21 @@ func (s *Store) EndTurn(ctx context.Context, session contract.SessionID, output 
 							}
 						}
 					}
-					if (reply.Reply.Target.Kind == contract.PrincipalSession || reply.Reply.Home.Kind == contract.ConversationDiscord && output.Final == "") && reply.Posted == "" && !slices.ContainsFunc(later, func(to contract.ReplyChannel) bool { return answers(to)(reply) }) {
+					// A mid-turn post to a session is not the result of the work still in progress.
+					owesSession := reply.Reply.Target.Kind == contract.PrincipalSession && len(ended) == 0
+					owesDiscord := reply.Reply.Home.Kind == contract.ConversationDiscord && output.Final == "" && reply.Posted == ""
+					if (owesSession || owesDiscord) && !slices.ContainsFunc(later, func(to contract.ReplyChannel) bool { return answers(to)(reply) }) {
 						later = append(later, reply.Reply)
 					}
 				}
-			default:
+			}
+			if !waiting || len(endIDs) > 0 {
+				remaining := later[:0]
 				for _, to := range later {
+					if waiting && to.Target.Kind != contract.PrincipalSession {
+						remaining = append(remaining, to)
+						continue
+					}
 					if !slices.ContainsFunc(body.Replies, answers(to)) {
 						// A turn that ended on a post has no final text, so its last post is what answers.
 						paid := contract.FinalReply{Reply: to}
@@ -589,7 +597,7 @@ func (s *Store) EndTurn(ctx context.Context, session contract.SessionID, output 
 						body.Replies = append(body.Replies, paid)
 					}
 				}
-				later = nil
+				later = remaining
 			}
 			if kept, err = json.Marshal(later); err != nil {
 				return err
@@ -623,6 +631,7 @@ func (s *Store) EndTurn(ctx context.Context, session contract.SessionID, output 
 				return err
 			}
 		}
+		emptyFinal := body.Outcome == contract.TurnCompleted && body.Final == "" && len(body.Data) == 0 && body.DataAttachment == nil && len(body.Attachments) == 0
 		for _, reply := range body.Replies {
 			if silentWorkflow {
 				continue
@@ -650,11 +659,12 @@ func (s *Store) EndTurn(ctx context.Context, session contract.SessionID, output 
 					return err
 				}
 			}
-			// A post already answered, and the text of a turn that still waits adds no result to it.
+			// If the target got a post, a turn that still waits has no result to add.
 			if waiting && reply.Posted != "" && len(ended) == 0 {
 				continue
 			}
-			d := contract.Delivery{To: reply.Reply.Target, Surface: contract.SurfaceSession, Reply: contract.ReplyChannel{Kind: contract.ReplyPost, Target: event.From, Home: reply.Reply.Home}, Wake: reply.Posted == ""}
+			// The target may already have read the post. Wake it unless the post was the only result.
+			d := contract.Delivery{To: reply.Reply.Target, Surface: contract.SurfaceSession, Reply: contract.ReplyChannel{Kind: contract.ReplyPost, Target: event.From, Home: reply.Reply.Home}, Wake: reply.Posted == "" || !emptyFinal}
 			// The engine opened this channel, so reach does not apply, but a reply to a parent that can't receive goes up.
 			if _, err := reroute(ctx, tx, event.From, &d); err != nil {
 				return err
