@@ -256,8 +256,12 @@ func (m *Mirror) authEnvIdentity(ctx context.Context, repo contract.RepoName) ([
 	if token == "" {
 		return nil, "", MissingTokenError{}
 	}
+	return gitHubAuthEnv(token), login, nil
+}
+
+func gitHubAuthEnv(token string) []string {
 	credential := base64.StdEncoding.EncodeToString([]byte("x-access-token:" + token))
-	return []string{"GIT_CONFIG_COUNT=1", "GIT_CONFIG_KEY_0=http.https://github.com/.extraheader", "GIT_CONFIG_VALUE_0=Authorization: Basic " + credential, "GIT_TERMINAL_PROMPT=0"}, login, nil
+	return []string{"GIT_CONFIG_COUNT=1", "GIT_CONFIG_KEY_0=http.https://github.com/.extraheader", "GIT_CONFIG_VALUE_0=Authorization: Basic " + credential, "GIT_TERMINAL_PROMPT=0"}
 }
 
 func (m *Mirror) checkAccess(ctx context.Context, repo contract.RepoName) error {

@@ -354,7 +354,8 @@ func TestStoredWorkThatIsGoneFailsLoudly(t *testing.T) {
 	gitIn(t, origin, "update-ref", "-d", "refs/heads/"+first["branch"].(string))
 	h.workdir = cloneOrigin(t, origin)
 	entry := h.result(script).([]any)[0].(map[string]any)
-	if entry["failed"] != true || !strings.Contains(entry["reason"].(string), "did not come back") {
+	reason, _ := entry["reason"].(string)
+	if entry["failed"] != true || !strings.Contains(reason, "14 days") || !strings.Contains(reason, "Start a new run") {
 		t.Fatalf("entry %v", entry)
 	}
 	failed := 0
