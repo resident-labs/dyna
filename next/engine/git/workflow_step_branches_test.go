@@ -59,6 +59,7 @@ func TestWorkflowStepBranchExpiryAgainstBareOrigin(t *testing.T) {
 		{"2123456789ab", "work-2123456789ab", contract.WorkflowStepAgent}, // also a session branch
 		{"3123456789ab", "work", contract.WorkflowStepAgent},
 		{"4123456789ab", "work-run", contract.WorkflowStepCommand},
+		{"5123456789ab", "work-5123456789ab", contract.WorkflowStepAgent}, // open PR head
 	} {
 		_, err := st.StartWorkflowStep(ctx, "work", contract.WorkflowStepStartRequest{Key: step.key, Kind: step.kind}, end)
 		must(err)
@@ -71,6 +72,8 @@ func TestWorkflowStepBranchExpiryAgainstBareOrigin(t *testing.T) {
 		runReal(t, remote, "update-ref", "refs/heads/"+step.branch, tip)
 	}
 	must(st.AddBranch(ctx, repo, "work", "work-2123456789ab", end))
+	must(st.RecordPROpen(ctx, "Owner/Repo", 1, "work", "work-5123456789ab", "keep working", "",
+		event("pr-open", end, contract.PrOpened{Repo: "Owner/Repo", Number: 1, Session: "work"}), nil))
 	finish("work", end)
 	list := func() string {
 		return runReal(t, remote, "for-each-ref", "--format=%(refname:short)", "refs/heads")

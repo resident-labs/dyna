@@ -36,6 +36,7 @@ func (s *Store) ExpiredWorkflowStepBranches(ctx context.Context, cutoff time.Tim
 )
 SELECT room,repo,branch,commit_sha FROM candidates c WHERE room IS NOT NULL
  AND NOT EXISTS (SELECT 1 FROM session_branches b WHERE b.repo=c.repo COLLATE NOCASE AND b.branch=c.branch)
+ AND NOT EXISTS (SELECT 1 FROM pr_owners p WHERE p.repo=c.repo COLLATE NOCASE AND p.branch=c.branch AND p.state='open')
  ORDER BY room, repo COLLATE NOCASE, branch`, contract.WorkflowStepAgent, contract.WorkflowStepDone, contract.WorkflowRunning, cutoff.UnixMilli())
 	if err != nil {
 		return nil, err
