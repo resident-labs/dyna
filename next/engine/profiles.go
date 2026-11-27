@@ -638,6 +638,16 @@ func (s *Service) AgySeedProblem(ctx context.Context, caller contract.Principal,
 			running = append(running, hosted.Name)
 		}
 	}
+	// And whatever agy is actually running there, which a switch to Pi leaves until its box has restarted.
+	mounted, err := s.store.AgyBoxes(ctx, name)
+	if err != nil {
+		return failure(err)
+	}
+	for _, session := range mounted {
+		if !slices.Contains(running, session) {
+			running = append(running, session)
+		}
+	}
 	if len(running) > 0 {
 		return &contract.Error{Code: contract.ErrConflict, Message: fmt.Sprintf("agy sessions run on host %s (%s); close them, or let them end, before seeding it", name, strings.Join(running, ", "))}
 	}

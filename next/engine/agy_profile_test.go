@@ -356,3 +356,32 @@ func TestAgySeedFenceHoldsAgyOffTheHostUntilTheSeedEnds(t *testing.T) {
 		t.Fatal("a refused seed left its fence up")
 	}
 }
+
+// A session switched from agy to Pi has its old agy box, with the account mounted, until that box restarts: the seed looks at what runs,
+// not at the profile.
+
+func TestAgySeedRefusesAnOldAgyBoxDuringAHarnessSwitch(t *testing.T) {
+	s, room, _, owner := agySetup(t)
+	ctx := t.Context()
+	if err := s.store.SetHostAgy(ctx, "host", true); err != nil {
+		t.Fatal(err)
+	}
+	sid := startOn(t, s, room, "mover", "gem", "host")
+	readySession(t, s, sid)
+	hello, problem := s.BoxHello(ctx, boxCaller(sid), contract.BoxHelloRequest{CanHandoff: true, LaunchGen: launchGen(t, s, sid)})
+	if problem != nil || hello.Harness != contract.HarnessAgy {
+		t.Fatalf("hello: %+v %v", hello, problem)
+	}
+	openTurn(t, s, ctx, room, sid, "t1")
+	if _, p := s.SessionSetProfile(ctx, owner, contract.SessionSetProfileRequest{Session: sid, Profile: "other"}); p != nil {
+		t.Fatal(p)
+	}
+	allowed, err := s.AgyExitAllowed(ctx, hello.Box)
+	if err != nil || !allowed {
+		t.Fatalf("expected old agy runtime while turn runs: %v %v", allowed, err)
+	}
+	if end, p := s.BeginAgySeed(ctx, owner, "host"); p == nil {
+		end()
+		t.Fatal("seed admitted on host with a still-running agy turn")
+	}
+}

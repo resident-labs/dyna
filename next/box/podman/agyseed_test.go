@@ -301,3 +301,75 @@ func TestAgyUnpackLeavesAProgramInstalledMeanwhile(t *testing.T) {
 		t.Fatalf("replace kept %q", got)
 	}
 }
+
+// stallBeforePublishing runs an unpack with --replace whose publishing move blocks, so a test can end it exactly between the old
+// account leaving its place and the new one arriving. It returns when the old folder has been moved aside.
+func stallBeforePublishing(t *testing.T, dst string, pack []byte) *exec.Cmd {
+	t.Helper()
+	real, _ := exec.LookPath("mv")
+	bin := t.TempDir()
+	write(t, bin+"/mv", "#!/bin/bash\ncase \"$*\" in *\".seed.\"*accounts/main*) sleep 60 ;; esac\nexec "+real+" \"$@\"\n", 0o755)
+	cmd := exec.Command("bash", "-c", agyUnpackScript, "dyna", dst, "-", "1")
+	cmd.Env = append(os.Environ(), "PATH="+bin+":"+os.Getenv("PATH"))
+	cmd.Stdin = bytes.NewReader(pack)
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		if _, err := os.Stat(dst + "/accounts/.main.old"); err == nil {
+			if _, err := os.Stat(dst + "/accounts/main"); err != nil {
+				return cmd
+			}
+		}
+		if time.Now().After(deadline) {
+			syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+			t.Fatal("the replace never reached its publishing move")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+// A signal after the old account has left its place and before the new one is in it puts the old one back; it is never deleted.
+func TestAgyReplaceSignalledBeforePublishingRestoresTheOldAccount(t *testing.T) {
+	src := agyFolder(t)
+	write(t, src+"/accounts/main/token.json", "NEW-ACCOUNT", 0o600)
+	pack, _ := shell(t, nil, agyPackScript, src, "accounts/main")
+	dst := t.TempDir() + "/agy"
+	write(t, dst+"/accounts/main/token.json", "OLD-ACCOUNT", 0o600)
+	cmd := stallBeforePublishing(t, dst, pack)
+	syscall.Kill(-cmd.Process.Pid, syscall.SIGTERM)
+	cmd.Wait()
+	if got, _ := os.ReadFile(dst + "/accounts/main/token.json"); string(got) != "OLD-ACCOUNT" {
+		t.Fatalf("the old account after a signal: %q", got)
+	}
+	if _, err := os.Stat(dst + "/accounts/.main.old"); err == nil {
+		t.Fatal("a stray .main.old remains beside a restored account")
+	}
+}
+
+// A kill that leaves no chance to clean up leaves the old account at .main.old, and the next seed, whatever it is asked, puts it back
+// instead of deleting it.
+func TestAgyReplaceKilledBeforePublishingIsRestoredByTheNextSeed(t *testing.T) {
+	src := agyFolder(t)
+	write(t, src+"/accounts/main/token.json", "NEW-ACCOUNT", 0o600)
+	pack, _ := shell(t, nil, agyPackScript, src, "accounts/main")
+	dst := t.TempDir() + "/agy"
+	write(t, dst+"/accounts/main/token.json", "OLD-ACCOUNT", 0o600)
+	cmd := stallBeforePublishing(t, dst, pack)
+	syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+	cmd.Wait()
+	if _, err := os.Stat(dst + "/accounts/main"); err == nil {
+		t.Fatal("the kill left an account in place; the test did not stop between the moves")
+	}
+	if err := shellIn(t, t.TempDir(), bytes.NewReader(pack), agyUnpackScript, dst, "-", "0"); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := os.ReadFile(dst + "/accounts/main/token.json"); string(got) != "OLD-ACCOUNT" {
+		t.Fatalf("the next seed did not restore the old account: %q", got)
+	}
+	if _, err := os.Stat(dst + "/accounts/.main.old"); err == nil {
+		t.Fatal("a stray .main.old remains")
+	}
+}

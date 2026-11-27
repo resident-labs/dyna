@@ -439,6 +439,26 @@ func (s *Store) SetHostGPUs(ctx context.Context, host contract.HostName, gpus []
 	})
 }
 
+// AgyBoxes names the sessions whose box on the host is, or may be, running agy: a box whose agent said at its last hello that it serves
+// agy and that is not stopped, failed or gone (creating, starting, ready, closing or lost). It is what is actually mounted, whatever the session's profile now says: a session just
+// switched to Pi still has its old agy box until that box has restarted.
+func (s *Store) AgyBoxes(ctx context.Context, host contract.HostName) ([]string, error) {
+	rows, err := s.Read().QueryContext(ctx, "SELECT s.name FROM boxes b JOIN sessions s ON s.id=b.session WHERE b.host=? AND b.harness=? AND b.state IN (?,?,?,?,?) ORDER BY s.name", host, contract.HarnessAgy, contract.BoxCreating, contract.BoxStarting, contract.BoxReady, contract.BoxClosing, contract.BoxLost)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var names []string
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			return nil, err
+		}
+		names = append(names, name)
+	}
+	return names, rows.Err()
+}
+
 // BeginAgySeed marks a host as being seeded with agy, and says false when it already is. The mark is the one fence of a seed: while it
 // stands Hosts reports the host without agy, so admission, placement and a harness switch all refuse to enter agy on it. A caller holds
 // LockAdmission across the mark and its check that no agy session is on the host, so an admission lands wholly before or after.

@@ -41,16 +41,22 @@ tar -c -f - --transform='s,.*,.dyna-complete,' -- "$marker" 2>/dev/null`
 // agyUnpackScript extracts the tar on stdin under a temporary folder in the agy folder $1, on the folder's own filesystem and never under /tmp,
 // requires the complete marker, checks the program's checksum $2 (or "-" for none), and moves each piece into place, so a half copy is
 // never at the final path. The temporary folder is 0700 and goes on every way out, even a signal; one left by a kill is swept at the next
-// seed, under the lock. The account folder is 0700. A present account folder is left alone unless $3 is 1, and is then put back if the
-// move fails. The program is published only if the path is still free once the lock is held, or when $3 is 1.
+// seed, under the lock. The account folder is 0700. A present account folder is left alone unless $3 is 1. A replaced one is kept at
+// accounts/.main.old, outside the temporary folder, from the moment it leaves its place until the new one is in it and complete: any way
+// out in between (a signal, a failed move) puts it back, and a kill leaves it for the next seed, which puts it back when accounts/main
+// is missing and removes it only when accounts/main is there. The old copy is never deleted while accounts/main is not. The program is published only if the path is still free once the lock is held, or when $3 is 1.
 const agyUnpackScript = `set -eu
 dir=$1 want=$2 replace=$3
 mkdir -p -m 0700 -- "$dir"
 exec 9> "$dir/.seed.lock"
 flock -x 9
+main=$dir/accounts/main old=$dir/accounts/.main.old
+if [ -e "$old" ]; then
+ if [ -e "$main" ]; then rm -rf -- "$old"; else mv -T -- "$old" "$main"; fi
+fi
 rm -rf -- "$dir"/.seed.??????
 tmp=$(mktemp -d "$dir/.seed.XXXXXX")
-trap 'rm -rf -- "$tmp"' EXIT
+trap 'if [ -e "$old" ] && [ ! -e "$main" ]; then mv -T -- "$old" "$main"; fi; rm -rf -- "$tmp"' EXIT
 trap 'exit 1' HUP INT TERM
 tar -x -i -p --no-same-owner -C "$tmp" -f -
 [ -f "$tmp/.dyna-complete" ]
@@ -66,11 +72,12 @@ fi
 if [ -d "$tmp/accounts/main" ]; then
  chmod 0700 "$tmp/accounts/main"
  mkdir -p -m 0700 -- "$dir/accounts"
- if [ -e "$dir/accounts/main" ]; then
+ if [ -e "$main" ]; then
   [ "$replace" = 1 ] || exit 0
-  mv -T -- "$dir/accounts/main" "$tmp/old"
+  mv -T -- "$main" "$old"
  fi
- mv -T -- "$tmp/accounts/main" "$dir/accounts/main" || { [ ! -e "$tmp/old" ] || mv -T -- "$tmp/old" "$dir/accounts/main"; exit 1; }
+ mv -T -- "$tmp/accounts/main" "$main"
+ rm -rf -- "$old"
 fi`
 
 func agyDir(layout box.Layout) string { return filepath.Dir(layout.HostAgyBinary()) }
