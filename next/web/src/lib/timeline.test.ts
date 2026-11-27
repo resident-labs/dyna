@@ -1,25 +1,44 @@
 // Ported from T3 Code (apps/web/src/components/chat/MessagesTimeline.logic.test.ts), MIT License, Copyright (c) 2026 T3 Tools Inc. See next/third_party/t3code/LICENSE.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { workingLine, compactionNote, summarizeWork, deriveTimelineGroups, finalTimelineItem, postDestination, queuedTimelinePosts, steerInput, timelineInput, timelineInputText, timelineSegments, formatTimelineDuration, mergeTimelineInputs, mergeTimelineItems, timelineItemRunning, withFinished, workFoldLabel, workLayout, foldInputRuns, engineEventsNote, attemptFailedNote } from "./timeline.ts";
+import { workingLine, compactionNote, summarizeWork, deriveTimelineGroups, finalTimelineItem, postDestination, timelineTailPosts, steerInput, timelineInput, timelineInputText, timelineSegments, formatTimelineDuration, mergeTimelineInputs, mergeTimelineItems, timelineItemRunning, withFinished, workFoldLabel, workLayout, foldInputRuns, engineEventsNote, attemptFailedNote } from "./timeline.ts";
 import type { TranscriptInput, TranscriptItem, TranscriptTurn } from "./contract.gen.ts";
 
 const steer = (id: string, at = ""): TranscriptItem => ({ id: `steer:${id}`, event: id, seq: 6, turn: "t", at, kind: "steer", from: { kind: "owner" } });
 const work = (id: string): TranscriptItem => ({ id, turn: "t", at: "", kind: "tool", tool: "bash" });
 
-test("a steer leaves the queue the moment the transcript holds it, and a message after the turn stays queued", () => {
-  const input = { id: "in", seq: 5, at: "", room: "r", type: "post.created", from: { kind: "owner" }, text: "" } as TranscriptInput;
-  const turn = (items: TranscriptItem[]): TranscriptTurn => ({ id: "t", started: "", inputs: [input], items, more: false });
-  const posts = [{ id: "in", seq: 5 }, { id: "sent", seq: 6 }, { id: "after", seq: 7 }];
-  assert.deepEqual(queuedTimelinePosts(posts, [turn([work("a")])]).map(post => post.id), ["sent", "after"]);
-  assert.deepEqual(queuedTimelinePosts(posts, [turn([work("a"), steer("sent")])]).map(post => post.id), ["after"]);
+const postAt = (id: string, seq: number, second = seq) => ({ id, seq, at: new Date(second * 1000).toISOString() });
+const startAt = postAt("", 0, 5).at;
+const tail = (posts: ReturnType<typeof postAt>[], turns: TranscriptTurn[] | undefined, liveTurn?: string) =>
+  timelineTailPosts(posts, turns, liveTurn).map(({ post, queued }) => [post.id, queued]);
+
+test("DM history waits for the first transcript page, but a loaded empty transcript can have a waiting post", () => {
+  const posts = [postAt("first", 1)];
+  assert.deepEqual(tail(posts, undefined), []);
+  assert.deepEqual(tail(posts, []), [["first", true]]);
+});
+
+test("an unmatched post predating the newest loaded turn is not queued", () => {
+  const turn: TranscriptTurn = { id: "t", started: startAt, inputs: [], items: [], more: false };
+  const posts = [postAt("old", 4), postAt("same millisecond", 5), postAt("next", 6)];
+  assert.deepEqual(tail(posts, [turn]), [["old", false], ["same millisecond", false], ["next", true]]);
+  assert.deepEqual(tail(posts, [turn], "newer"), [["old", false], ["same millisecond", false], ["next", false]]);
+});
+
+test("a steer leaves the queue the moment the transcript holds it, and the next message stays queued", () => {
+  const input: TranscriptInput = { ...postAt("in", 5, 4), room: "r", type: "post.created", from: { kind: "owner" }, text: "" };
+  const turn: TranscriptTurn = { id: "t", started: startAt, inputs: [input], items: [work("a")], more: false };
+  const posts = [input, postAt("sent", 6), postAt("after", 7)];
+  assert.deepEqual(tail(posts, [turn], "t"), [["sent", true], ["after", true]]);
+  assert.deepEqual(tail(posts, [{ ...turn, mandatoryItems: true }], "t"), [["sent", false], ["after", false]]);
+  assert.deepEqual(tail(posts, [{ ...turn, items: [work("a"), steer("sent")] }], "t"), [["after", true]]);
 });
 
 test("a later turn's input can no longer hide a steer: the post has its place in its turn", () => {
   const items = [work("a"), steer("sent"), { id: "b", turn: "t", at: "", kind: "text", text: "answer" } as TranscriptItem];
   const input = (id: string, seq: number) => ({ id, seq, at: "", room: "r", type: "post.created", from: { kind: "owner" }, text: "" }) as TranscriptInput;
   const turns: TranscriptTurn[] = [{ id: "t", started: "", inputs: [input("in", 5)], items, more: false }, { id: "u", started: "", inputs: [input("next", 9)], items: [], more: false }];
-  assert.deepEqual(queuedTimelinePosts([{ id: "sent", seq: 6 }, { id: "next", seq: 9 }], turns), []);
+  assert.deepEqual(tail([postAt("sent", 6), postAt("next", 9)], turns), []);
   assert.deepEqual(timelineSegments("t", items).map(segment => [segment.steers.map(item => item.id), segment.items.map(item => item.id)]), [[[], ["a"]], [["steer:sent"], ["b"]]]);
 });
 
@@ -79,9 +98,8 @@ test("a repeat read of a turn keeps one steer, in its place", () => {
 test("a post stays queued until the transcript holds it, even after an agent's later post", () => {
   const input = { id: "in", seq: 5, at: "", room: "r", type: "post.created", from: { kind: "owner" }, text: "" } as TranscriptInput;
   const nested: TranscriptItem = { id: "out", event: "out", seq: 7, turn: "t", at: "", kind: "post" };
-  const turn: TranscriptTurn = { id: "t", started: "", inputs: [input], items: [{ id: "tool", turn: "t", at: "", kind: "tool", tool: "post", posts: [nested] }], more: false };
-  const queued = queuedTimelinePosts([{ id: "old", seq: 3 }, { id: "in", seq: 5 }, { id: "waiting", seq: 6 }, { id: "out", seq: 7 }, { id: "new", seq: 8 }], [turn]);
-  assert.deepEqual(queued.map(post => post.id), ["waiting", "new"]);
+  const turn: TranscriptTurn = { id: "t", started: startAt, inputs: [input], items: [{ id: "tool", turn: "t", at: "", kind: "tool", tool: "post", posts: [nested] }], more: false };
+  assert.deepEqual(tail([postAt("old", 3), postAt("in", 5), postAt("waiting", 6), postAt("out", 7), postAt("new", 8)], [turn]), [["waiting", true], ["new", true]]);
 });
 
 test("one item of work has no heading to open first, and a script keeps the heading that counts its actions", () => {

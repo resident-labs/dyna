@@ -200,16 +200,22 @@ export function finalTimelineItem(items: TranscriptItem[], session: string): Tra
   return final;
 }
 
-// Dyna: A post waits outside the turns until the transcript holds it. An agent's own post can land while an owner's
-// message still waits, so only the newest input marks what is history; anything older is already in the transcript's past.
-export function queuedTimelinePosts<Post extends { id: string; seq: number }>(posts: Post[], turns: TranscriptTurn[]): Post[] {
+// Hold back the DM event window until the first transcript page can place its history.
+// An agent's own post can land while an owner's message still waits, so only inputs advance the history boundary.
+export function timelineTailPosts<Post extends { id: string; seq: number; at: string }>(posts: Post[], turns: TranscriptTurn[] | undefined, liveTurn?: string): { post: Post; queued: boolean }[] {
+  if (!turns) return [];
+  const newest = turns.at(-1);
+  const started = newest ? Date.parse(newest.started) : -Infinity;
+  // The live turn or its steers may not be in the transcript yet. Show unmatched posts plainly in that case.
+  const covered = (!liveTurn || liveTurn === newest?.id) && !newest?.mandatoryItems;
   const held = new Set<string>();
   let lastInput = 0;
   for (const turn of turns) {
     for (const input of turn.inputs ?? []) { held.add(input.id); lastInput = Math.max(lastInput, input.seq); }
     for (const item of turn.items ?? []) for (const entry of [item, ...(item.posts ?? [])]) held.add(entry.event ?? entry.id);
   }
-  return posts.filter(post => post.seq > lastInput && !held.has(post.id));
+  return posts.filter(post => post.seq > lastInput && !held.has(post.id))
+    .map(post => ({ post, queued: covered && Date.parse(post.at) > started }));
 }
 
 // Dyna: A post names its destination only when it left the DM on screen.
