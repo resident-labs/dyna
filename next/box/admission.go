@@ -27,6 +27,8 @@ const (
 	PendingNoGPU PendingReason = "no-gpu"
 	// PendingNoAgy says no ready host has agy installed and signed in, for a box of an agy session.
 	PendingNoAgy PendingReason = "no-agy"
+	// PendingAgySeeding says the host an agy box could start on is being seeded with agy now.
+	PendingAgySeeding PendingReason = "agy-seeding"
 )
 
 type Placement struct {
@@ -115,9 +117,12 @@ func Admit(hosts []Host, boxes []Box, request Box, only ...string) Placement {
 			}
 			continue
 		}
-		if request.Agy && existing == nil && !h.Agy {
+		if request.Agy && (h.Seeding || existing == nil && !h.Agy) {
 			if reason == PendingNoReadyHost {
 				reason = PendingNoAgy
+				if h.Seeding {
+					reason = PendingAgySeeding
+				}
 			}
 			continue
 		}

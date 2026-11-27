@@ -58,6 +58,7 @@ type Host struct {
 	Pool      string         // the pool that holds this node
 	GPUs      []contract.GPU // the cards its CDI spec offers, from the latest probe
 	Agy       bool           // agy is installed and signed in on it, from the latest probe
+	Seeding   bool           // an owner's agy seed is copying to it: no agy box starts there until it ends
 	Box       contract.BoxID // the one box a per-session node serves
 	// Services are the services placed here, which admission counts first (5.5, 5.18).
 	Services []ServiceHold

@@ -5,7 +5,9 @@ import (
 	"errors"
 	"io"
 	"path/filepath"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/resident-labs/dyna/box"
 )
@@ -102,6 +104,21 @@ func (h *Host) AgyState(ctx context.Context, layout box.Layout) (AgyState, error
 		}
 	}
 	return state, nil
+}
+
+// agyBarrierScript returns when no unpack on the host is running: it takes the lock the unpack holds, and fails if that takes longer than
+// $2 seconds. A script that was cut off, its ssh gone, holds the lock until it has ended or died, so this is the proof that it has.
+const agyBarrierScript = `set -eu
+mkdir -p -m 0700 -- "$1"
+exec 9> "$1/.seed.lock"
+flock -x -w "$2" 9`
+
+// AgyBarrier waits, up to wait, for a seed's unpack on this host to be over, on a fresh ssh command of its own.
+func (h *Host) AgyBarrier(ctx context.Context, layout box.Layout, wait time.Duration) error {
+	if _, err := h.run(ctx, "bash", "-c", agyBarrierScript, "dyna-agy-barrier", agyDir(layout), strconv.Itoa(int(wait.Seconds()))); err != nil {
+		return errors.New("could not tell whether a seed of the agy files has ended on the host")
+	}
+	return nil
 }
 
 // stream runs a command on the host with its input and output as streams, over the host's own connection and under its gates. A driver that

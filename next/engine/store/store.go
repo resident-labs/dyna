@@ -79,9 +79,6 @@ type Store struct {
 	subMu          sync.Mutex
 	subs           map[chan contract.Event]struct{}
 
-	agyMu      sync.Mutex
-	agySeeding map[contract.HostName]bool // hosts being seeded with agy now: Hosts reports them without agy
-
 	stamped sync.Map // turn IDs whose first model handoff is persisted
 	logged  sync.Map // turn IDs whose stamp failure was logged
 }

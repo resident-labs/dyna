@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"time"
 
 	"github.com/resident-labs/dyna/contract"
 	"github.com/resident-labs/dyna/engine"
@@ -12,6 +13,21 @@ import (
 
 // ErrAgyArch says the program on the source cannot run on the target, so it was not copied. It is a fact about the host, not a fault.
 var ErrAgyArch = errors.New("agy binary architecture differs")
+
+// agyBarrierWait is how long the barrier waits for a seed's unpack to let go of the host's seed lock.
+const agyBarrierWait = 20 * time.Second
+
+// AgyBarrier says whether no unpack of a seed is running on the host: its lock is free. An unreachable host, or a lock still held after
+// the wait, is an error, and a mark that waits on it stays.
+func (b *Boxes) AgyBarrier(ctx context.Context, name contract.HostName) error {
+	h, err := b.host(ctx, name)
+	if err != nil {
+		return err
+	}
+	ctx, cancel := context.WithTimeout(ctx, agyBarrierWait+10*time.Second)
+	defer cancel()
+	return h.AgyBarrier(ctx, b.Layout, agyBarrierWait)
+}
 
 // SeedAgy is the owner's `dyna agy seed`: it copies the signed-in agy account folder, and the program when the host has none, from
 // engine.AgySource to the target, as an opaque archive carried over the two hosts' drivers (as StageBinary sends the engine's own

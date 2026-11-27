@@ -6,7 +6,7 @@ import (
 	"strconv"
 )
 
-const schemaVersion = 133
+const schemaVersion = 134
 
 const agentsTable = `CREATE TABLE agents (id TEXT PRIMARY KEY, session TEXT NOT NULL REFERENCES sessions(id), turn TEXT NOT NULL, name TEXT NOT NULL, state TEXT NOT NULL, transcript TEXT NOT NULL DEFAULT '', start_offset INTEGER NOT NULL DEFAULT 0, started_at INTEGER NOT NULL, ended_at INTEGER NOT NULL DEFAULT 0, model TEXT NOT NULL DEFAULT '', input_tokens INTEGER NOT NULL DEFAULT 0, output_tokens INTEGER NOT NULL DEFAULT 0, cache_read_tokens INTEGER NOT NULL DEFAULT 0, cache_write_tokens INTEGER NOT NULL DEFAULT 0)`
 
@@ -14,6 +14,8 @@ const agentsTable = `CREATE TABLE agents (id TEXT PRIMARY KEY, session TEXT NOT 
 // steps below the floor go when the floor moves. Later steps are ordinary.
 var steps = map[int][]string{
 	// A GitHub poll may outlive deletion and re-creation of a repository registration.
+	// A host being seeded with agy holds the token of the seed that marked it; agy boxes are kept off it while it is set.
+	133: {`ALTER TABLE hosts ADD COLUMN seeding TEXT NOT NULL DEFAULT ''`},
 	131: {`CREATE TABLE IF NOT EXISTS repo_registrations (repo TEXT PRIMARY KEY REFERENCES repos(repo) ON DELETE CASCADE, generation TEXT NOT NULL)`, `INSERT INTO repo_registrations(repo,generation) SELECT repo,lower(hex(randomblob(16))) FROM repos WHERE true ON CONFLICT(repo) DO NOTHING`},
 	// agy on any host that has it: a host reports whether agy is installed and signed in there, and a box of an agy session waits for such a host.
 	132: {

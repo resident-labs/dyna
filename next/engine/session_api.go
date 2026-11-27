@@ -784,7 +784,7 @@ func (s *Service) SessionSetProfile(ctx context.Context, caller contract.Princip
 			if problem := s.checkHarnessSwitch(ctx, target, req.Profile, harnessOf(req.Profile)); problem != nil {
 				return problem
 			}
-			harness = &store.HarnessSwitch{RequireHandoff: true}
+			harness = &store.HarnessSwitch{RequireHandoff: true, To: harnessOf(req.Profile)}
 		}
 		if err := s.store.SetSessionProfile(ctx, target.ID, target.Profile, req.Profile, event, harness); err != nil {
 			if harness != nil && errors.Is(err, store.ErrSessionClosing) {
@@ -792,6 +792,9 @@ func (s *Service) SessionSetProfile(ctx context.Context, caller contract.Princip
 			}
 			if errors.Is(err, store.ErrProfileChanged) {
 				return &contract.Error{Code: contract.ErrConflict, Message: fmt.Sprintf("session %s changed profile while this request was being made; read its profile again and decide from that", target.Name)}
+			}
+			if errors.Is(err, store.ErrHostSeeding) {
+				return &contract.Error{Code: contract.ErrConflict, Message: fmt.Sprintf("session %s's host is being seeded with agy; try again shortly", target.Name)}
 			}
 			if errors.Is(err, store.ErrNoHandoff) {
 				return &contract.Error{Code: contract.ErrConflict, Message: fmt.Sprintf("session %s runs in a box that cannot hand its conversation to another harness yet; try again after its box has restarted, or start a new session on profile %s", target.Name, req.Profile)}

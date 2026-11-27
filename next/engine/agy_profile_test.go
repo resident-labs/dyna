@@ -1,15 +1,21 @@
 package engine
 
 import (
+	"context"
+	"database/sql"
+	"errors"
 	"github.com/resident-labs/dyna/engine/live"
 	"os"
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/resident-labs/dyna/box"
 	"github.com/resident-labs/dyna/contract"
+	"github.com/resident-labs/dyna/engine/store"
 )
 
 const agyProfilesJSON = `{
@@ -287,7 +293,7 @@ func TestAgyProfileHasNoSessionCap(t *testing.T) {
 }
 
 func TestAgySeedIsTheOwnersAndNeverForARunningOrIneligibleHost(t *testing.T) {
-	s, room, root, owner := agySetup(t)
+	s, _, root, owner := agySetup(t)
 	ctx := t.Context()
 	if e := s.AgySeedProblem(ctx, contract.Principal{Kind: contract.PrincipalSession, Session: root}, "host"); e == nil || e.Code != contract.ErrForbidden {
 		t.Fatalf("a session seeds: %v", e)
@@ -306,54 +312,6 @@ func TestAgySeedIsTheOwnersAndNeverForARunningOrIneligibleHost(t *testing.T) {
 	}
 	if e := s.AgySeedProblem(ctx, owner, "host"); e != nil {
 		t.Fatalf("a host with only a pig session: %v", e)
-	}
-	// An agy session on the host holds the seed off, and names it.
-	if err := s.store.SetHostAgy(ctx, "host", true); err != nil {
-		t.Fatal(err)
-	}
-	if _, e := s.SessionStart(ctx, owner, contract.SessionStartRequest{Room: room, Name: "gemini", Profile: "gem", Host: "host"}); e != nil {
-		t.Fatal(e)
-	}
-	if e := s.AgySeedProblem(ctx, owner, "host"); e == nil || e.Code != contract.ErrConflict || !strings.Contains(e.Message, "gemini") {
-		t.Fatalf("an agy session runs there: %v", e)
-	}
-}
-
-// While a host is being seeded it reports no agy to placement, start and a harness switch alike, and the seed itself is refused when an
-// agy session is on the host: one fence, taken before the check.
-func TestAgySeedFenceHoldsAgyOffTheHostUntilTheSeedEnds(t *testing.T) {
-	s, room, root, owner := agySetup(t)
-	ctx := t.Context()
-	if err := s.store.SetHostAgy(ctx, "host", true); err != nil {
-		t.Fatal(err)
-	}
-	start := func(name string) *contract.Error {
-		_, e := s.SessionStart(ctx, owner, contract.SessionStartRequest{Room: room, Name: name, Profile: "gem", Parent: root, Host: "host"})
-		return e
-	}
-	end, e := s.BeginAgySeed(ctx, owner, "host")
-	if e != nil {
-		t.Fatal(e)
-	}
-	if e := start("during"); e == nil || e.Code != contract.ErrConflict || !strings.Contains(e.Message, "being seeded") {
-		t.Fatalf("an agy session started on a host being seeded: %v", e)
-	}
-	if hosts, _ := s.store.Hosts(ctx); slices.ContainsFunc(hosts, func(h box.Host) bool { return h.Name == "host" && h.Agy }) {
-		t.Fatal("a host being seeded still reports agy to admission")
-	}
-	if _, e := s.BeginAgySeed(ctx, owner, "host"); e == nil || e.Code != contract.ErrConflict {
-		t.Fatalf("a second seed of the same host: %v", e)
-	}
-	end()
-	if e := start("after"); e != nil {
-		t.Fatalf("after the seed: %v", e)
-	}
-	// A failed check ends its own fence.
-	if _, e := s.BeginAgySeed(ctx, owner, "host"); e == nil || !strings.Contains(e.Message, "after") {
-		t.Fatalf("a host with an agy session: %v", e)
-	}
-	if s.store.AgySeeding("host") {
-		t.Fatal("a refused seed left its fence up")
 	}
 }
 
@@ -380,8 +338,211 @@ func TestAgySeedRefusesAnOldAgyBoxDuringAHarnessSwitch(t *testing.T) {
 	if err != nil || !allowed {
 		t.Fatalf("expected old agy runtime while turn runs: %v %v", allowed, err)
 	}
-	if end, p := s.BeginAgySeed(ctx, owner, "host"); p == nil {
-		end()
+	if p := s.BeginAgySeed(ctx, "host", "tok", ""); p == nil {
 		t.Fatal("seed admitted on host with a still-running agy turn")
+	}
+}
+
+// seeding marks the host as a seed holds it, as the seed's own transaction does, without the check of boxes.
+func markSeeding(t *testing.T, s *Service, host contract.HostName, token string) {
+	t.Helper()
+	if err := s.store.Write(t.Context(), func(tx *sql.Tx) error {
+		_, err := tx.ExecContext(t.Context(), "UPDATE hosts SET seeding=? WHERE name=?", token, host)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func seedMark(t *testing.T, s *Service, host contract.HostName) string {
+	t.Helper()
+	mark, err := s.AgySeedMark(t.Context(), host)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return mark
+}
+
+// The persisted seed mark, one cell of the states and events table at a time: what each event does while the host is idle and while a
+// seed holds it.
+func TestAgySeedMarkStatesAndEvents(t *testing.T) {
+	agyHost := func(t *testing.T) (*Service, contract.RoomID, contract.SessionID, contract.Principal) {
+		s, room, root, owner := agySetup(t)
+		if err := s.store.SetHostAgy(t.Context(), "host", true); err != nil {
+			t.Fatal(err)
+		}
+		return s, room, root, owner
+	}
+	start := func(s *Service, owner contract.Principal, room contract.RoomID, root contract.SessionID, name string) *contract.Error {
+		_, e := s.SessionStart(t.Context(), owner, contract.SessionStartRequest{Room: room, Name: name, Profile: "gem", Parent: root, Host: "host"})
+		return e
+	}
+	cells := map[string]func(t *testing.T){
+		"seed start on an idle host with no agy box marks it": func(t *testing.T) {
+			s, _, _, _ := agyHost(t)
+			if e := s.BeginAgySeed(t.Context(), "host", "one", ""); e != nil || seedMark(t, s, "host") != "one" {
+				t.Fatalf("%v %q", e, seedMark(t, s, "host"))
+			}
+		},
+		"seed start refuses a host with an agy box, pending or running, and marks nothing": func(t *testing.T) {
+			s, room, root, owner := agyHost(t)
+			if e := start(s, owner, room, root, "gemini"); e != nil {
+				t.Fatal(e)
+			}
+			if e := s.BeginAgySeed(t.Context(), "host", "one", ""); e == nil || e.Code != contract.ErrConflict || !strings.Contains(e.Message, "gemini") || seedMark(t, s, "host") != "" {
+				t.Fatalf("%v %q", e, seedMark(t, s, "host"))
+			}
+		},
+		"seed start on a marked host is refused unless it takes over the mark it read": func(t *testing.T) {
+			s, _, _, _ := agyHost(t)
+			markSeeding(t, s, "host", "stale")
+			if e := s.BeginAgySeed(t.Context(), "host", "two", ""); e == nil || e.Code != contract.ErrConflict || seedMark(t, s, "host") != "stale" {
+				t.Fatalf("a seed took another's mark: %v %q", e, seedMark(t, s, "host"))
+			}
+			if e := s.BeginAgySeed(t.Context(), "host", "two", "stale"); e != nil || seedMark(t, s, "host") != "two" {
+				t.Fatalf("%v %q", e, seedMark(t, s, "host"))
+			}
+		},
+		"seed end clears its own mark and no other's": func(t *testing.T) {
+			s, _, _, _ := agyHost(t)
+			markSeeding(t, s, "host", "mine")
+			s.EndAgySeedAfter("host", "theirs", true, nil)
+			if seedMark(t, s, "host") != "mine" {
+				t.Fatal("another seed's end cleared the mark")
+			}
+			s.EndAgySeedAfter("host", "mine", true, nil)
+			if seedMark(t, s, "host") != "" {
+				t.Fatal("a known end left the mark")
+			}
+		},
+		"seed end of an unknown end clears only after the barrier, and stays when it fails": func(t *testing.T) {
+			s, _, _, _ := agyHost(t)
+			markSeeding(t, s, "host", "tok")
+			s.EndAgySeedAfter("host", "tok", false, func(context.Context, contract.HostName) error { return errors.New("unreachable") })
+			if seedMark(t, s, "host") != "tok" {
+				t.Fatal("the mark was cleared with the host unreachable")
+			}
+			s.EndAgySeedAfter("host", "tok", false, func(context.Context, contract.HostName) error { return nil })
+			if seedMark(t, s, "host") != "" {
+				t.Fatal("the mark stayed after the barrier passed")
+			}
+		},
+		"engine start runs the barrier per marked host and never clears blindly": func(t *testing.T) {
+			s, _, _, _ := agyHost(t)
+			markSeeding(t, s, "host", "stale")
+			s.ReleaseAgySeeds(t.Context(), func(context.Context, contract.HostName) error { return errors.New("unreachable") })
+			if seedMark(t, s, "host") != "stale" {
+				t.Fatal("an unreachable host's mark was cleared at start")
+			}
+			var asked []contract.HostName
+			s.ReleaseAgySeeds(t.Context(), func(_ context.Context, name contract.HostName) error { asked = append(asked, name); return nil })
+			if seedMark(t, s, "host") != "" || !slices.Equal(asked, []contract.HostName{"host"}) {
+				t.Fatalf("%q %v", seedMark(t, s, "host"), asked)
+			}
+		},
+		"agy session start pinned to a seeded host is refused, and an idle host takes it": func(t *testing.T) {
+			s, room, root, owner := agyHost(t)
+			markSeeding(t, s, "host", "tok")
+			if e := start(s, owner, room, root, "during"); e == nil || e.Code != contract.ErrConflict || !strings.Contains(e.Message, "being seeded") {
+				t.Fatalf("%v", e)
+			}
+			markSeeding(t, s, "host", "")
+			if e := start(s, owner, room, root, "after"); e != nil {
+				t.Fatal(e)
+			}
+		},
+		"an unpinned agy session does not choose a seeded host": func(t *testing.T) {
+			s, room, root, owner := agyHost(t)
+			markSeeding(t, s, "host", "tok")
+			markSeeding(t, s, "hermeslab", "tok")
+			if _, e := s.SessionStart(t.Context(), owner, contract.SessionStartRequest{Room: room, Name: "any", Profile: "gem", Parent: root}); e == nil {
+				t.Fatal("placed with every agy host seeded")
+			}
+		},
+		"a switch to agy on a seeded host is refused; a switch away is allowed": func(t *testing.T) {
+			s, room, _, owner := agyHost(t)
+			pig := startOn(t, s, room, "pig", "other", "host")
+			readySession(t, s, pig)
+			markSeeding(t, s, "host", "tok")
+			if _, e := s.SessionSetProfile(t.Context(), owner, contract.SessionSetProfileRequest{Session: pig, Profile: "gem"}); e == nil || e.Code != contract.ErrConflict || !strings.Contains(e.Message, "being seeded") {
+				t.Fatalf("%v", e)
+			}
+			markSeeding(t, s, "host", "")
+			if _, e := s.SessionSetProfile(t.Context(), owner, contract.SessionSetProfileRequest{Session: pig, Profile: "gem"}); e != nil {
+				t.Fatal(e)
+			}
+			markSeeding(t, s, "host", "tok")
+			if _, e := s.SessionSetProfile(t.Context(), owner, contract.SessionSetProfileRequest{Session: pig, Profile: "other"}); e != nil {
+				t.Fatalf("a switch away during a seed: %v", e)
+			}
+		},
+		"a box that wants agy is refused its start on a seeded host, in the start transaction": func(t *testing.T) {
+			s, room, root, owner := agyHost(t)
+			if e := start(s, owner, room, root, "gemini"); e != nil {
+				t.Fatal(e)
+			}
+			sessions, _ := s.store.HostSessions(t.Context())
+			index := slices.IndexFunc(sessions["host"], func(h contract.HostSession) bool { return h.Name == "gemini" })
+			b, err := s.store.Box(t.Context(), s.mustSession(t, sessions["host"][index].ID).Box)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := s.store.Write(t.Context(), func(tx *sql.Tx) error {
+				_, err := tx.ExecContext(t.Context(), "UPDATE boxes SET state='pending' WHERE id=?", b.ID)
+				return err
+			}); err != nil {
+				t.Fatal(err)
+			}
+			b.State, b.Host = contract.BoxPending, "host" // as admission assigns it
+			markSeeding(t, s, "host", "tok")
+			event, err := s.event(room, contract.Principal{Kind: contract.PrincipalEngine}, contract.BoxChanged{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := s.store.TransitionBox(t.Context(), b, contract.BoxCreating, "", event); !errors.Is(err, store.ErrHostSeeding) {
+				t.Fatalf("a start on a seeded host: %v", err)
+			}
+		},
+	}
+	for name, cell := range cells {
+		t.Run(name, cell)
+	}
+}
+
+func (s *Service) mustSession(t *testing.T, id contract.SessionID) store.Session {
+	t.Helper()
+	session, err := s.store.Session(t.Context(), id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return session
+}
+
+// A profile edit, a seed start and a profile switch at once never wait on each other: the seed and the switch each decide in one
+// transaction, and neither holds a lock the profile registry's writer queues behind.
+func TestAgySeedSwitchAndProfileEditDoNotDeadlock(t *testing.T) {
+	s, room, _, owner := agySetup(t)
+	pig := startOn(t, s, room, "pig", "other", "hermeslab")
+	readySession(t, s, pig)
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		var wg sync.WaitGroup
+		wg.Add(3)
+		go func() {
+			defer wg.Done()
+			_, _ = s.ProfileSet(t.Context(), owner, contract.ProfileSetRequest{Profile: contract.Profile{Name: "other", Provider: contract.ModelProviderOpenAI, Model: "m", AllowedModels: []string{"m"}, Thinking: contract.ThinkingLow, Harness: contract.HarnessPig}})
+		}()
+		go func() { defer wg.Done(); _ = s.BeginAgySeed(t.Context(), "host", "tok", "") }()
+		go func() {
+			defer wg.Done()
+			_, _ = s.SessionSetProfile(t.Context(), owner, contract.SessionSetProfileRequest{Session: pig, Profile: "gem"})
+		}()
+		wg.Wait()
+	}()
+	select {
+	case <-done:
+	case <-time.After(30 * time.Second):
+		t.Fatal("a profile edit, a seed and a switch waited on each other")
 	}
 }

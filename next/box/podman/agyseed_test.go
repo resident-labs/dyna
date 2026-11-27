@@ -308,7 +308,8 @@ func stallBeforePublishing(t *testing.T, dst string, pack []byte) *exec.Cmd {
 	t.Helper()
 	real, _ := exec.LookPath("mv")
 	bin := t.TempDir()
-	write(t, bin+"/mv", "#!/bin/bash\ncase \"$*\" in *\".seed.\"*accounts/main*) sleep 60 ;; esac\nexec "+real+" \"$@\"\n", 0o755)
+	ready := bin + "/ready"
+	write(t, bin+"/mv", "#!/bin/bash\ncase \"$*\" in *\".seed.\"*accounts/main*) : > "+ready+"; sleep 60 ;; esac\nexec "+real+" \"$@\"\n", 0o755)
 	cmd := exec.Command("bash", "-c", agyUnpackScript, "dyna", dst, "-", "1")
 	cmd.Env = append(os.Environ(), "PATH="+bin+":"+os.Getenv("PATH"))
 	cmd.Stdin = bytes.NewReader(pack)
@@ -318,10 +319,9 @@ func stallBeforePublishing(t *testing.T, dst string, pack []byte) *exec.Cmd {
 	}
 	deadline := time.Now().Add(10 * time.Second)
 	for {
-		if _, err := os.Stat(dst + "/accounts/.main.old"); err == nil {
-			if _, err := os.Stat(dst + "/accounts/main"); err != nil {
-				return cmd
-			}
+		// The stub writes the file only once it is the publishing move and blocks: the signal goes after that, never before.
+		if _, err := os.Stat(ready); err == nil {
+			return cmd
 		}
 		if time.Now().After(deadline) {
 			syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
@@ -339,8 +339,10 @@ func TestAgyReplaceSignalledBeforePublishingRestoresTheOldAccount(t *testing.T) 
 	dst := t.TempDir() + "/agy"
 	write(t, dst+"/accounts/main/token.json", "OLD-ACCOUNT", 0o600)
 	cmd := stallBeforePublishing(t, dst, pack)
-	syscall.Kill(-cmd.Process.Pid, syscall.SIGTERM)
-	cmd.Wait()
+	if err := syscall.Kill(-cmd.Process.Pid, syscall.SIGTERM); err != nil {
+		t.Fatal(err)
+	}
+	_ = cmd.Wait()
 	if got, _ := os.ReadFile(dst + "/accounts/main/token.json"); string(got) != "OLD-ACCOUNT" {
 		t.Fatalf("the old account after a signal: %q", got)
 	}
@@ -358,8 +360,10 @@ func TestAgyReplaceKilledBeforePublishingIsRestoredByTheNextSeed(t *testing.T) {
 	dst := t.TempDir() + "/agy"
 	write(t, dst+"/accounts/main/token.json", "OLD-ACCOUNT", 0o600)
 	cmd := stallBeforePublishing(t, dst, pack)
-	syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
-	cmd.Wait()
+	if err := syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL); err != nil {
+		t.Fatal(err)
+	}
+	_ = cmd.Wait()
 	if _, err := os.Stat(dst + "/accounts/main"); err == nil {
 		t.Fatal("the kill left an account in place; the test did not stop between the moves")
 	}
@@ -371,5 +375,35 @@ func TestAgyReplaceKilledBeforePublishingIsRestoredByTheNextSeed(t *testing.T) {
 	}
 	if _, err := os.Stat(dst + "/accounts/.main.old"); err == nil {
 		t.Fatal("a stray .main.old remains")
+	}
+}
+
+// The barrier returns only when the seed lock is free: while a script holds it, as an unpack does for its whole run, the barrier waits and
+// then fails; once the script has ended it passes. A host that cannot be reached fails it too.
+func TestAgyBarrierWaitsForTheUnpackToLetGo(t *testing.T) {
+	dir := t.TempDir() + "/agy"
+	holder := exec.Command("bash", "-c", `mkdir -p "$1"; exec 9> "$1/.seed.lock"; flock -x 9; : > "$1/held"; sleep 60`, "dyna", dir)
+	holder.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	if err := holder.Start(); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = syscall.Kill(-holder.Process.Pid, syscall.SIGKILL); _ = holder.Wait() }()
+	for deadline := time.Now().Add(10 * time.Second); ; time.Sleep(10 * time.Millisecond) {
+		if _, err := os.Stat(dir + "/held"); err == nil {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("the holder never took the lock")
+		}
+	}
+	if err := shellIn(t, t.TempDir(), nil, agyBarrierScript, dir, "1"); err == nil {
+		t.Fatal("the barrier passed while the lock was held")
+	}
+	if err := syscall.Kill(-holder.Process.Pid, syscall.SIGKILL); err != nil {
+		t.Fatal(err)
+	}
+	_ = holder.Wait()
+	if err := shellIn(t, t.TempDir(), nil, agyBarrierScript, dir, "5"); err != nil {
+		t.Fatalf("the barrier failed with the lock free: %v", err)
 	}
 }
