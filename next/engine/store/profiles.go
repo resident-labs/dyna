@@ -78,15 +78,6 @@ func (s *Store) SetSessionProfile(ctx context.Context, target contract.SessionID
 					return ErrNoHandoff
 				}
 			}
-			if len(harness.Profiles) > 0 {
-				var open int
-				if err := tx.QueryRowContext(ctx, "SELECT COUNT(*) FROM sessions WHERE profile IN (SELECT value FROM json_each(?)) AND closed_at IS NULL", mustJSON(harness.Profiles)).Scan(&open); err != nil {
-					return err
-				}
-				if open >= harness.Limit {
-					return ErrProfileFull
-				}
-			}
 			// The handoff is due from the next turn, not from one already running.
 			if _, err := tx.ExecContext(ctx, "UPDATE sessions SET handoff=MAX(1,(SELECT COALESCE(MAX(seq),0) FROM events)) WHERE id=?", target); err != nil {
 				return err
@@ -141,11 +132,8 @@ func (s *Store) setProfile(ctx context.Context, tx *sql.Tx, target contract.Sess
 }
 
 // HarnessSwitch says a session's profile change is a change of harness, which starts its native conversation again from a
-// handoff. Profiles are the agy profiles when the session moves onto agy, so the account's limit is held inside the same
-// transaction; nil for a change within one harness.
+// handoff; nil for a change within one harness.
 type HarnessSwitch struct {
-	Profiles []contract.ProfileName
-	Limit    int
 	// RequireHandoff holds the switch to a box that said it can hand a conversation over, read in the same transaction.
 	RequireHandoff bool
 }

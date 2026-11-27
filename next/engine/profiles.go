@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"log"
-	"math"
 	"os"
 	"path/filepath"
 	"slices"
@@ -109,9 +108,6 @@ func validateProfiles(profiles map[contract.ProfileName]profile) error {
 		case contract.HarnessAgy:
 			if p.Provider != contract.ModelProviderGoogle {
 				return fmt.Errorf("profile %q: an agy profile has provider google", name)
-			}
-			if p.MaxConcurrent == 0 {
-				return fmt.Errorf("profile %q: an agy profile needs max-concurrent above 0, because one Google account serves every agy session", name)
 			}
 		default:
 			return fmt.Errorf("profile %q: harness is pig or agy", name)
@@ -511,32 +507,6 @@ var agyMount = contract.BoxAgy{Binary: box.AgyBinary, GeminiDir: contract.AgyGem
 // AgyProfile says a profile runs on the agy harness.
 func (s *Service) AgyProfile(name contract.ProfileName) bool {
 	return s.profiles.Harness(name) == contract.HarnessAgy
-}
-
-// agyAccount is what one Google account allows when name is an agy profile, and nothing otherwise: every agy profile shares the
-// account, so their open sessions share one limit, the smallest max-concurrent among them. Call it inside withProfile, so that a
-// profile added or edited meanwhile cannot slip past the count. A pig profile's max-concurrent bounds workflow workers only.
-func (s *Service) agyAccount(name contract.ProfileName) ([]contract.ProfileName, int) {
-	if p, ok := s.profiles.(*ProfileConfig); ok {
-		return p.agyAccountLocked(name)
-	}
-	return nil, 0
-}
-
-// agyAccountLocked is agyAccount for a caller that holds p.mu.
-func (p *ProfileConfig) agyAccountLocked(name contract.ProfileName) ([]contract.ProfileName, int) {
-	if p.entries[name].Harness != contract.HarnessAgy {
-		return nil, 0
-	}
-	var names []contract.ProfileName
-	limit := math.MaxInt
-	for profile, entry := range p.entries {
-		if entry.Harness == contract.HarnessAgy {
-			names = append(names, profile)
-			limit = min(limit, entry.MaxConcurrent)
-		}
-	}
-	return names, limit
 }
 
 // checkHarnessSwitch refuses a live session's move between pig and agy that cannot be made, with the next step. The session keeps

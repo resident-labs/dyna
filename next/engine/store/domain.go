@@ -39,9 +39,6 @@ func (e *VisualSupersededError) Error() string { return "visual has a newer vers
 
 var ErrParentHostAbsent = errors.New("sameHost requires a parent with an assigned host")
 
-// ErrProfileFull refuses a new session on a profile that already has its limit of open sessions.
-var ErrProfileFull = errors.New("profile has its limit of open sessions")
-
 // Session describes the stored session and its box.
 type Session struct {
 	ID          contract.SessionID
@@ -55,15 +52,11 @@ type Session struct {
 	NewRoomName string          // nonempty only for a new room root
 	Compose     string          // the compose file this session chose when it started, or ""
 	GPU         contract.GPUGiB // the VRAM its box asks of a card (5.5); set to start, not read back
-	// AccountProfiles are every profile that shares one account with this session's, and AccountLimit the open sessions that account
-	// allows at once. Both are set to start, not read back; with no profiles there is no limit.
-	AccountProfiles []contract.ProfileName
-	AccountLimit    int
-	Root            bool  // read back only: the session has no parent
-	Closing         bool  // read back only: the session is closing
-	ClearedAt       int64 // read back only: unix millis when a clear is pending for the next turn, or 0
-	Handoff         bool  // read back only: its next conversation starts from a handoff of the earlier files
-	HandoffGen      int64 // read back only: names that handoff, the events seq it became due at; 0 when none
+	Root        bool            // read back only: the session has no parent
+	Closing     bool            // read back only: the session is closing
+	ClearedAt   int64           // read back only: unix millis when a clear is pending for the next turn, or 0
+	Handoff     bool            // read back only: its next conversation starts from a handoff of the earlier files
+	HandoffGen  int64           // read back only: names that handoff, the events seq it became due at; 0 when none
 	// Workflow makes the new session a crew. It is set only to start one: Session does not read it back.
 	Workflow *WorkflowRun
 }
@@ -132,15 +125,6 @@ func (s *Store) StartSession(ctx context.Context, session Session, parent contra
 			}
 			if err := checkDepth(tree.Depth(parent)+1, maxDepth); err != nil {
 				return err
-			}
-		}
-		if len(session.AccountProfiles) > 0 {
-			var open int
-			if err := tx.QueryRowContext(ctx, "SELECT COUNT(*) FROM sessions WHERE profile IN (SELECT value FROM json_each(?)) AND closed_at IS NULL", mustJSON(session.AccountProfiles)).Scan(&open); err != nil {
-				return err
-			}
-			if open >= session.AccountLimit {
-				return ErrProfileFull
 			}
 		}
 		if clientID != "" {

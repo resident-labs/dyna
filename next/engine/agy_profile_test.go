@@ -1,13 +1,10 @@
 package engine
 
 import (
-	"fmt"
 	"github.com/resident-labs/dyna/engine/live"
 	"os"
 	"path/filepath"
 	"strings"
-	"sync"
-	"sync/atomic"
 	"testing"
 
 	"github.com/resident-labs/dyna/box"
@@ -45,7 +42,6 @@ func TestProfileHarnessValidation(t *testing.T) {
 	for name, text := range map[string]string{
 		"unknown harness":    `{"x": {"provider": "anthropic", "model": "m", "allowedModels": ["m"], "thinking": "low", "harness": "codex"}}`,
 		"agy needs google":   `{"x": {"provider": "anthropic", "model": "m", "allowedModels": ["m"], "thinking": "low", "harness": "agy"}}`,
-		"agy needs a limit":  `{"x": {"provider": "google", "model": "m", "allowedModels": ["m"], "thinking": "low", "harness": "agy"}}`,
 		"pig refuses google": `{"x": {"provider": "google", "model": "m", "allowedModels": ["m"], "thinking": "low"}}`,
 	} {
 		if _, err := loadAgyProfiles(t, text); err == nil {
@@ -179,61 +175,11 @@ func TestBoxHelloCarriesTheHarness(t *testing.T) {
 	}
 }
 
-// One Google account serves every agy profile, so the limit counts their open sessions together, and with differing max-concurrent
-// (gem 2, gem2 3) it is the smallest.
-func TestAgyLimitCountsEveryAgyProfile(t *testing.T) {
-	s, room, _, owner := agySetup(t)
-	ctx := t.Context()
-	for name, profile := range map[string]contract.ProfileName{"one": "gem", "two": "gem2"} {
-		if _, e := s.SessionStart(ctx, owner, contract.SessionStartRequest{Room: room, Name: name, Profile: profile}); e != nil {
-			t.Fatal(e)
-		}
-	}
-	for _, profile := range []contract.ProfileName{"gem", "gem2"} {
-		if _, e := s.SessionStart(ctx, owner, contract.SessionStartRequest{Room: room, Name: "more", Profile: profile}); e == nil || e.Code != contract.ErrConflict || !strings.Contains(e.Message, "across every agy profile") {
-			t.Fatalf("%s: %v", profile, e)
-		}
-	}
-}
-
-func TestAgyProfileLimitsOpenSessions(t *testing.T) {
-	s, room, _, owner := agySetup(t)
-	ctx := t.Context()
-	for _, name := range []string{"one", "two"} {
-		if _, e := s.SessionStart(ctx, owner, contract.SessionStartRequest{Room: room, Name: name, Profile: "gem"}); e != nil {
-			t.Fatal(e)
-		}
-	}
-	if _, e := s.SessionStart(ctx, owner, contract.SessionStartRequest{Room: room, Name: "three", Profile: "gem"}); e == nil || e.Code != contract.ErrConflict || !strings.Contains(e.Message, "allows 2 open sessions at once") {
-		t.Fatalf("a third agy session: %v", e)
-	}
-}
-
 func TestProfileSetRefusesAnAntigravityModel(t *testing.T) {
 	s, _, _, owner := agySetup(t)
 	req := contract.ProfileSetRequest{Create: true, Profile: contract.Profile{Name: "neon", Provider: contract.ModelProviderAnthropic, Model: "antigravity/gemini", AllowedModels: []string{"antigravity/gemini"}, Thinking: contract.ThinkingLow}}
 	if _, e := s.ProfileSet(t.Context(), owner, req); e == nil || !strings.Contains(e.Message, "--harness agy") {
 		t.Fatalf("%v", e)
-	}
-}
-
-// Starts race for the last place: the count and the insert share one store transaction, so exactly the limit succeed.
-func TestAgyLimitHoldsUnderConcurrentStarts(t *testing.T) {
-	s, room, _, owner := agySetup(t)
-	var wg sync.WaitGroup
-	var started atomic.Int32
-	for i := range 8 {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			if _, e := s.SessionStart(t.Context(), owner, contract.SessionStartRequest{Room: room, Name: fmt.Sprint("racer", i), Profile: "gem"}); e == nil {
-				started.Add(1)
-			}
-		}()
-	}
-	wg.Wait()
-	if started.Load() != 2 {
-		t.Fatalf("%d sessions started on a profile that allows 2", started.Load())
 	}
 }
 
@@ -281,5 +227,18 @@ func TestStopReachesAnAgyHarnessWithNoTurn(t *testing.T) {
 	handle.Unlock()
 	if !sent {
 		t.Fatal("the stop did not reach the agy harness")
+	}
+}
+
+// An agy profile's max-concurrent is what it is for any profile: no account cap, so more sessions than it names start, and 0 is valid.
+func TestAgyProfileHasNoSessionCap(t *testing.T) {
+	if _, err := loadAgyProfiles(t, `{"g": {"provider": "google", "model": "gemini-3.8-flash", "allowedModels": ["gemini-3.8-flash"], "thinking": "low", "harness": "agy"}}`); err != nil {
+		t.Fatal(err)
+	}
+	s, room, _, owner := agySetup(t)
+	for _, name := range []string{"a", "b", "c", "d"} {
+		if _, e := s.SessionStart(t.Context(), owner, contract.SessionStartRequest{Room: room, Name: name, Profile: "gem"}); e != nil {
+			t.Fatalf("%s: %v", name, e)
+		}
 	}
 }
