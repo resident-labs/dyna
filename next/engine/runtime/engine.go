@@ -451,7 +451,7 @@ func Run(ctx context.Context, cfg Config) error {
 				passCtx, cancel = context.WithTimeout(ctx, 5*time.Minute)
 				steps, err := st.ExpiredWorkflowStepBranches(passCtx, now.Add(-enginegit.WorkflowStepBranchRetention))
 				if err == nil {
-					err = enginegit.DeleteWorkflowStepBranches(passCtx, mirror.Runner, credentials.Room, steps)
+					err = enginegit.DeleteWorkflowStepBranches(passCtx, mirror.Runner, credentials.Room, accountClients, steps)
 				}
 				cancel()
 				if err != nil && ctx.Err() == nil {

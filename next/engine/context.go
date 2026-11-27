@@ -206,8 +206,11 @@ func (s *Service) ContextSnapshot(ctx context.Context, caller contract.Principal
 	if err != nil {
 		return contract.ContextSnapshotResponse{}, failure(err)
 	}
-	var prEvents []string
+	var prEvents, stepBranchExpiry []string
 	for _, repo := range repos {
+		if repo.StepBranchExpiry {
+			stepBranchExpiry = append(stepBranchExpiry, string(repo.Repo))
+		}
 		if repo.PREvents {
 			shown := string(repo.Repo)
 			if status := s.store.PRPollStatus(ctx, repo.Repo); status != "" {
@@ -218,6 +221,9 @@ func (s *Service) ContextSnapshot(ctx context.Context, caller contract.Principal
 	}
 	if len(prEvents) > 0 {
 		lines = append(lines, "Room-wide PR events: "+strings.Join(prEvents, ", "))
+	}
+	if len(stepBranchExpiry) > 0 {
+		lines = append(lines, "Workflow step branch expiry: "+strings.Join(stepBranchExpiry, ", "))
 	}
 	ciRepos, err := s.store.CIRepos(ctx)
 	if err != nil {

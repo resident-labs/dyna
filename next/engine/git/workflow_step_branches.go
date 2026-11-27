@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/resident-labs/dyna/contract"
+	"github.com/resident-labs/dyna/engine/prs"
 	"github.com/resident-labs/dyna/engine/store"
 )
 
@@ -19,7 +20,7 @@ const WorkflowStepBranchRetention = 14 * 24 * time.Hour
 
 // DeleteWorkflowStepBranches deletes expired refs still at their journaled tip. Grouped reads avoid one request per
 // historical branch on every sweep. The empty local repository needs no mirror or objects to push a deletion.
-func DeleteWorkflowStepBranches(ctx context.Context, runner Runner, roomToken func(context.Context, contract.RoomID) (string, string, error), branches []store.WorkflowStepBranch) error {
+func DeleteWorkflowStepBranches(ctx context.Context, runner Runner, roomToken func(context.Context, contract.RoomID) (string, string, error), accounts *prs.Accounts, branches []store.WorkflowStepBranch) error {
 	if len(branches) == 0 {
 		return nil
 	}
@@ -39,7 +40,7 @@ func DeleteWorkflowStepBranches(ctx context.Context, runner Runner, roomToken fu
 			n++
 		}
 		bound, cancel := context.WithTimeout(ctx, 30*time.Second)
-		err := deleteWorkflowStepBranches(bound, runner, roomToken, dir, branches[:n])
+		err := deleteWorkflowStepBranches(bound, runner, roomToken, accounts, dir, branches[:n])
 		cancel()
 		if err != nil && ctx.Err() == nil {
 			slog.Warn("workflow step branch expiry", "room", first.Room, "repo", first.Repo, "error", err)
@@ -49,9 +50,9 @@ func DeleteWorkflowStepBranches(ctx context.Context, runner Runner, roomToken fu
 	return ctx.Err()
 }
 
-func deleteWorkflowStepBranches(ctx context.Context, runner Runner, roomToken func(context.Context, contract.RoomID) (string, string, error), dir string, branches []store.WorkflowStepBranch) error {
+func deleteWorkflowStepBranches(ctx context.Context, runner Runner, roomToken func(context.Context, contract.RoomID) (string, string, error), accounts *prs.Accounts, dir string, branches []store.WorkflowStepBranch) error {
 	first := branches[0]
-	token, _, err := roomToken(ctx, first.Room)
+	token, login, err := roomToken(ctx, first.Room)
 	if err != nil {
 		return err
 	}
@@ -70,6 +71,20 @@ func deleteWorkflowStepBranches(ctx context.Context, runner Runner, roomToken fu
 			tips[ref] = oid
 		}
 	}
+	var refs []string
+	for _, step := range branches {
+		ref := "refs/heads/" + step.Branch
+		if validOID(step.Commit) && tips[ref] == step.Commit {
+			refs = append(refs, ref)
+		}
+	}
+	if login != "" {
+		login += " of room " + string(first.Room)
+	}
+	open, err := accounts.Client(token, login).OpenPRHeads(ctx, first.Repo, refs)
+	if err != nil {
+		return fmt.Errorf("check open PR heads: %w", err)
+	}
 	var failures []error
 	for batch := range slices.Chunk(branches, 100) {
 		if ctx.Err() != nil {
@@ -79,7 +94,7 @@ func deleteWorkflowStepBranches(ctx context.Context, runner Runner, roomToken fu
 		var deletes []string
 		for _, step := range batch {
 			ref := "refs/heads/" + step.Branch
-			if validOID(step.Commit) && tips[ref] == step.Commit {
+			if protected, checked := open[ref]; checked && !protected {
 				args = append(args, "--force-with-lease="+ref+":"+step.Commit)
 				deletes = append(deletes, ":"+ref)
 			}

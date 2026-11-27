@@ -2,13 +2,18 @@ package git
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"io"
+	"net/http"
+	"net/url"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/resident-labs/dyna/contract"
+	"github.com/resident-labs/dyna/engine/prs"
 	"github.com/resident-labs/dyna/engine/store"
 )
 
@@ -59,7 +64,8 @@ func TestWorkflowStepBranchExpiryAgainstBareOrigin(t *testing.T) {
 		{"2123456789ab", "work-2123456789ab", contract.WorkflowStepAgent}, // also a session branch
 		{"3123456789ab", "work", contract.WorkflowStepAgent},
 		{"4123456789ab", "work-run", contract.WorkflowStepCommand},
-		{"5123456789ab", "work-5123456789ab", contract.WorkflowStepAgent}, // open PR head
+		{"5123456789ab", "work-5123456789ab", contract.WorkflowStepAgent}, // tracked open PR head
+		{"6123456789ab", "work-6123456789ab", contract.WorkflowStepAgent}, // untracked open PR head
 	} {
 		_, err := st.StartWorkflowStep(ctx, "work", contract.WorkflowStepStartRequest{Key: step.key, Kind: step.kind}, end)
 		must(err)
@@ -79,6 +85,29 @@ func TestWorkflowStepBranchExpiryAgainstBareOrigin(t *testing.T) {
 		return runReal(t, remote, "for-each-ref", "--format=%(refname:short)", "refs/heads")
 	}
 	all := list()
+	endpoint, _ := url.Parse("https://api.github.invalid")
+	incomplete := true
+	checks := 0
+	accounts := &prs.Accounts{Endpoint: endpoint, Now: time.Now, Transport: roundTrip(func(r *http.Request) (*http.Response, error) {
+		checks++
+		var request struct {
+			Query     string
+			Variables map[string]string
+		}
+		defer r.Body.Close()
+		must(json.NewDecoder(r.Body).Decode(&request))
+		if r.URL.Path != "/graphql" || r.Header.Get("Authorization") != "Bearer test-token" || request.Variables["owner"] != "owner" || request.Variables["name"] != "repo" ||
+			!strings.Contains(request.Query, `r0:ref(qualifiedName:"refs/heads/work-0123456789ab"){associatedPullRequests(states:[OPEN]`) ||
+			!strings.Contains(request.Query, `r1:ref(qualifiedName:"refs/heads/work-6123456789ab"){associatedPullRequests(states:[OPEN]`) ||
+			strings.Contains(request.Query, "work-1123456789ab") || strings.Contains(request.Query, "work-5123456789ab") {
+			t.Fatalf("unexpected PR check: %s %s", r.URL.Path, request.Query)
+		}
+		body := `{"data":{"repository":{"r0":{"associatedPullRequests":{"nodes":[]}},"r1":{"associatedPullRequests":{"nodes":[{"number":16941}]}}}}}`
+		if incomplete {
+			body = `{"data":{"repository":{"r0":{"associatedPullRequests":{"nodes":[]}}}}}`
+		}
+		return &http.Response{StatusCode: http.StatusOK, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(body))}, nil
+	})}
 	sweep := func(now time.Time, want int) {
 		t.Helper()
 		branches, err := st.ExpiredWorkflowStepBranches(ctx, now.Add(-WorkflowStepBranchRetention))
@@ -91,9 +120,12 @@ func TestWorkflowStepBranchExpiryAgainstBareOrigin(t *testing.T) {
 				t.Fatalf("credential for room %q", got)
 			}
 			return "test-token", "", nil
-		}, branches))
+		}, accounts, branches))
 	}
 	at := end.Add(WorkflowStepBranchRetention)
+	sweep(at, 0) // Default off, even past the cutoff.
+	must(st.AddRoomRepo(ctx, room, repo, false, store.RoomRepoOptions{StepBranchExpiry: new(true)}))
+	must(st.AddRoomRepo(ctx, room, repo, false)) // An omitted option leaves the switch on.
 	sweep(at.Add(-time.Millisecond), 0)
 	start("child", "work")
 	sweep(at, 0) // A copied result in a running descendant keeps its parent's branch.
@@ -103,8 +135,13 @@ func TestWorkflowStepBranchExpiryAgainstBareOrigin(t *testing.T) {
 	if got := list(); got != all {
 		t.Fatalf("before cutoff refs:\n%s", got)
 	}
-	sweep(at, 2)
-	if got, want := list(), strings.Replace(all, "work-0123456789ab\n", "", 1); got != want {
+	sweep(at, 3)
+	if got := list(); got != all || checks != 1 {
+		t.Fatalf("incomplete PR check deleted a head (%d batches):\n%s", checks, got)
+	}
+	incomplete = false
+	sweep(at, 3)
+	if got, want := list(), strings.Replace(all, "work-0123456789ab\n", "", 1); got != want || checks != 2 {
 		t.Fatalf("after cutoff refs:\n%s\nwant:\n%s", got, want)
 	}
 	if tip := runReal(t, remote, "rev-parse", "refs/heads/work-1123456789ab"); tip != f.tip {

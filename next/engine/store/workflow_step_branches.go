@@ -29,7 +29,7 @@ func (s *Store) ExpiredWorkflowStepBranches(ctx context.Context, cutoff time.Tim
     SELECT repo, branch, min(commit_sha) AS commit_sha,
            min(CASE WHEN EXISTS (SELECT 1 FROM session_branches b
                 WHERE b.session=r.session AND b.repo=r.repo COLLATE NOCASE AND r.branch=b.branch||'-'||r.suffix)
-             AND EXISTS (SELECT 1 FROM room_repos a WHERE a.room=r.room AND a.repo=r.repo COLLATE NOCASE)
+             AND EXISTS (SELECT 1 FROM room_repos a WHERE a.room=r.room AND a.repo=r.repo COLLATE NOCASE AND a.step_branch_expiry=1)
              THEN room END) AS room
       FROM results r GROUP BY repo COLLATE NOCASE, branch
     HAVING max(state=? OR ended_at=0 OR ended_at>?)=0 AND min(commit_sha)=max(commit_sha)

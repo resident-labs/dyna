@@ -262,7 +262,7 @@ func (f *fakeClient) RoomRepoRemove(_ context.Context, q contract.RoomRepoRemove
 }
 func (f *fakeClient) RoomRepos(_ context.Context, q contract.RoomReposRequest) (contract.RoomReposResponse, error) {
 	f.repoList = q
-	return contract.RoomReposResponse{Repos: []contract.RoomRepo{{Repo: "owner/a", Default: true}, {Repo: "owner/b"}}}, nil
+	return contract.RoomReposResponse{Repos: []contract.RoomRepo{{Repo: "owner/a", Default: true}, {Repo: "owner/b", StepBranchExpiry: true}}}, nil
 }
 func (f *fakeClient) ComposeList(_ context.Context, q contract.ComposeListRequest) (contract.ComposeListResponse, error) {
 	f.composeList = q
@@ -454,13 +454,19 @@ func TestRoomDeleteNeedsDiscard(t *testing.T) {
 func TestRoomRepos(t *testing.T) {
 	f := &fakeClient{}
 	runCLI(t, f, "room", "repo", "add", "r", "owner/a", "--default")
-	if f.repoAdd.Room != "r" || f.repoAdd.Repo != "owner/a" || !f.repoAdd.Default || f.repoAdd.PREvents != nil {
+	if f.repoAdd.Room != "r" || f.repoAdd.Repo != "owner/a" || !f.repoAdd.Default || f.repoAdd.PREvents != nil || f.repoAdd.StepBranchExpiry != nil {
 		t.Fatalf("%+v", f.repoAdd)
 	}
 	for _, mode := range []string{"on", "off"} {
 		runCLI(t, f, "room", "repo", "add", "r", "owner/a", "--pr-events", mode)
 		if f.repoAdd.PREvents == nil || *f.repoAdd.PREvents != (mode == "on") {
 			t.Fatalf("--pr-events %s: %+v", mode, f.repoAdd)
+		}
+	}
+	for _, mode := range []string{"on", "off"} {
+		runCLI(t, f, "room", "repo", "add", "r", "owner/a", "--step-branch-expiry", mode)
+		if f.repoAdd.StepBranchExpiry == nil || *f.repoAdd.StepBranchExpiry != (mode == "on") {
+			t.Fatalf("--step-branch-expiry %s: %+v", mode, f.repoAdd)
 		}
 	}
 	if _, err := execCLI(f, "room", "repo", "add", "r", "owner/a", "--pr-events", "yes"); err == nil || !strings.Contains(err.Error(), "on or off") {
@@ -471,7 +477,7 @@ func TestRoomRepos(t *testing.T) {
 		t.Fatalf("%+v", f.repoRemove)
 	}
 	out := runCLI(t, f, "room", "repo", "list", "r")
-	if f.repoList.Room != "r" || out != "owner/a (default)\nowner/b\n" {
+	if f.repoList.Room != "r" || out != "owner/a (default)\nowner/b (step branch expiry on)\n" {
 		t.Fatalf("%+v: %q", f.repoList, out)
 	}
 }
