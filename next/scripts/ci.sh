@@ -23,7 +23,11 @@ case "$suite" in
     GOBIN="$RUNNER_TEMP/dyna-lint-bin" go install honnef.co/go/tools/cmd/staticcheck@v0.8.2
     mapfile -t packages < <(go list ./... | grep -v '/third_party/')
     "$RUNNER_TEMP/dyna-lint-bin/staticcheck" -checks='SA*,U*' "${packages[@]}"
-    go test -count=1 -timeout 3m ./...
+    # Real Chromium startup has timed out on hosted runners in the parallel suite.
+    # Keep its two cookie tests out of the package workload and run them one at a time.
+    chromium_tests='^(TestDevToolsCookieRoundTrip|TestReadV1ChromiumCookiesRealProfile)$'
+    go test -count=1 -timeout 3m -skip "$chromium_tests" ./...
+    go test -count=1 -timeout 3m -p 1 -v -run "$chromium_tests" ./box/computer ./engine/store
     # Join the vendored management handler and engine over private RPC.
     go test -count=1 -tags=dyna_integration ./engine/model -run '^TestKimiCompletionBindsAcrossProxyNotification$'
     ;;
