@@ -20,12 +20,13 @@ import (
 )
 
 const (
+	compatTextRequest = `{"stream":true,"messages":[{"role":"user","content":"hi"}]}`
 	compatTextPartial = `data: {"id":"chatcmpl_fixture","object":"chat.completion.chunk","model":"local-model","choices":[{"index":0,"delta":{"role":"assistant","content":"hello"},"finish_reason":null}],"usage":{"prompt_tokens":12,"completion_tokens":3,"total_tokens":15}}` + "\n\n"
 	compatTextFinish  = `data: {"id":"chatcmpl_fixture","object":"chat.completion.chunk","model":"local-model","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}` + "\n\n"
 	compatTextUsage   = `data: {"id":"chatcmpl_fixture","object":"chat.completion.chunk","model":"local-model","choices":[],"usage":{"prompt_tokens":12,"completion_tokens":3,"total_tokens":15}}` + "\n\n"
 )
 
-func runOpenAICompatTextFixture(t *testing.T, ctx context.Context, format sdktranslator.Format, handler http.HandlerFunc) (*cliproxyexecutor.StreamResult, *multiProviderUsageCapture) {
+func runOpenAICompatTextFixture(t *testing.T, ctx context.Context, format sdktranslator.Format, payload string, handler http.HandlerFunc) (*cliproxyexecutor.StreamResult, *multiProviderUsageCapture) {
 	t.Helper()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/v1/chat/completions" {
@@ -42,7 +43,7 @@ func runOpenAICompatTextFixture(t *testing.T, ctx context.Context, format sdktra
 	const provider = "openai-compatible-fixture"
 	auth := &cliproxyauth.Auth{ID: t.Name(), Provider: provider, Attributes: map[string]string{"base_url": server.URL + "/v1", "api_key": "fixture"}}
 	result, err := NewOpenAICompatExecutor(provider, &config.Config{}).ExecuteStream(ctx, auth,
-		cliproxyexecutor.Request{Model: "local-model", Payload: []byte(`{"stream":true,"messages":[{"role":"user","content":"hi"}]}`)},
+		cliproxyexecutor.Request{Model: "local-model", Payload: []byte(payload)},
 		cliproxyexecutor.Options{SourceFormat: sdktranslator.FormatOpenAI, ResponseFormat: format, Stream: true})
 	if err != nil {
 		t.Fatal(err)
@@ -68,7 +69,7 @@ func TestOpenAICompatTextCancellationAtRenderedBoundary(t *testing.T) {
 			defer timeout()
 			ctx, cancel := context.WithCancelCause(ctx)
 			defer cancel(nil)
-			result, capture := runOpenAICompatTextFixture(t, ctx, tc.format, func(w http.ResponseWriter, r *http.Request) {
+			result, capture := runOpenAICompatTextFixture(t, ctx, tc.format, compatTextRequest, func(w http.ResponseWriter, r *http.Request) {
 				_, _ = io.WriteString(w, tc.frame)
 				w.(http.Flusher).Flush()
 				<-r.Context().Done()
@@ -114,7 +115,7 @@ func TestOpenAICompatTextAcceptedReadCut(t *testing.T) {
 			ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 			defer cancel()
 			body := compatTextPartial + tc.finalFrame
-			result, capture := runOpenAICompatTextFixture(t, ctx, sdktranslator.FormatOpenAIResponse, func(w http.ResponseWriter, _ *http.Request) {
+			result, capture := runOpenAICompatTextFixture(t, ctx, sdktranslator.FormatOpenAIResponse, compatTextRequest, func(w http.ResponseWriter, _ *http.Request) {
 				w.Header().Set("Content-Length", fmt.Sprint(len(body)+100))
 				_, _ = io.WriteString(w, body)
 			})
@@ -159,7 +160,7 @@ func TestOpenAICompatResponsesUsageWaitsForDelivery(t *testing.T) {
 			defer cancel()
 			ctx, finish := usage.WithStreamDelivery(ctx)
 			defer finish(context.Canceled)
-			result, capture := runOpenAICompatTextFixture(t, ctx, sdktranslator.FormatOpenAIResponse, func(w http.ResponseWriter, r *http.Request) {
+			result, capture := runOpenAICompatTextFixture(t, ctx, sdktranslator.FormatOpenAIResponse, compatTextRequest, func(w http.ResponseWriter, r *http.Request) {
 				_, _ = io.WriteString(w, compatTextPartial+compatTextFinish+compatTextUsage+"data: [DONE]\n\n")
 				w.(http.Flusher).Flush()
 				<-r.Context().Done()
@@ -203,7 +204,7 @@ func TestOpenAICompatTextCleanEOFTerminals(t *testing.T) {
 		{"responses_confirmed_finish_only", compatTextPartial + compatTextFinish + compatTextUsage, `"type":"response.completed"`, sdktranslator.FormatOpenAIResponse},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			result, capture := runOpenAICompatTextFixture(t, t.Context(), tc.format, func(w http.ResponseWriter, _ *http.Request) {
+			result, capture := runOpenAICompatTextFixture(t, t.Context(), tc.format, compatTextRequest, func(w http.ResponseWriter, _ *http.Request) {
 				_, _ = io.WriteString(w, tc.upstream)
 			})
 			var body strings.Builder
@@ -218,6 +219,41 @@ func TestOpenAICompatTextCleanEOFTerminals(t *testing.T) {
 			}
 			if record := capture.await(t); record.Failed || record.Detail.TotalTokens != 15 {
 				t.Fatalf("incorrect terminal usage: %+v", record)
+			}
+		})
+	}
+}
+
+func TestOpenAICompatDoneWithoutRenderedResponsesTerminal(t *testing.T) {
+	for _, patch := range []bool{false, true} {
+		t.Run(fmt.Sprintf("apply_patch=%t", patch), func(t *testing.T) {
+			payload := compatTextRequest
+			if patch {
+				payload = `{"stream":true,"messages":[{"role":"user","content":"hi"}],"tools":[{"type":"custom","name":"apply_patch"}]}`
+			}
+			result, capture := runOpenAICompatTextFixture(t, t.Context(), sdktranslator.FormatOpenAIResponse, payload, func(w http.ResponseWriter, _ *http.Request) {
+				_, _ = io.WriteString(w, `data: {"id":"chat_role_only","object":"chat.completion.chunk","model":"local-model","choices":[{"index":0,"delta":{"role":"assistant"},"finish_reason":null}]}`+"\n\n"+compatTextUsage+"data: [DONE]\n\n")
+			})
+			var err error
+			var wire strings.Builder
+			for chunk := range result.Chunks {
+				if openAICompatTextChunkIsTerminal(sdktranslator.FormatOpenAIResponse, chunk.Payload) {
+					t.Fatal("role-only stream produced successful terminal")
+				}
+				wire.Write(chunk.Payload)
+				if chunk.Err != nil {
+					err = chunk.Err
+				}
+			}
+			status, ok := errors.AsType[statusErr](err)
+			if !ok || status.StatusCode() != http.StatusBadGateway || (!patch && !status.IsStreamTruncated()) {
+				t.Fatalf("role-only stream error = %#v", err)
+			}
+			if failedFrame := strings.Contains(wire.String(), `"type":"response.failed"`); failedFrame != patch {
+				t.Fatalf("unexpected patch failure frame, patch=%t: %s", patch, wire.String())
+			}
+			if record := capture.await(t); !record.Failed || record.Detail.TotalTokens != 15 {
+				t.Fatalf("incorrect missing terminal usage: %+v", record)
 			}
 		})
 	}

@@ -546,3 +546,47 @@ func TestIssue6332HTTPReentrantReplayDelivery(t *testing.T) {
 		})
 	}
 }
+
+func TestOpenAICompatResponsesTerminalTransportFailureUsage(t *testing.T) {
+	for _, mode := range []string{"success", "write_failure", "flush_failure"} {
+		t.Run(mode, func(t *testing.T) {
+			const model, provider = "compat-delivery-fixture", "openai-compatible-delivery-fixture"
+			capture := &issue6332Capture{records: make(chan usage.Record, 1), authID: t.Name()}
+			usage.RegisterNamedPlugin(t.Name(), capture)
+			t.Cleanup(func() { usage.RegisterNamedPlugin(t.Name(), responsesUsageNop{}) })
+			upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "text/event-stream")
+				_, _ = io.WriteString(w, `data: {"id":"ct_delivery","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"role":"assistant","content":"hello"},"finish_reason":null}]}`+"\n\n"+
+					`data: {"id":"ct_delivery","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}`+"\n\n"+
+					`data: {"id":"ct_delivery","choices":[],"usage":{"prompt_tokens":12,"completion_tokens":3,"total_tokens":15}}`+"\n\ndata: [DONE]\n\n")
+				w.(http.Flusher).Flush()
+				<-r.Context().Done()
+			}))
+			defer upstream.Close()
+			manager := cliproxyauth.NewManager(nil, nil, nil)
+			manager.RegisterExecutor(runtimeexecutor.NewOpenAICompatExecutor(provider, &config.Config{}))
+			auth := &cliproxyauth.Auth{ID: t.Name(), Provider: provider, Status: cliproxyauth.StatusActive, Attributes: map[string]string{"base_url": upstream.URL, "api_key": "fixture"}}
+			if _, err := manager.Register(t.Context(), auth); err != nil {
+				t.Fatal(err)
+			}
+			registry.GetGlobalRegistry().RegisterClient(auth.ID, provider, []*registry.ModelInfo{{ID: model}})
+			t.Cleanup(func() { registry.GetGlobalRegistry().UnregisterClient(auth.ID) })
+			h := NewOpenAIResponsesAPIHandler(handlers.NewBaseAPIHandlers(&sdkconfig.SDKConfig{}, manager))
+			router := gin.New()
+			router.POST("/v1/responses", h.Responses)
+			ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+			defer cancel()
+			request := httptest.NewRequestWithContext(ctx, http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"`+model+`","input":"hello","stream":true}`))
+			writer := &issue6332Writer{ResponseRecorder: httptest.NewRecorder(), cancel: func() {}, event: "response.completed", failWrite: mode == "write_failure", failFlush: mode == "flush_failure"}
+			router.ServeHTTP(writer, request)
+			select {
+			case record := <-capture.records:
+				if record.Failed != (mode != "success") || record.Detail.TotalTokens != 15 || (record.Failed && !strings.Contains(record.Fail.Body, io.ErrClosedPipe.Error())) {
+					t.Fatalf("incorrect delivery usage: %+v", record)
+				}
+			case <-ctx.Done():
+				t.Fatal("delivery usage was not published")
+			}
+		})
+	}
+}

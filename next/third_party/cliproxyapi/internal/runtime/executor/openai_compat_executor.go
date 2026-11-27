@@ -640,7 +640,7 @@ func (e *OpenAICompatExecutor) executeStreamWithCredentials(ctx context.Context,
 		if ctx.Err() != nil || streamFailed {
 			return
 		}
-		if seenDone || (terminalDelivered && (responseFormat != sdktranslator.FormatOpenAI || errScan != nil)) {
+		if terminalDelivered && (seenDone || responseFormat != sdktranslator.FormatOpenAI || errScan != nil) {
 			return
 		}
 		patchErr := statusErr{code: http.StatusBadGateway, msg: helps.ApplyPatchUpstreamErrorMessage, streamTruncated: errScan != nil}
@@ -653,6 +653,9 @@ func (e *OpenAICompatExecutor) executeStreamWithCredentials(ctx context.Context,
 			publishStreamError(patchErr, false)
 			return
 		}
+		if seenDone && responseFormat != sdktranslator.FormatOpenAIResponse {
+			return
+		}
 		if errScan != nil {
 			helps.RecordAPIResponseError(ctx, e.cfg, errScan)
 			publishStreamError(statusErr{code: http.StatusBadGateway, msg: "upstream stream closed before [DONE]", streamTruncated: true}, false)
@@ -660,7 +663,7 @@ func (e *OpenAICompatExecutor) executeStreamWithCredentials(ctx context.Context,
 		}
 		canFinalize := responseFormat != sdktranslator.FormatOpenAIResponse && (responseFormat != sdktranslator.FormatClaude || sawFinishReason)
 		if responseFormat == sdktranslator.FormatOpenAIResponse {
-			canFinalize = helps.CanFinalizeResponseStream(param)
+			canFinalize = !seenDone && helps.CanFinalizeResponseStream(param)
 		}
 		if canFinalize {
 			// Keep the legacy Chat fallback and translator-confirmed EOF completion.
@@ -668,7 +671,11 @@ func (e *OpenAICompatExecutor) executeStreamWithCredentials(ctx context.Context,
 				return
 			}
 		}
-		publishStreamError(statusErr{code: http.StatusBadGateway, msg: "upstream stream closed before [DONE]", streamTruncated: true}, false)
+		msg := "upstream stream closed before [DONE]"
+		if seenDone {
+			msg = "upstream [DONE] did not produce a Responses terminal event"
+		}
+		publishStreamError(statusErr{code: http.StatusBadGateway, msg: msg, streamTruncated: true}, false)
 	}()
 	return &cliproxyexecutor.StreamResult{Headers: httpResp.Header.Clone(), Chunks: out}, nil
 }
