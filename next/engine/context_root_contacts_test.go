@@ -45,7 +45,7 @@ func TestContextRootContacts(t *testing.T) {
 		t.Fatal(err)
 	}
 	names = append(names, "and 3 more (context show dyna_contacts)")
-	want := "siblings: " + strings.Join(names, ", ")
+	want := "you: test\nsiblings: " + strings.Join(names, ", ")
 	for _, section := range []contract.ContextSectionKey{"", contract.ContextContacts} {
 		res, problem := r.s.ContextSnapshot(ctx, r.root, contract.ContextSnapshotRequest{Section: section})
 		if problem != nil {
@@ -58,7 +58,7 @@ func TestContextRootContacts(t *testing.T) {
 			}
 		}
 		if section == contract.ContextContacts {
-			want = "siblings: " + strings.Join(fullNames, ", ")
+			want = "you: test\nsiblings: " + strings.Join(fullNames, ", ")
 		}
 		if got != want {
 			t.Fatalf("root contacts = %q, want %q", got, want)
@@ -66,7 +66,7 @@ func TestContextRootContacts(t *testing.T) {
 	}
 	// Other rooms' contacts are only exposed to roots, not their workers.
 	res, problem := r.s.ContextSnapshot(ctx, r.worker, contract.ContextSnapshotRequest{Section: contract.ContextContacts})
-	if problem != nil || len(res.Sections) != 1 || res.Sections[0].Text != "parent: root (test)" {
+	if problem != nil || len(res.Sections) != 1 || res.Sections[0].Text != "you: test\nparent: root (test)" {
 		t.Fatalf("worker contacts = %+v, %v", res, problem)
 	}
 }
