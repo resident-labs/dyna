@@ -186,13 +186,13 @@ const (
 // UpdatePreparedAuth atomically merges request preparation results into the latest runtime auth
 // under the manager lock, preserving concurrent modifications without modifying refresh lifecycle fields.
 func (m *Manager) UpdatePreparedAuth(ctx context.Context, base, updated *Auth) (*Auth, error) {
-	return m.updateInternal(ctx, base, updated, updateModePrepare)
+	return m.updateInternal(ctx, base, updated, updateModePrepare, nil)
 }
 
 // UpdateRefreshedAuth atomically merges refresh results into the latest runtime auth
 // under the manager lock, preserving concurrent modifications (proxy_url, notes, weights, etc.).
 func (m *Manager) UpdateRefreshedAuth(ctx context.Context, base, updated *Auth) (*Auth, error) {
-	return m.updateInternal(ctx, base, updated, updateModeRefresh)
+	return m.updateInternal(ctx, base, updated, updateModeRefresh, nil)
 }
 
 // Replace commits a new grant through the ordinary mutation gate and store.
@@ -231,7 +231,7 @@ func (m *Manager) Replace(ctx context.Context, auth *Auth) (*Auth, error) {
 
 // Update replaces an existing auth entry and notifies hooks.
 func (m *Manager) Update(ctx context.Context, auth *Auth) (*Auth, error) {
-	return m.updateInternal(ctx, nil, auth, updateModeReplace)
+	return m.updateInternal(ctx, nil, auth, updateModeReplace, nil)
 }
 
 // Modify loads the latest auth for id while holding the per-auth mutation gate,
@@ -281,7 +281,7 @@ func (m *Manager) Modify(ctx context.Context, id string, expectedEpoch uint64, e
 	return committedAuth, errUpdate == nil && didCommit && committedAuth != nil, errUpdate
 }
 
-func (m *Manager) updateInternal(ctx context.Context, base, auth *Auth, mode updateAuthMode) (*Auth, error) {
+func (m *Manager) updateInternal(ctx context.Context, base, auth *Auth, mode updateAuthMode, savedOrAborted func()) (*Auth, error) {
 	if auth == nil || auth.ID == "" {
 		return nil, nil
 	}
@@ -291,6 +291,10 @@ func (m *Manager) updateInternal(ctx context.Context, base, auth *Auth, mode upd
 	}
 	committedAuth, didCommit, persistCooldown, err := m.updateInternalLocked(ctx, base, auth, mode)
 	releaseMutation()
+	// Hooks below can call Shutdown, so the drain must not wait for them.
+	if savedOrAborted != nil {
+		savedOrAborted()
+	}
 	if err == nil && didCommit && committedAuth != nil {
 		m.finishAuthUpdate(ctx, committedAuth, persistCooldown)
 	}
