@@ -67,7 +67,7 @@ func testChannel(t *testing.T, s *Service, ctx context.Context, caller contract.
 			t.Fatal(problem)
 		}
 	}
-	if allowed, err := s.store.CanDispatch(ctx, caller.Session); err != nil || (!allowed && current.State != contract.BoxClosing) {
+	if allowed, err := s.store.BoxReadyForDispatch(ctx, caller.Session); err != nil || (!allowed && current.State != contract.BoxClosing) {
 		t.Fatalf("test agent cannot dispatch: session=%+v box=%+v err=%v", session, current, err)
 	}
 	ctx, cancel := context.WithCancel(ctx)

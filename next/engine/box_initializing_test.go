@@ -29,7 +29,7 @@ func TestHarnessStartupStaysStartingUntilChannelOpens(t *testing.T) {
 	if current.State != contract.BoxStarting || current.Reason != "initializing session" {
 		t.Fatalf("hello falsely ready: %+v", current)
 	}
-	if allowed, err := s.store.CanDispatch(ctx, sid); err != nil || allowed {
+	if allowed, err := s.store.BoxReadyForDispatch(ctx, sid); err != nil || allowed {
 		t.Fatalf("dispatch before harness ready: %v %v", allowed, err)
 	}
 	s.SetStartStatus(func(contract.BoxID) *contract.BoxStartStatus { return nil })

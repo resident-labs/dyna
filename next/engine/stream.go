@@ -392,7 +392,7 @@ func (s *Service) BoxChannel(ctx context.Context, caller contract.Principal, bin
 					}
 				}
 			}
-			allowed, err := s.store.CanDispatch(ctx, session.ID)
+			allowed, err := s.store.BoxReadyForDispatch(ctx, session.ID)
 			if err != nil {
 				reason, cause = streamAdmissionFailed, err
 				return
@@ -473,14 +473,22 @@ func (s *Service) BoxChannel(ctx context.Context, caller contract.Principal, bin
 				}
 			}
 			if len(start) != 0 {
-				model, _, err := s.profiles.Model(profile)
-				if err != nil {
-					reason, cause = streamProfileFailed, err
-					return
-				}
-				if err = s.store.DispatchTurnModel(ctx, turn, model.ID); err != nil {
-					reason, cause = streamModelSaveFailed, err
-					return
+				message := contract.TurnStart{Turn: turn, Inputs: start}
+				// A replay during a harness handoff must not apply the next turn's profile.
+				if profile != "" {
+					model, _, err := s.profiles.Model(profile)
+					if err != nil {
+						reason, cause = streamProfileFailed, err
+						return
+					}
+					if err = s.store.DispatchTurnModel(ctx, turn, model.ID); err != nil {
+						reason, cause = streamModelSaveFailed, err
+						return
+					}
+					message.Model = model
+					message.ModelInstructions = prompt.ModelInstructions(model)
+					message.CompactTokens = s.profiles.CompactionTokens(profile)
+					message.TextOnlyModels = s.profiles.TextOnlyModels()
 				}
 				sections, saved, err := s.store.SavedTurnSections(ctx, turn)
 				if err != nil {
@@ -511,8 +519,9 @@ func (s *Service) BoxChannel(ctx context.Context, caller contract.Principal, bin
 					reason, cause = streamDispatchFailed, err
 					return
 				}
+				message.Sections, message.Fresh = sections, fresh
 				select {
-				case out <- contract.BoxMessage{Body: contract.TurnStart{Turn: turn, Inputs: start, Model: model, ModelInstructions: prompt.ModelInstructions(model), CompactTokens: s.profiles.CompactionTokens(profile), TextOnlyModels: s.profiles.TextOnlyModels(), Sections: sections, Fresh: fresh}}:
+				case out <- contract.BoxMessage{Body: message}:
 				case <-ctx.Done():
 					reason, cause = streamCanceled, ctx.Err()
 					return
