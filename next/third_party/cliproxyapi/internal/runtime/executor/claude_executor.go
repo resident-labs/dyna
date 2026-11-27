@@ -294,6 +294,29 @@ func (e *ClaudeExecutor) applyNativeToolSearchFallback(ctx context.Context, auth
 	return ctx, req, opts
 }
 
+// pinResponsesMidSessionSystemItems opts in only on the measured first-party
+// OAuth Messages wire. Cloaked API keys can move the leading system prompt
+// back to the top-level field when a system turn ends messages, defeating
+// prefix stability. CountTokens does not opt in or change its beta contract.
+func (e *ClaudeExecutor) pinResponsesMidSessionSystemItems(ctx context.Context, auth *cliproxyauth.Auth, from sdktranslator.Format, upstreamModel, baseURL string, policy claudeWirePolicy, settings claudeCloakSettings) context.Context {
+	if from != sdktranslator.FormatOpenAIResponse || !policy.OAuth || !policy.Cloak || settings.strictMode || !isAnthropicUpstreamBase(baseURL) || rebuildMidSystemMessageEnabled(e.cfg, auth) {
+		return ctx
+	}
+	switch claudeCanonicalModel(upstreamModel) {
+	case "claude-opus-5", "claude-sonnet-5", "claude-opus-5-5", "claude-haiku-5-5": // Measured first-party system turns; see upstream #7310.
+	default:
+		return ctx
+	}
+	if e.cfg != nil {
+		for _, beta := range e.cfg.ClaudeHeaderDefaults.AnthropicBetaStrip {
+			if strings.TrimSpace(beta) == claudeMidConvSystemBeta {
+				return ctx
+			}
+		}
+	}
+	return responsesclaude.WithMidSessionSystemItems(ctx)
+}
+
 func (e *ClaudeExecutor) modelLevelCooling() bool {
 	return e != nil && e.cfg != nil && e.cfg.Claude.ModelLevelCooling
 }
