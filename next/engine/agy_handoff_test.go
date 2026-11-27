@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"context"
 	"database/sql"
 	"strings"
 	"testing"
@@ -105,29 +106,6 @@ func TestHarnessSwitchNeedsABoxThatCanHandOff(t *testing.T) {
 	_, e := s.SessionSetProfile(t.Context(), owner, contract.SessionSetProfileRequest{Session: sid, Profile: "gem"})
 	if e == nil || e.Code != contract.ErrConflict || !strings.Contains(e.Message, "cannot hand its conversation") {
 		t.Fatalf("err = %v", e)
-	}
-}
-
-// The box that is up when the session changes harness takes no new turn: the dispatch gate holds until a box has started since.
-func TestSwitchHoldsDispatchUntilTheBoxRestarts(t *testing.T) {
-	s, room, _, owner := agySetup(t)
-	ctx := t.Context()
-	sid := startOn(t, s, room, "held", "other", "hermeslab")
-	readySession(t, s, sid)
-	if ok, err := s.store.CanDispatch(ctx, sid); err != nil || !ok {
-		t.Fatalf("before the switch: %v %v", ok, err)
-	}
-	if _, e := s.SessionSetProfile(ctx, owner, contract.SessionSetProfileRequest{Session: sid, Profile: "gem"}); e != nil {
-		t.Fatal(e)
-	}
-	if ok, err := s.store.CanDispatch(ctx, sid); err != nil || ok {
-		t.Fatalf("the old box may take a turn: %v %v", ok, err)
-	}
-	if _, p := s.BoxHello(ctx, boxCaller(sid), contract.BoxHelloRequest{CanHandoff: true, LaunchGen: launchGen(t, s, sid)}); p != nil {
-		t.Fatal(p)
-	}
-	if ok, err := s.store.CanDispatch(ctx, sid); err != nil || !ok {
-		t.Fatalf("the restarted box may not: %v %v", ok, err)
 	}
 }
 
@@ -248,9 +226,6 @@ func TestLateHelloFromTheOldContainerKeepsTheFence(t *testing.T) {
 	}
 	if _, p := s.BoxHello(ctx, boxCaller(sid), contract.BoxHelloRequest{CanHandoff: true}); p != nil {
 		t.Fatal(p)
-	}
-	if ok, err := s.store.CanDispatch(ctx, sid); err != nil || ok {
-		t.Fatalf("the old container may take a turn: %v %v", ok, err)
 	}
 	if !s.Stale(sid) {
 		t.Fatal("the old container is not stale")
@@ -428,5 +403,84 @@ func TestStartupWriteComparesTheLaunchGeneration(t *testing.T) {
 	}
 	if want != "stop" || due >= event.Time.Add(box.SessionStartupBudget).UnixMilli() {
 		t.Fatalf("want %q due %d: the obsolete launch was given startup time", want, due)
+	}
+}
+
+func TestRunningPigTurnKeepsItsChannelWhileSwitchingToAgy(t *testing.T) {
+	for _, command := range []string{"steer", "stop", "stop after reconnect"} {
+		t.Run(command, func(t *testing.T) {
+			s, room, _, owner := agySetup(t)
+			ctx := t.Context()
+			sid := startOn(t, s, room, "running", "other", "hermeslab")
+			readySession(t, s, sid)
+			connect := func() <-chan contract.BoxMessage {
+				t.Helper()
+				channelCtx, cancel := context.WithCancel(ctx)
+				messages, problem := s.BoxChannel(channelCtx, boxCaller(sid), "same-agent")
+				if problem != nil {
+					cancel()
+					t.Fatal(problem)
+				}
+				t.Cleanup(func() {
+					cancel()
+					for range messages {
+					}
+				})
+				return messages
+			}
+			messages := connect()
+			post := func(text string) contract.PostResponse {
+				t.Helper()
+				sent, problem := s.Post(ctx, owner, contract.PostRequest{Room: room, Home: contract.Conversation{Kind: contract.ConversationDM, Session: sid}, Text: text})
+				if problem != nil {
+					t.Fatal(problem)
+				}
+				return sent
+			}
+			next := func() contract.BoxMessageBody {
+				t.Helper()
+				select {
+				case message, ok := <-messages:
+					if !ok {
+						t.Fatal("box channel closed")
+					}
+					return message.Body
+				case <-time.After(2 * time.Second):
+					t.Fatal("box channel delivered no message")
+					return nil
+				}
+			}
+			post("start work")
+			start, ok := next().(contract.TurnStart)
+			if !ok || start.Model.ID != "m" {
+				t.Fatalf("expected PiG turn, got %+v", start)
+			}
+			if _, problem := s.SessionSetProfile(ctx, owner, contract.SessionSetProfileRequest{Session: sid, Profile: "gem"}); problem != nil {
+				t.Fatal(problem)
+			}
+			if command == "stop after reconnect" {
+				messages = connect()
+				replay, ok := next().(contract.TurnStart)
+				if !ok || replay.Turn != start.Turn || replay.Model.ID != "" {
+					t.Fatalf("expected the PiG turn to replay without changing model, got %+v", replay)
+				}
+			}
+			if command == "steer" {
+				sent := post("steer the current turn")
+				steer, ok := next().(contract.TurnSteer)
+				if !ok || steer.Input.Delivery != contract.DeliverySeq(sent.Seq) {
+					t.Fatalf("expected steer for delivery %d, got %+v", sent.Seq, steer)
+				}
+			} else {
+				result, problem := s.SessionStop(ctx, owner, contract.SessionStopRequest{Session: sid})
+				if problem != nil || !result.Stopping {
+					t.Fatalf("stop = %+v: %v", result, problem)
+				}
+				stop, ok := next().(contract.TurnStop)
+				if !ok || stop.Turn != start.Turn {
+					t.Fatalf("expected stop for %s, got %+v", start.Turn, stop)
+				}
+			}
+		})
 	}
 }

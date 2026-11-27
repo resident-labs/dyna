@@ -304,7 +304,7 @@ var methodTable = []MethodEntry{
 		act("transcript", "read", typ[contract.TranscriptDigestRequest](), transcriptHelp, "transcript"),
 	),
 	method(contract.MethodSessionSetProfile, contract.ScopeOperate, UserAccess,
-		act("session", "set_profile", typ[contract.SessionSetProfileRequest](), "Set profile for session (name or ID), any session under you at any depth.", "session set-profile"),
+		act("session", "set_profile", typ[contract.SessionSetProfileRequest](), "Set profile for session (name or ID), any session under you at any depth. The active turn keeps its model; a harness change takes effect after it ends.", "session set-profile"),
 	),
 	method(contract.MethodSessionAccount, contract.ScopeRead, OwnerAccess),
 	method(contract.MethodSessionSetAccount, contract.ScopeOperate, OwnerAccess),

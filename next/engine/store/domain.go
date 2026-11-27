@@ -1055,7 +1055,8 @@ const dispatchInputs = dispatchProjection + `WHERE d.to_kind=?1 AND d.to_id=?2 A
 
 // Dispatch atomically assigns pending inputs to the active turn, or starts one.
 // replay includes previously taken inputs for a new channel connection.
-// Dispatch also returns the session's profile, read in the same transaction as its inputs.
+// Dispatch also returns the session's profile, read in the same transaction as its inputs. During a handoff, an old box
+// taking more inputs for its current turn gets no new profile.
 // DrainDispatch prevents further turn dispatches and waits for any active dispatch.
 func (s *Store) DrainDispatch() {
 	s.dispatchMu.Lock()
@@ -1093,7 +1094,8 @@ func (s *Store) dispatch(ctx context.Context, session contract.SessionID, turn c
 	var harness string
 	err = s.Write(ctx, func(tx *sql.Tx) error {
 		var boxID contract.BoxID
-		err := tx.QueryRowContext(ctx, `SELECT b.id,s.profile,r.paused_at IS NOT NULL,b.harness FROM sessions s JOIN boxes b ON b.session=s.id JOIN rooms r ON r.id=s.room WHERE s.id=? AND s.state='open' AND s.closed_at IS NULL AND b.want='run' AND b.state='ready' AND NOT (s.handoff>0 AND b.launch_gen!=s.handoff)`, session).Scan(&boxID, &profile, &paused, &harness)
+		var handoff bool
+		err := tx.QueryRowContext(ctx, `SELECT b.id,s.profile,r.paused_at IS NOT NULL,b.harness,s.handoff>0 AND b.launch_gen!=s.handoff FROM sessions s JOIN boxes b ON b.session=s.id JOIN rooms r ON r.id=s.room WHERE s.id=? AND s.state='open' AND s.closed_at IS NULL AND b.want='run' AND b.state='ready'`, session).Scan(&boxID, &profile, &paused, &harness, &handoff)
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil
 		}
@@ -1106,6 +1108,13 @@ func (s *Store) dispatch(ctx context.Context, session contract.SessionID, turn c
 		err = tx.QueryRowContext(ctx, "SELECT id FROM turns WHERE session=? AND ended_at IS NULL", session).Scan(&active)
 		if err != nil && !errors.Is(err, sql.ErrNoRows) {
 			return err
+		}
+		// The old box keeps its running turn; only a new turn needs the new harness and its profile.
+		if handoff {
+			if active == "" {
+				return nil
+			}
+			profile = ""
 		}
 		rows, err := tx.QueryContext(ctx, dispatchInputs, contract.PrincipalSession, session, active, replay)
 		if err != nil {
