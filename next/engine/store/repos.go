@@ -204,7 +204,15 @@ func (s *Store) RemoveRoomRepo(ctx context.Context, room contract.RoomID, repo c
 				return err
 			}
 		}
+		// Unlinking drops this room's snapshots. A re-added link cannot use a continuation
+		// that assumed it had received earlier pages, or a pass read for the old link.
+		if _, err := tx.ExecContext(ctx, `DELETE FROM github_feeds WHERE repo=? AND feed=?`, repo, RoomPRCensusFeed); err != nil {
+			return err
+		}
 		if next.Valid {
+			if _, err := tx.ExecContext(ctx, `UPDATE repo_registrations SET generation=lower(hex(randomblob(16))) WHERE repo=?`, repo); err != nil {
+				return err
+			}
 			_, err := tx.ExecContext(ctx, `UPDATE repos SET default_room=? WHERE repo=? AND default_room=?`, next.String, repo, room)
 			return err
 		}

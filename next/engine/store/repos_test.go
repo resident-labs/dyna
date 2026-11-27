@@ -261,3 +261,66 @@ func TestRepositoryRegistrationMigration(t *testing.T) {
 		t.Fatalf("missing migrated registration: %+v %v", heads, err)
 	}
 }
+
+func TestRemoveSharedRoomRepoInvalidatesOldCensus(t *testing.T) {
+	ctx := t.Context()
+	s, err := Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	now := time.Now()
+	on := true
+	const repo contract.RepoName = "owner/shared"
+	for _, room := range []contract.RoomID{"a", "b"} {
+		if err := s.CreateRoom(ctx, room, string(room), now); err != nil {
+			t.Fatal(err)
+		}
+		if err := s.AddRoomRepo(ctx, room, "owner/default", true); err != nil {
+			t.Fatal(err)
+		}
+		if err := s.AddRoomRepo(ctx, room, repo, false, &on); err != nil {
+			t.Fatal(err)
+		}
+	}
+	row := TrackedPR{PrSummary: contract.PrSummary{Repo: repo, Number: 1, State: contract.PrOpen}}
+	if err := s.ApplyPRPoll(ctx, GitHubPass{
+		RoomPRs: []RoomPRPass{{Room: "a", Repo: repo, Rows: []TrackedPR{row}}, {Room: "b", Repo: repo, Rows: []TrackedPR{row}}},
+		Feeds:   []GitHubFeed{{Repo: repo, Feed: RoomPRCensusFeed, Cursor: FeedCursor{NextPage: "/page/2", CensusRooms: []contract.RoomID{"a", "b"}}}, {Repo: repo, Feed: "issues", ETag: "live"}},
+	}, now); err != nil {
+		t.Fatal(err)
+	}
+	before, err := s.RepoHeads(ctx, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	old := GitHubPass{Registrations: map[contract.RepoName]string{repo: before[repo].Registration},
+		RoomPRs: []RoomPRPass{{Room: "a", Repo: repo, CensusComplete: true, Rows: []TrackedPR{row}}},
+		Feeds:   []GitHubFeed{{Repo: repo, Feed: RoomPRCensusFeed, Cursor: FeedCursor{NextPage: "/page/3", CensusRooms: []contract.RoomID{"a", "b"}}}},
+	}
+	if err := s.RemoveRoomRepo(ctx, "a", repo); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.AddRoomRepo(ctx, "a", repo, false, &on); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.ApplyPRPoll(ctx, old, now); err != nil {
+		t.Fatal(err)
+	}
+	feeds, err := s.GitHubFeeds(ctx)
+	if err != nil || feeds[repo][RoomPRCensusFeed].Cursor.NextPage != "" || feeds[repo]["issues"].ETag != "live" {
+		t.Fatalf("census continuation or live cursor changed incorrectly: %+v %v", feeds[repo], err)
+	}
+	watches, err := s.RoomPRWatches(ctx, repo)
+	if err != nil || len(watches) != 2 {
+		t.Fatalf("watches: %+v %v", watches, err)
+	}
+	for _, w := range watches {
+		if w.Room == "a" && (w.CensusAt != 0 || len(w.Rows) != 0) {
+			t.Fatalf("old pass marked re-added room complete: %+v", w)
+		}
+		if w.Room == "b" && len(w.Rows) != 1 {
+			t.Fatalf("other room's snapshots changed: %+v", w)
+		}
+	}
+}

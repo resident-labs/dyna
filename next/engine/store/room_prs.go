@@ -8,6 +8,9 @@ import (
 	"time"
 )
 
+// RoomPRCensusFeed is the continuation for room-wide initial PR census pages.
+const RoomPRCensusFeed = "room_pr_census"
+
 type RoomPRWatch struct {
 	Room     contract.RoomID
 	Repo     contract.RepoName

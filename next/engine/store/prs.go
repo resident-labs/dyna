@@ -97,7 +97,7 @@ type ListedHead struct {
 
 // RepoState is what is stored of a repository's default branch (spec 7.7): its head, which is empty until a poll reads one, and the heads in its recent list whose CI is not settled, oldest first.
 type RepoState struct {
-	Registration string // changes when a repository is removed and added again
+	Registration string // changes when a repository link is removed
 	Head         string
 	Unsettled    []ListedHead
 }
