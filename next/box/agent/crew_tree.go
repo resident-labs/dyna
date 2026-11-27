@@ -24,12 +24,13 @@ var pushDelay = 10 * time.Second
 
 // treeResult is what a worktree step stores. A commit other than the run base is saved on the remote at Branch.
 type treeResult struct {
-	Step   string   `json:"step"`
-	Text   string   `json:"text,omitempty"`
-	Output any      `json:"output,omitempty"`
-	Branch string   `json:"branch"`
-	Commit string   `json:"commit"`
-	Files  []string `json:"files"`
+	Step        string   `json:"step"`
+	Text        string   `json:"text,omitempty"`
+	Output      any      `json:"output,omitempty"`
+	Branch      string   `json:"branch"`
+	Commit      string   `json:"commit"`
+	Files       []string `json:"files"`
+	Unpublished bool     `json:"unpublished,omitempty"` // The commit is already pinned; there is no remote branch to restore.
 }
 
 // treeDir is a step's folder, beside the main tree so that git status there never sees it.
@@ -82,6 +83,7 @@ func (c *Crew) treeWorker(ctx context.Context, key, name string, profile contrac
 		out.value, out.reason = nil, fmt.Sprintf("the worker's work did not reach %s: %s", branch, err)
 		return out
 	}
+	result.Unpublished = result.Commit == c.config.Base
 	out.value = result
 	return out
 }
@@ -106,6 +108,18 @@ func (c *Crew) saveTree(ctx context.Context, dir, name, branch string) (string, 
 		return "", nil, err
 	}
 	if commit == c.config.Base {
+		// A lost attempt may have pushed this name before its result was stored. Ask origin, not the clone's cache.
+		bound, cancel := context.WithTimeout(ctx, saveTimeout)
+		ref, err := runGit(bound, dir, "", "ls-remote", "--refs", "origin", "refs/heads/"+branch)
+		cancel()
+		if err != nil {
+			return "", nil, err
+		}
+		if ref != "" {
+			if err := c.push(ctx, dir, "", branch); err != nil {
+				return "", nil, err
+			}
+		}
 		return commit, []string{}, nil
 	}
 	changed, err := git("diff", "--name-only", "--no-renames", "-z", c.config.Base, commit)
@@ -128,7 +142,10 @@ func (c *Crew) push(ctx context.Context, dir, commit, branch string) error {
 		bound, cancel := context.WithTimeout(ctx, saveTimeout)
 		_, err = runGit(bound, dir, "", "push", "--no-verify", "--force", "origin", commit+":refs/heads/"+branch)
 		cancel()
-		if err == nil || attempt == pushAttempts {
+		if err == nil || (commit == "" && strings.Contains(err.Error(), "remote ref does not exist")) {
+			return nil
+		}
+		if attempt == pushAttempts {
 			break
 		}
 		select {
@@ -146,11 +163,11 @@ func (c *Crew) restore(ctx context.Context, call crewCall, reply crewReply) crew
 		return reply
 	}
 	var saved struct {
-		Branch string `json:"branch"`
-		Commit string `json:"commit"`
+		Branch      string `json:"branch"`
+		Unpublished bool   `json:"unpublished"` // absent on merge results and in old journals
 	}
 	data, _ := json.Marshal(reply.Value)
-	if err := json.Unmarshal(data, &saved); err != nil || saved.Branch == "" || saved.Commit == c.config.Base {
+	if err := json.Unmarshal(data, &saved); err != nil || saved.Branch == "" || saved.Unpublished {
 		return reply
 	}
 	c.repo.Lock()
@@ -241,10 +258,6 @@ func (c *Crew) merge(ctx context.Context, key string, entries []mergeEntry, opts
 	for _, entry := range entries {
 		if entry.Failed {
 			result.Conflicts = append(result.Conflicts, contract.WorkflowConflict{Step: entry.Step, Files: []string{}, Reason: entry.Reason})
-			continue
-		}
-		if entry.Commit == c.config.Base {
-			result.Merged = append(result.Merged, entry.Step)
 			continue
 		}
 		_, err := runGit(ctx, dir, "", "merge", "--no-ff", "--no-verify", "-m", "merge "+entry.Step, entry.Commit)

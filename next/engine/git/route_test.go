@@ -169,6 +169,25 @@ func TestTopicBranchPushAuthorization(t *testing.T) {
 	}
 }
 
+func TestForwardsDeletionOfOwnedStepBranch(t *testing.T) {
+	target, _ := url.Parse("https://github.com")
+	line := strings.Repeat("1", 40) + " " + strings.Repeat("0", 40) + " refs/heads/work-0123456789ab\x00report-status\n"
+	body := fmt.Sprintf("%04x%s0000", len(line)+4, line)
+	called := false
+	transport := roundTrip(func(r *http.Request) (*http.Response, error) {
+		called = true
+		if got, err := io.ReadAll(r.Body); err != nil || string(got) != body {
+			t.Fatalf("bad forwarded body: %q %v", got, err)
+		}
+		return &http.Response{StatusCode: 200, Header: make(http.Header), Body: io.NopCloser(strings.NewReader("ok"))}, nil
+	})
+	w := httptest.NewRecorder()
+	Handler(target, transport, "secret", "ses_1", "room", routeAccess(), defaultMain).ServeHTTP(w, httptest.NewRequest("POST", "/git/owner/repo.git/git-receive-pack", strings.NewReader(body)))
+	if !called || w.Code != 200 {
+		t.Fatalf("forwarded %v, status %d: %s", called, w.Code, w.Body.String())
+	}
+}
+
 // Close keeps no archive ref, so not even a session's own refs/dyna/archive name is pushed upstream.
 func TestRefusesAPushToAnArchiveRef(t *testing.T) {
 	target, _ := url.Parse("https://github.com")
