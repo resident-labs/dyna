@@ -171,8 +171,7 @@ func (h *Host) stream(ctx context.Context, in io.Reader, out io.Writer, argv ...
 // PackAgy writes the program and the account folder as an opaque archive to w, as the host has them. The caller only hands it on to
 // UnpackAgy, through a pipe, so the engine holds no more of it than the pipe's one write at a time.
 func (h *Host) PackAgy(ctx context.Context, layout box.Layout, binary, account bool, w io.Writer) error {
-	// The account goes first: tar notices a changed file only while it reads it, so a token refresh has the second the small account takes to
-	// be read, and not the minute behind the program's 274 MB.
+	// Packing the account first only stops the program delaying the account read; it does not shorten tar's per-file changed-while-reading window.
 	members := []string{}
 	if account {
 		members = append(members, "accounts/main")

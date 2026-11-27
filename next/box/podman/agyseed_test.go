@@ -567,8 +567,7 @@ func (s *streamRecorder) RunStream(_ context.Context, _ io.Reader, _ io.Writer, 
 	return nil
 }
 
-// The account is packed before the program, so a rare writer of the account (a token refresh) has the second the small account takes to
-// read and not the minute the program takes.
+// Packing the account first only stops the program delaying the account read; it does not shorten tar's per-file changed-while-reading window.
 func TestPackAgyReadsTheAccountBeforeTheProgram(t *testing.T) {
 	rec := &streamRecorder{runner: &runner{}}
 	h := newTestHost(t, rec.runner)
