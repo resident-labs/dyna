@@ -41,8 +41,15 @@ func TestActiveDynaClaudeResponsesInstructionPrefix(t *testing.T) {
 		if err != nil {
 			return nil, err
 		}
+		// The Claude executor sets the wire casing just before transport.
+		var betas []string
+		for name, values := range r.Header {
+			if strings.EqualFold(name, "Anthropic-Beta") {
+				betas = append(betas, values...)
+			}
+		}
 		select {
-		case requests <- capture{body, strings.Join(r.Header["anthropic-beta"], ",")}:
+		case requests <- capture{body, strings.Join(betas, ",")}:
 		default:
 			t.Error("unexpected repeat upstream request")
 		}
