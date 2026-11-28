@@ -2,10 +2,9 @@
   import { tick } from "svelte";
   import Icon from "./Icon.svelte";
   import StatusPill from "./StatusPill.svelte";
-  import WorkingDot from "./WorkingDot.svelte";
   // The room's less frequent actions. On a phone they sit behind the header's button; elsewhere a right click on the
   // room's rail icon opens them at the pointer, and focus returns to that icon.
-  let { phone, paused, operate, admin, onpause, oninstructions, onclear, onterminal, oncomputer, onrequests, onjobs, onruns, runsLive = false, waiting = 0 }: { phone: boolean; onrequests?: () => void; onjobs?: () => void; onruns?: () => void; runsLive?: boolean; waiting?: number; paused: boolean; operate: boolean; admin: boolean; onpause: () => void; oninstructions: () => void; onclear?: (trigger?: HTMLElement | null) => void; onterminal?: () => void; oncomputer?: () => void } = $props();
+  let { phone, paused, operate, admin, onpause, oninstructions, onclear, onterminal, oncomputer, onrequests, onjobs, waiting = 0 }: { phone: boolean; onrequests?: () => void; onjobs?: () => void; waiting?: number; paused: boolean; operate: boolean; admin: boolean; onpause: () => void; oninstructions: () => void; onclear?: (trigger?: HTMLElement | null) => void; onterminal?: () => void; oncomputer?: () => void } = $props();
   let open = $state(false);
   let root: HTMLDivElement;
   let button: HTMLButtonElement | undefined = $state();
@@ -53,7 +52,6 @@
       {#if onclear && !at}<button type="button" role="menuitem" tabindex="-1" onclick={() => { const trigger = button; void show(false); onclear(trigger); }}>Clear conversation…</button>{/if}
       {#if onrequests}<button type="button" role="menuitem" tabindex="-1" onclick={() => { void show(false, true); onrequests(); }}>Requests{#if waiting}<StatusPill tone="warning" label="Requests waiting" count={waiting} />{/if}</button>{/if}
       {#if onjobs}<button type="button" role="menuitem" tabindex="-1" onclick={() => { void show(false, true); onjobs(); }}>Jobs</button>{/if}
-      {#if onruns}<button type="button" role="menuitem" tabindex="-1" onclick={() => { void show(false, true); onruns(); }}>Runs{#if runsLive}<WorkingDot label="A run is going" />{/if}</button>{/if}
       {#if onterminal}<button type="button" role="menuitem" tabindex="-1" onclick={() => { void show(false, true); onterminal(); }}>Terminal</button>{/if}
       {#if oncomputer}<button type="button" role="menuitem" tabindex="-1" onclick={() => { void show(false, true); oncomputer(); }}>Computer</button>{/if}
       {#if (phone || at) && admin}<button type="button" role="menuitem" tabindex="-1" onclick={() => { void show(false, true); oninstructions(); }}>Instructions</button>{/if}
