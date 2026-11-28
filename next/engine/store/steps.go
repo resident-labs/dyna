@@ -17,7 +17,7 @@ var steps = map[int][]string{
 	134: {`CREATE TABLE IF NOT EXISTS agy_limits (account TEXT PRIMARY KEY, until INTEGER NOT NULL)`},
 	135: {`CREATE TABLE IF NOT EXISTS agy_accounts (id TEXT PRIMARY KEY, label TEXT NOT NULL, created INTEGER NOT NULL)`},
 	// agy: which added account is active for every agy session, whose sign-in the engine host's token file holds, and an unfinished switch (held, its target and the host it stopped at). One row.
-	136: {`CREATE TABLE IF NOT EXISTS agy_account (one INTEGER PRIMARY KEY CHECK (one=1), active TEXT NOT NULL DEFAULT '', holder TEXT NOT NULL DEFAULT '', held INTEGER NOT NULL DEFAULT 0, target TEXT NOT NULL DEFAULT '', stuck_host TEXT NOT NULL DEFAULT '')`},
+	136: {`CREATE TABLE IF NOT EXISTS agy_account (one INTEGER PRIMARY KEY CHECK (one=1), active TEXT NOT NULL DEFAULT '', held INTEGER NOT NULL DEFAULT 0, target TEXT NOT NULL DEFAULT '', stuck_host TEXT NOT NULL DEFAULT '')`},
 	133: {`ALTER TABLE room_repos ADD COLUMN step_branch_expiry INTEGER NOT NULL DEFAULT 0`},
 	// A GitHub poll may outlive deletion and re-creation of a repository registration.
 	131: {`CREATE TABLE IF NOT EXISTS repo_registrations (repo TEXT PRIMARY KEY REFERENCES repos(repo) ON DELETE CASCADE, generation TEXT NOT NULL)`, `INSERT INTO repo_registrations(repo,generation) SELECT repo,lower(hex(randomblob(16))) FROM repos WHERE true ON CONFLICT(repo) DO NOTHING`},

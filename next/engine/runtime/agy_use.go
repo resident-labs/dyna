@@ -64,30 +64,16 @@ func twice(path string) (io.Reader, int64, func(), error) {
 	return io.MultiReader(io.NewSectionReader(f, 0, size), io.NewSectionReader(f, 0, size)), size, func() { f.Close() }, nil
 }
 
-// AgyTokenIs says whether the host's token file is the same bytes as the stored file.
-func (b *Boxes) AgyTokenIs(ctx context.Context, name contract.HostName, stored string) (bool, error) {
-	host, err := b.host(ctx, name)
-	if err != nil {
-		return false, err
-	}
-	r, size, closeFile, err := twice(stored)
-	if err != nil {
-		return false, err
-	}
-	defer closeFile()
-	return host.AgyTokenIs(ctx, b.Layout, io.LimitReader(r, size))
-}
-
 // AgyInstall swaps the host's token for the stored file, after copying the current one to takeback when that is not empty, and returns
-// how many agy servers it ended.
-func (b *Boxes) AgyInstall(ctx context.Context, name contract.HostName, stored, takeback string) (int, error) {
+// how many agy servers it ended, or same when the host had the token already: the host's script decides that under its lock.
+func (b *Boxes) AgyInstall(ctx context.Context, name contract.HostName, stored, takeback string) (int, bool, error) {
 	host, err := b.host(ctx, name)
 	if err != nil {
-		return 0, err
+		return 0, false, err
 	}
 	r, size, closeFile, err := twice(stored)
 	if err != nil {
-		return 0, err
+		return 0, false, err
 	}
 	defer closeFile()
 	if takeback == "" {

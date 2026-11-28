@@ -31,7 +31,8 @@ type fakeAgyHosts struct {
 	tokens   map[contract.HostName]string
 	down     map[contract.HostName]error // AgyHostAnswers
 	failOn   map[contract.HostName]error // AgyInstall
-	installs []contract.HostName
+	installs []contract.HostName         // the installs that changed a token; a host that had it already is not one
+	stall    map[contract.HostName]bool  // AgyInstall waits for its context
 	takeback map[contract.HostName]string
 }
 
@@ -48,24 +49,28 @@ func (f *fakeAgyHosts) read(h contract.HostName) string {
 	}
 	return f.tokens[h]
 }
-func (f *fakeAgyHosts) AgyTokenIs(_ context.Context, h contract.HostName, stored string) (bool, error) {
+func (f *fakeAgyHosts) AgyInstall(ctx context.Context, h contract.HostName, stored, takeback string) (int, bool, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	b, err := os.ReadFile(stored)
-	return err == nil && string(b) == f.read(h), err
-}
-func (f *fakeAgyHosts) AgyInstall(_ context.Context, h contract.HostName, stored, takeback string) (int, error) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
+	b, _ := os.ReadFile(stored)
+	// What the host's script decides under its lock: a token that already is the incoming one is left alone, with no take-back.
+	if string(b) == f.read(h) {
+		return 0, true, nil
+	}
 	f.installs = append(f.installs, h)
 	f.takeback[h] = takeback
-	if err := f.failOn[h]; err != nil {
-		return 0, err
+	if f.stall[h] {
+		f.mu.Unlock()
+		<-ctx.Done()
+		f.mu.Lock()
+		return 0, false, ctx.Err()
 	}
-	b, _ := os.ReadFile(stored)
+	if err := f.failOn[h]; err != nil {
+		return 0, false, err
+	}
 	if takeback != "" {
 		if err := os.WriteFile(takeback, []byte(f.read(h)), 0o600); err != nil {
-			return 0, err
+			return 0, false, err
 		}
 	}
 	if h == AgySource {
@@ -73,7 +78,7 @@ func (f *fakeAgyHosts) AgyInstall(_ context.Context, h contract.HostName, stored
 	} else {
 		f.tokens[h] = string(b)
 	}
-	return 2, nil
+	return 2, false, nil
 }
 
 // useRig has two added accounts: old (active, its token in main) and new (stored only), and a second host.
@@ -87,7 +92,7 @@ func newUseRig(t *testing.T) *useRig {
 	t.Helper()
 	r := &useRig{agyRig: newAgyRig(t)}
 	r.hosts = &fakeAgyHosts{rig: r.agyRig, names: []contract.HostName{AgySource, "node"}, tokens: map[contract.HostName]string{"node": tokOld},
-		down: map[contract.HostName]error{}, failOn: map[contract.HostName]error{}, takeback: map[contract.HostName]string{}}
+		down: map[contract.HostName]error{}, failOn: map[contract.HostName]error{}, stall: map[contract.HostName]bool{}, takeback: map[contract.HostName]string{}}
 	r.actions.SetAgyHosts(r.hosts)
 	r.actions.agyTurnWait, r.actions.agyTurnPoll = 200*time.Millisecond, 20*time.Millisecond
 	add := func(label, token string) contract.AccountID {
@@ -213,7 +218,7 @@ func TestUseSwapsEveryHostTakesBackAndActivatesInOneStep(t *testing.T) {
 	if r.hosts.takeback[AgySource] != r.layout.HostAgyToken(string(r.old)) || r.hosts.takeback["node"] != "" {
 		t.Fatalf("take-backs: %v", r.hosts.takeback)
 	}
-	if u := r.state(); u.Active != r.new || u.Holder != r.new || u.Held || u.StuckHost != "" || u.Target != "" {
+	if u := r.state(); u.Active != r.new || u.Held || u.StuckHost != "" || u.Target != "" {
 		t.Fatalf("state: %+v", u)
 	}
 	if got := r.hosts.installs; len(got) != 2 || got[0] != AgySource {
@@ -236,7 +241,7 @@ func TestUseWithAHostFailingStaysHeldNamesItAndARerunSkipsHostsDone(t *testing.T
 		t.Fatalf("a failing host: %v %+v", problem, out)
 	}
 	u := r.state()
-	if !u.Held || u.StuckHost != "node" || u.Target != r.new || u.Active != r.old || u.Holder != r.new {
+	if !u.Held || u.StuckHost != "node" || u.Target != r.new || u.Active != r.old {
 		t.Fatalf("state: %+v", u)
 	}
 	// The sessions stay held: the account the engine host holds is not the active one.
@@ -261,21 +266,154 @@ func TestUseWithAHostFailingStaysHeldNamesItAndARerunSkipsHostsDone(t *testing.T
 	}
 }
 
-// After a half-done switch, a use of the old account takes the engine host's token back to its holder (the new account), never to the
-// active one: the old account's copy is not overwritten with the new sign-in.
-func TestUseBackAfterAHalfDoneSwitchKeepsEachAccountsCopy(t *testing.T) {
+// A switch whose hermeslab swap finished but whose result was lost (the engine went down, or the caller left) is held with its target.
+// Only a run for that target is accepted: it finds hermeslab done, takes nothing back, and finishes; the old account is refused with the
+// text, and the old account's stored copy is never overwritten with the new token.
+func TestAHeldSwitchAcceptsOnlyItsTargetAndARerunFinishesWithoutATakeBack(t *testing.T) {
 	r := newUseRig(t)
-	r.hosts.failOn["node"] = errors.New("x")
-	r.use("New")
-	r.hosts.failOn = map[contract.HostName]error{}
+	// The state a lost result leaves: held for the new account, hermeslab already holding the new token, node not swapped.
+	if _, err := r.st.BeginAgySwitch(r.ctx, r.new); err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, r.layout.HostAgyMainToken(), tokNew)
+	_, problem := r.use("Old")
+	if problem == nil || problem.Code != contract.ErrConflict || !strings.Contains(problem.Message, "finish the switch to New first") {
+		t.Fatalf("the old account while held: %v", problem)
+	}
+	if len(r.hosts.installs) != 0 || file(r.layout.HostAgyToken(string(r.old))) != tokOld || !r.state().Held {
+		t.Fatalf("a refused use changed something: installs %v old %q %+v", r.hosts.installs, file(r.layout.HostAgyToken(string(r.old))), r.state())
+	}
+	out, problem := r.use("New")
+	if problem != nil {
+		t.Fatal(problem)
+	}
+	if !strings.Contains(out.Hosts[0].Result, "already") || len(r.hosts.installs) != 1 || r.hosts.installs[0] != "node" {
+		t.Fatalf("the rerun: %+v installs %v", out.Hosts, r.hosts.installs)
+	}
+	if file(r.layout.HostAgyToken(string(r.old))) != tokOld || file(r.layout.HostAgyMainToken()) != tokNew || r.hosts.tokens["node"] != tokNew {
+		t.Fatalf("copies: old %q main %q node %q", file(r.layout.HostAgyToken(string(r.old))), file(r.layout.HostAgyMainToken()), r.hosts.tokens["node"])
+	}
+	if u := r.state(); u.Held || u.Active != r.new || u.Target != "" {
+		t.Fatalf("after the rerun: %+v", u)
+	}
+	// The way back is a new switch, after the first one is done.
 	if _, problem := r.use("Old"); problem != nil {
 		t.Fatal(problem)
 	}
-	if file(r.layout.HostAgyToken(string(r.old))) != tokOld || file(r.layout.HostAgyToken(string(r.new))) != tokNew || file(r.layout.HostAgyMainToken()) != tokOld || r.hosts.tokens["node"] != tokOld {
-		t.Fatalf("old %q new %q main %q node %q", file(r.layout.HostAgyToken(string(r.old))), file(r.layout.HostAgyToken(string(r.new))), file(r.layout.HostAgyMainToken()), r.hosts.tokens["node"])
+}
+
+// A refreshed outgoing token (one that matches no stored copy) is taken back on the rerun, to the outgoing account: it is the active one
+// until every host is done.
+func TestARerunTakesBackAnOutgoingTokenThatDiffersFromTheTarget(t *testing.T) {
+	r := newUseRig(t)
+	r.hosts.failOn["node"] = errors.New("x")
+	writeFile(t, r.layout.HostAgyMainToken(), tokOld+"-REFRESHED")
+	r.use("New")                                               // hermeslab swapped (and took the refreshed token back); node failed
+	writeFile(t, r.layout.HostAgyMainToken(), tokOld+"-AGAIN") // something put another outgoing token there before the rerun
+	r.hosts.failOn = map[contract.HostName]error{}
+	if _, problem := r.use("New"); problem != nil {
+		t.Fatal(problem)
 	}
-	if u := r.state(); u.Held || u.Active != r.old || u.Holder != r.old {
-		t.Fatalf("%+v", u)
+	if file(r.layout.HostAgyToken(string(r.old))) != tokOld+"-AGAIN" || file(r.layout.HostAgyMainToken()) != tokNew {
+		t.Fatalf("old %q main %q", file(r.layout.HostAgyToken(string(r.old))), file(r.layout.HostAgyMainToken()))
+	}
+}
+
+// An engine restart keeps the held switch: the target and the refusal come from the stored row.
+func TestAHeldSwitchSurvivesAnEngineRestart(t *testing.T) {
+	r := newUseRig(t)
+	r.hosts.failOn["node"] = errors.New("x")
+	r.use("New")
+	again := NewAccountActions(r.actions.service, r.actions.connections, r.actions.quotas)
+	again.SetAgyHosts(r.hosts)
+	if _, problem := again.AgyUse(r.ctx, owner, contract.AgyUseRequest{Account: "Old"}); problem == nil || !strings.Contains(problem.Message, "finish the switch to New first") {
+		t.Fatalf("after a restart: %v", problem)
+	}
+	if u := r.state(); !u.Held || u.Target != r.new || u.StuckHost != "node" {
+		t.Fatalf("state: %+v", u)
+	}
+	r.hosts.failOn = map[contract.HostName]error{}
+	if _, problem := again.AgyUse(r.ctx, owner, contract.AgyUseRequest{Account: "New"}); problem != nil {
+		t.Fatal(problem)
+	}
+}
+
+// A host that stalls fails within its bound, names itself, and the switch stays held.
+func TestAStalledHostFailsWithinItsBoundAndStaysHeld(t *testing.T) {
+	r := newUseRig(t)
+	r.actions.agyHostWait = 100 * time.Millisecond
+	r.hosts.stall["node"] = true
+	start := time.Now()
+	_, problem := r.use("New")
+	if problem == nil || !strings.Contains(problem.Message, "host node") || !strings.Contains(problem.Message, "did not finish") {
+		t.Fatalf("a stalled host: %v", problem)
+	}
+	if time.Since(start) > 5*time.Second {
+		t.Fatal("the stall was not bounded")
+	}
+	if u := r.state(); !u.Held || u.StuckHost != "node" || u.Active != r.old {
+		t.Fatalf("state: %+v", u)
+	}
+}
+
+// Remove and a switch's target. Remove wins when it runs between the switch's checks and its lock: the switch fails before anything is
+// held. The hook blocks the switch there, and Remove runs meanwhile.
+func TestRemovingTheTargetBetweenTheChecksAndTheHoldWins(t *testing.T) {
+	r := newUseRig(t)
+	reached, proceed := make(chan struct{}), make(chan struct{})
+	r.actions.afterAgyPreflight = func() { close(reached); <-proceed }
+	done := make(chan *contract.Error, 1)
+	go func() { _, problem := r.use("New"); done <- problem }()
+	<-reached
+	if _, problem := r.actions.AccountsRemove(r.ctx, owner, contract.AccountsRemoveRequest{AccountID: r.new}); problem != nil {
+		t.Fatalf("remove: %v", problem)
+	}
+	close(proceed)
+	if problem := <-done; problem == nil || problem.Code != contract.ErrInvalid {
+		t.Fatalf("the switch after the account was removed: %v", problem)
+	}
+	if u := r.state(); u.Held || u.Target != "" || len(r.hosts.installs) != 0 {
+		t.Fatalf("something was held or swapped: %+v %v", u, r.hosts.installs)
+	}
+}
+
+// The hold wins when it is set first: Remove of the target is refused while the switch waits for running turns, and works after it.
+func TestRemovingTheTargetOfAHeldSwitchIsRefused(t *testing.T) {
+	r := newUseRig(t)
+	r.actions.agyTurnWait = 3 * time.Second
+	sqlExec(t, r.st, `INSERT INTO rooms(id,name,created_at,cpus,mem_bytes) VALUES('r','r',0,0,0);
+ INSERT INTO sessions(id,room,name,profile,state,goal,created_at) VALUES('a','r','a','p','open','',0);
+ INSERT INTO boxes(id,session,image,size,state,reason,slice,created_at,updated_at,harness) VALUES('ba','a','','agent','ready','','',0,0,'agy');
+ INSERT INTO turns(id,session,started_at,outcome,model,input_tokens,output_tokens,cache_read_tokens,cache_write_tokens) VALUES('t1','a',1,'running','m',0,0,0,0)`)
+	done := make(chan *contract.Error, 1)
+	go func() { _, problem := r.use("New"); done <- problem }()
+	for !r.state().Held {
+		time.Sleep(5 * time.Millisecond)
+	}
+	if _, problem := r.actions.AccountsRemove(r.ctx, owner, contract.AccountsRemoveRequest{AccountID: r.new}); problem == nil || problem.Code != contract.ErrConflict {
+		t.Fatalf("the target was removed while held: %v", problem)
+	}
+	sqlExec(t, r.st, "UPDATE turns SET ended_at=2,outcome='completed'")
+	if problem := <-done; problem != nil {
+		t.Fatal(problem)
+	}
+}
+
+// A run that releases because turns are still running releases only a hold it set itself: one an earlier run left stays.
+func TestTurnsStillRunningKeepAnEarlierRunsHold(t *testing.T) {
+	r := newUseRig(t)
+	if _, err := r.st.BeginAgySwitch(r.ctx, r.new); err != nil {
+		t.Fatal(err)
+	}
+	sqlExec(t, r.st, `INSERT INTO rooms(id,name,created_at,cpus,mem_bytes) VALUES('r','r',0,0,0);
+ INSERT INTO sessions(id,room,name,profile,state,goal,created_at) VALUES('a','r','a','p','open','',0);
+ INSERT INTO boxes(id,session,image,size,state,reason,slice,created_at,updated_at,harness) VALUES('ba','a','','agent','ready','','',0,0,'agy');
+ INSERT INTO turns(id,session,started_at,outcome,model,input_tokens,output_tokens,cache_read_tokens,cache_write_tokens) VALUES('t1','a',1,'running','m',0,0,0,0)`)
+	if _, problem := r.use("New"); problem == nil || problem.Code != contract.ErrConflict {
+		t.Fatalf("running turns: %v", problem)
+	}
+	if u := r.state(); !u.Held || u.Target != r.new {
+		t.Fatalf("the earlier hold was released: %+v", u)
 	}
 }
 
@@ -361,7 +499,7 @@ func TestImportMainIsActiveAndAFileIsNotAndEveryUnsafeNameIsRefused(t *testing.T
 	if info, _ := os.Stat(layout.HostAgyToken(string(out.Account))); info.Mode().Perm() != 0o600 {
 		t.Fatalf("mode %v", info.Mode())
 	}
-	if u, _ := r.st.AgyUse(ctx); u.Active != out.Account || u.Holder != out.Account || u.Held {
+	if u, _ := r.st.AgyUse(ctx); u.Active != out.Account || u.Held {
 		t.Fatalf("state %+v", u)
 	}
 	if n := rows(t, r.st, "SELECT count(*) FROM agy_limits WHERE account=?", string(out.Account)); n != 1 {

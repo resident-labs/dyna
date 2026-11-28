@@ -23,11 +23,10 @@ type AgyHosts interface {
 	AgyHostNames(ctx context.Context) ([]contract.HostName, error)
 	// AgyHostAnswers is nil when the host answers and has an account folder to put a token in.
 	AgyHostAnswers(ctx context.Context, host contract.HostName) error
-	// AgyTokenIs says whether the host's token file is the same bytes as the stored file.
-	AgyTokenIs(ctx context.Context, host contract.HostName, stored string) (bool, error)
-	// AgyInstall copies the host's current token to takeback when that is not empty, ends the host's agy servers, puts the stored file in as
-	// the host's token and compares them, and returns how many agy servers it ended.
-	AgyInstall(ctx context.Context, host contract.HostName, stored, takeback string) (int, error)
+	// AgyInstall puts the stored file in as the host's token, under the host's lock: if the host's token already is that file it does nothing
+	// and says so (same); otherwise it ends the host's agy servers (and fails if one stays), copies the host's current token to takeback when
+	// that is not empty, installs the file, compares, and returns how many servers it ended.
+	AgyInstall(ctx context.Context, host contract.HostName, stored, takeback string) (killed int, same bool, err error)
 }
 
 // SetAgyHosts gives the switch its hosts.
@@ -51,7 +50,6 @@ func (s *Service) AgySwitchHeld(ctx context.Context) (bool, error) {
 }
 
 var (
-	errAgyBusy   = errors.New("an agy seed, switch or import is already running")
 	errAgyNoHost = errors.New("no agy host is set up")
 )
 
@@ -87,11 +85,14 @@ func (s *AccountActions) agyAccountOf(ctx context.Context, name string) (store.A
 //  2. Hold: one stored flag, which the quota gate reads with the usage limit (agyLimited), so no agy turn, idle compaction or retry wake
 //     goes out.
 //  3. Wait up to the bound for running agy turns to end; if any remain, release and fail with their count.
-//  4. Host by host, the engine host first: on a host whose token already is the account's, nothing; on the others the host's script takes
-//     the outgoing sign-in back to its stored copy (the engine host only), ends the agy servers, swaps the token and compares it.
+//  4. Host by host, the engine host first, each step bounded (agyHostWait): the host's script, under its lock, does nothing where the token
+//     already is the account's, and elsewhere ends the agy servers (a failure to end one fails the host), takes the outgoing sign-in back to
+//     its stored copy (the engine host only) and swaps the token.
 //  5. All done: the account is active and the hold is released, in one transaction. A host failed: the hold stays, and the host is named.
 //
-// Switching back to the old account is the way to cancel. It runs for minutes at worst, and the request has no timeout of its own.
+// A switch left unfinished stays held and is finished by running it again for the same account; nothing else is accepted while it is held,
+// and there is no cancel: finish it, then switch back. The active account changes only when every host is done, so a take-back always goes
+// to it. It runs for minutes at worst, and the request has no timeout of its own.
 func (s *AccountActions) AgyUse(ctx context.Context, caller contract.Principal, req contract.AgyUseRequest) (contract.AgyUseResponse, *contract.Error) {
 	if caller.Kind != contract.PrincipalOwner {
 		return contract.AgyUseResponse{}, forbidden()
@@ -112,7 +113,10 @@ func (s *AccountActions) AgyUse(ctx context.Context, caller contract.Principal, 
 	if err != nil {
 		return contract.AgyUseResponse{}, failure(err)
 	}
-	if use.Active == "" && use.Holder == "" {
+	if use.Held && use.Target != target.ID {
+		return contract.AgyUseResponse{}, &contract.Error{Code: contract.ErrConflict, Message: fmt.Sprintf("a switch to %s is unfinished; finish the switch to %s first", s.agyLabel(ctx, use.Target), s.agyLabel(ctx, use.Target))}
+	}
+	if use.Active == "" {
 		return contract.AgyUseResponse{}, invalid("no account is active yet: the sign-in on the engine host would be lost; import it first with `dyna agy import LABEL`")
 	}
 	if use.Active == target.ID && !use.Held {
@@ -131,28 +135,39 @@ func (s *AccountActions) AgyUse(ctx context.Context, caller contract.Principal, 
 			return contract.AgyUseResponse{}, &contract.Error{Code: contract.ErrUnavailable, Message: fmt.Sprintf("host %s does not answer (%v); nothing was changed", host, err)}
 		}
 	}
-	if err := s.service.store.BeginAgySwitch(ctx, target.ID); err != nil {
-		return contract.AgyUseResponse{}, failure(err)
+	if s.afterAgyPreflight != nil {
+		s.afterAgyPreflight()
+	}
+	fresh, problem := s.beginAgySwitch(ctx, target.ID)
+	if problem != nil {
+		return contract.AgyUseResponse{}, problem
 	}
 	// The hold is set: from here the switch runs to its end or its failure even if the caller goes away.
 	ctx = context.WithoutCancel(ctx)
 	if left, err := s.waitAgyTurns(ctx); err != nil || left > 0 {
-		s.service.store.AbortAgySwitch(ctx)
+		// A hold an earlier run left stays: the engine host may already have the new token.
+		if fresh {
+			s.service.store.AbortAgySwitch(ctx)
+		}
 		if err != nil {
 			return contract.AgyUseResponse{}, failure(err)
 		}
-		return contract.AgyUseResponse{}, &contract.Error{Code: contract.ErrConflict, Message: fmt.Sprintf("%d agy turns are still running; nothing was changed and agy sessions are released", left)}
+		message := fmt.Sprintf("%d agy turns are still running; nothing was changed and agy sessions are released", left)
+		if !fresh {
+			message = fmt.Sprintf("%d agy turns are still running; the switch stays unfinished and agy sessions stay held: run it again", left)
+		}
+		return contract.AgyUseResponse{}, &contract.Error{Code: contract.ErrConflict, Message: message}
 	}
 	var done []contract.AgyUseHost
 	for _, host := range hosts {
-		result, err := s.swapHost(ctx, host, target.ID, stored)
+		result, err := s.swapHost(ctx, host, use.Active, stored)
 		if err != nil {
 			s.service.store.StickAgySwitch(ctx, host)
-			return contract.AgyUseResponse{Hosts: done}, &contract.Error{Code: contract.ErrUnavailable, Message: fmt.Sprintf("host %s: %v; the switch is not finished and agy sessions stay held; run it again, or switch back to the old account", host, err)}
+			return contract.AgyUseResponse{Hosts: done}, &contract.Error{Code: contract.ErrUnavailable, Message: fmt.Sprintf("host %s: %v; the switch is not finished and agy sessions stay held; run the same switch again", host, err)}
 		}
 		done = append(done, contract.AgyUseHost{Host: host, Result: result})
 	}
-	if err := s.service.store.FinishAgySwitch(ctx, target.ID); err != nil {
+	if err := s.service.store.FinishAgySwitch(ctx, target.ID, time.Now()); err != nil {
 		return contract.AgyUseResponse{Hosts: done}, failure(err)
 	}
 	return contract.AgyUseResponse{Hosts: done}, nil
@@ -186,40 +201,54 @@ func (s *AccountActions) waitAgyTurns(ctx context.Context) (int, error) {
 	}
 }
 
-// swapHost makes one host's token the stored file's, or says it already was. The engine host takes the outgoing sign-in back to the stored
-// copy of the account that holds it, which a live agy may have refreshed; the others have no copy to take back.
-func (s *AccountActions) swapHost(ctx context.Context, host contract.HostName, target contract.AccountID, stored string) (string, error) {
-	engineHost := host == AgySource
-	same, err := s.agyHosts.AgyTokenIs(ctx, host, stored)
+// beginAgySwitch is the last check and the hold, under the lock Remove takes: the target is still there, row and file, and from the hold on
+// Remove refuses it. It reports whether this call set the hold.
+func (s *AccountActions) beginAgySwitch(ctx context.Context, target contract.AccountID) (bool, *contract.Error) {
+	s.removeMu.Lock()
+	defer s.removeMu.Unlock()
+	if _, err := s.agyAccountOf(ctx, string(target)); err != nil {
+		return false, invalid("the account was removed meanwhile; nothing was changed")
+	}
+	if info, err := os.Stat(s.service.layout.HostAgyToken(string(target))); err != nil || !info.Mode().IsRegular() {
+		return false, invalid("the account's stored sign-in is gone; nothing was changed")
+	}
+	fresh, err := s.service.store.BeginAgySwitch(ctx, target)
+	if err != nil {
+		return false, failure(err)
+	}
+	return fresh, nil
+}
+
+// agyLabel is an account's label, or its id when it has none.
+func (s *AccountActions) agyLabel(ctx context.Context, id contract.AccountID) string {
+	if account, err := s.agyAccountOf(ctx, string(id)); err == nil {
+		return account.Label
+	}
+	return string(id)
+}
+
+// swapHost makes one host's token the stored file's, or says it already was, within agyHostWait. The engine host takes the outgoing
+// account's sign-in back to that account's stored copy, which a live agy may have refreshed; the others have no copy to take back.
+func (s *AccountActions) swapHost(ctx context.Context, host contract.HostName, outgoing contract.AccountID, stored string) (string, error) {
+	wait := s.agyHostWait
+	if wait == 0 {
+		wait = 2 * time.Minute
+	}
+	ctx, cancel := context.WithTimeout(ctx, wait)
+	defer cancel()
+	takeback := ""
+	if host == AgySource {
+		takeback = s.service.layout.HostAgyToken(string(outgoing))
+	}
+	killed, same, err := s.agyHosts.AgyInstall(ctx, host, stored, takeback)
+	if errors.Is(err, context.DeadlineExceeded) {
+		return "", fmt.Errorf("did not finish within %s", wait)
+	}
 	if err != nil {
 		return "", err
 	}
 	if same {
-		if engineHost {
-			if err := s.service.store.NoteAgyHolder(ctx, target); err != nil {
-				return "", err
-			}
-		}
 		return "ok, it had the token already", nil
-	}
-	takeback := ""
-	if engineHost {
-		use, err := s.service.store.AgyUse(ctx)
-		if err != nil {
-			return "", err
-		}
-		if use.Holder != "" {
-			takeback = s.service.layout.HostAgyToken(string(use.Holder))
-		}
-	}
-	killed, err := s.agyHosts.AgyInstall(ctx, host, stored, takeback)
-	if err != nil {
-		return "", err
-	}
-	if engineHost {
-		if err := s.service.store.NoteAgyHolder(ctx, target); err != nil {
-			return "", err
-		}
 	}
 	return fmt.Sprintf("ok, ended %d agy processes (work agy left running there is ended)", killed), nil
 }
@@ -247,7 +276,7 @@ func (s *AccountActions) AgyImport(ctx context.Context, caller contract.Principa
 		return contract.AgyImportResponse{}, failure(err)
 	}
 	if use.Held {
-		return contract.AgyImportResponse{}, &contract.Error{Code: contract.ErrConflict, Message: "an account switch is unfinished; finish it, or switch back, first"}
+		return contract.AgyImportResponse{}, &contract.Error{Code: contract.ErrConflict, Message: "an account switch is unfinished; finish it first"}
 	}
 	layout := s.service.layout
 	folder := layout.HostAgyTokens()

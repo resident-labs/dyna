@@ -1,4 +1,4 @@
-import type { Account, AccountProviderInfo, AccountUsage, ConnectFlow, ConnectMethod, RoomSummary, SessionAccountIssue, SessionAccountResponse } from "./contract.gen.ts";
+import type { Account, AccountProviderInfo, AccountUsage, ConnectFlow, ConnectMethod, RoomSummary, SessionAccountIssue, SessionAccountResponse, AgySwitch } from "./contract.gen.ts";
 import { APIError } from "./client.ts";
 import type { Chip } from "./settings-list.ts";
 import { balancesText, causeText, visibleWindows, windowMeter } from "./usage.ts";
@@ -112,6 +112,19 @@ export function pasteFailure(flow: ConnectFlow, error: unknown): { text: string;
 
 // A status poll that failed to arrive: the Antigravity flow cannot be told to retry, as the sign-in may already have ended.
 export const pollFailure = (flow: ConnectFlow) => flow === "code" ? loginUnfinished : "Could not reach the service. Try again.";
+
+// What the Use section of an Antigravity account says and offers. While a switch is unfinished (it stays held, from the list, so a reload
+// shows it too) the only thing offered is finishing it, on its target; nothing else, and no way back, because the engine accepts only the
+// target until it is done.
+export function agyUse(account: Account, held: AgySwitch | undefined, targetLabel: string | undefined): { note: string; button?: string; held: boolean } {
+  if (held) {
+    const target = targetLabel ?? "the other account";
+    const note = `Switch to ${target} not finished${held.host ? `: host ${held.host}` : ""}. Antigravity sessions wait until it is.`;
+    return account.id === held.target ? { note, button: `Finish switch to ${target}`, held: true } : { note, held: true };
+  }
+  if (account.active) return { note: "Every Antigravity session uses this account now.", held: false };
+  return { note: "Every Antigravity session uses one account. Switching ends the work Antigravity left running, waits up to 5 minutes for running turns, and can take a few minutes.", button: "Use this account", held: false };
+}
 
 // An Antigravity switch or import that failed: the engine's own sentence, which never carries a sign-in.
 export const switchProblem = (error: unknown) => error instanceof APIError ? error.detail.message : "Could not switch the account. Try again.";

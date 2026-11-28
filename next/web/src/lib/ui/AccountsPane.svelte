@@ -2,7 +2,7 @@
   import { onMount, tick, type Snippet } from "svelte";
   import { call, SignedOut } from "../client.ts";
   import { accountChips, accountItems, accountLine, accountPill, addProviderError, loginUnfinished, pasteFailure, pollFailure, labelRefusal, parseModelIDs, providerChoices, refused, reconnectUnavailable, removalPrompt,
-    switchProblem, usageHint, usageNote, type AccountItem } from "../accounts.ts";
+    agyUse, switchProblem, usageHint, usageNote, type AccountItem } from "../accounts.ts";
   import { balancesText, visibleWindows } from "../usage.ts";
   import { confirm } from "../modal.ts";
   import type { Account, AccountProviderInfo, AccountUsage, AccountsConnectResponse, AgySwitch, AgyUseHost, ConnectFlow, RoomSummary } from "../contract.gen.ts";
@@ -231,7 +231,6 @@
     if (field && saved !== undefined && labelDraft !== saved) { event.preventDefault(); labelDraft = saved; labelError = ""; }
     else if (attempt) { event.preventDefault(); cancel(); }
   }
-  const switchHeld = (held: AgySwitch) => `Switch not finished. Antigravity sessions wait. Use the account again, or switch back to the old one.`;
   const ways: Record<ConnectFlow, string> = { callback: "Sign in with your plan", device: "Sign in with a code", key: "API key",
     code: "Adds one more Antigravity sign-in. Dyna keeps it but does not use it until you switch to it." };
   const connected: Record<ConnectFlow, string> = { callback: "signed in with a plan", device: "signed in with a code", key: "API key", code: "stored" };
@@ -346,13 +345,11 @@
   <label class="field">Label<input class="input label" aria-invalid={!!labelError} autocomplete="off" bind:value={labelDraft} readonly={labelSaving}
     onblur={() => void saveLabel(a)} onkeydown={event => { if (event.key === "Enter" && !event.isComposing) { event.preventDefault(); void saveLabel(a); } }} />
     {#if labelError}<span class="problem" role="alert">{labelError}</span>{/if}</label>
-  {#if each.provider?.connectFlow === "code"}<div class="section"><strong class="head">Use</strong>
-    {#if a.active}<p class="small muted">Every Antigravity session uses this account now.</p>
-    {:else}<p class="small muted">Every Antigravity session uses one account. Switching ends the work Antigravity left running, waits up to 5 minutes for running turns, and can take a few minutes.</p>
-      <div class="actions"><button type="button" class="btn" disabled={switching || a.state !== "connected"} onclick={() => void useAccount(a)}>{switching ? "Switching…" : "Use this account"}</button></div>{/if}
+  {#if each.provider?.connectFlow === "code"}{@const use = agyUse(a, agySwitch, (accounts ?? []).find(x => x.id === agySwitch?.target)?.label)}<div class="section"><strong class="head">Use</strong>
+    <p class={use.held ? "problem" : "small muted"} role={use.held ? "alert" : undefined}>{use.note}</p>
+    {#if use.button}<div class="actions"><button type="button" class="btn" disabled={switching || a.state !== "connected"} onclick={() => void useAccount(a)}>{switching ? "Switching…" : use.button}</button></div>{/if}
     {#if switching}<p class="small muted" role="status">Switching the account on each host. This can take a few minutes.</p>{/if}
-    {#each switched as host}<p class="small">{host.host}: {host.result}</p>{/each}
-    {#if agySwitch}<p class="problem" role="alert">{switchHeld(agySwitch)}</p>{/if}</div>{/if}
+    {#each switched as host}<p class="small">{host.host}: {host.result}</p>{/each}</div>{/if}
   {#if each.provider?.connectFlow !== "code"}
   <div class="section"><strong class="head">Usage{#if each.usage?.observedAt && windows.length}<span class="at">· at {clock(each.usage.observedAt)}</span>{/if}</strong>
     {#if note}<p class="small muted">{note}</p>{/if}

@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"time"
 
 	"github.com/resident-labs/dyna/contract"
 )
@@ -12,9 +13,6 @@ import (
 type AgyUse struct {
 	// Active is the account agy sessions use; empty until the signed-in account is imported or one is switched to.
 	Active contract.AccountID
-	// Holder is the account whose sign-in the engine host's token file holds. It differs from Active only in a switch left half-done, after
-	// the engine host took the new token and before every host did, and a take-back goes to it, never to Active.
-	Holder contract.AccountID
 	// Held says a switch is in progress or was left unfinished: while it is set the gate gives no agy session a turn.
 	Held bool
 	// Target is the account the held switch is moving to, and StuckHost the host it stopped at, when it did.
@@ -25,7 +23,7 @@ type AgyUse struct {
 // AgyUse reads the active account and the switch state.
 func (s *Store) AgyUse(ctx context.Context) (AgyUse, error) {
 	var use AgyUse
-	err := s.read.QueryRowContext(ctx, "SELECT active,holder,held,target,stuck_host FROM agy_account").Scan(&use.Active, &use.Holder, &use.Held, &use.Target, &use.StuckHost)
+	err := s.read.QueryRowContext(ctx, "SELECT active,held,target,stuck_host FROM agy_account").Scan(&use.Active, &use.Held, &use.Target, &use.StuckHost)
 	if errors.Is(err, sql.ErrNoRows) {
 		return AgyUse{}, nil
 	}
@@ -38,39 +36,31 @@ func agyRow(ctx context.Context, tx *sql.Tx) error {
 	return err
 }
 
-// BeginAgySwitch holds every agy session's dispatch and names the account the switch moves to. A switch left unfinished may be begun again.
-func (s *Store) BeginAgySwitch(ctx context.Context, target contract.AccountID) error {
-	return s.Write(ctx, func(tx *sql.Tx) error {
+// BeginAgySwitch holds every agy session's dispatch and names the account the switch moves to. It reports whether this call set the hold:
+// a switch an earlier run left unfinished is already held, and only a call for its own target may continue it (the engine refuses the others).
+func (s *Store) BeginAgySwitch(ctx context.Context, target contract.AccountID) (fresh bool, err error) {
+	err = s.Write(ctx, func(tx *sql.Tx) error {
 		if err := agyRow(ctx, tx); err != nil {
 			return err
 		}
+		var held bool
+		if err := tx.QueryRowContext(ctx, "SELECT held FROM agy_account WHERE one=1").Scan(&held); err != nil {
+			return err
+		}
+		fresh = !held
 		_, err := tx.ExecContext(ctx, "UPDATE agy_account SET held=1,target=?,stuck_host='' WHERE one=1", target)
 		return err
 	})
+	return fresh, err
 }
 
-// AbortAgySwitch ends a switch that changed nothing: agy sessions are released, and those with a waiting input start. A switch an
-// earlier run left half-done stays held, because the engine host holds a token that is not the active account's.
+// AbortAgySwitch releases a switch that changed nothing, and wakes the agy sessions it held.
 func (s *Store) AbortAgySwitch(ctx context.Context) error {
 	return s.Write(ctx, func(tx *sql.Tx) error {
-		if err := agyRow(ctx, tx); err != nil {
-			return err
-		}
-		if _, err := tx.ExecContext(ctx, "UPDATE agy_account SET held=CASE WHEN holder!='' AND holder!=active THEN 1 ELSE 0 END,target=CASE WHEN holder!='' AND holder!=active THEN target ELSE '' END,stuck_host='' WHERE one=1"); err != nil {
+		if _, err := tx.ExecContext(ctx, "UPDATE agy_account SET held=0,target='',stuck_host='' WHERE one=1"); err != nil {
 			return err
 		}
 		return s.wakeAgySessions(ctx, tx)
-	})
-}
-
-// NoteAgyHolder records that the engine host's token file now holds the account's sign-in.
-func (s *Store) NoteAgyHolder(ctx context.Context, id contract.AccountID) error {
-	return s.Write(ctx, func(tx *sql.Tx) error {
-		if err := agyRow(ctx, tx); err != nil {
-			return err
-		}
-		_, err := tx.ExecContext(ctx, "UPDATE agy_account SET holder=? WHERE one=1", id)
-		return err
 	})
 }
 
@@ -85,14 +75,25 @@ func (s *Store) StickAgySwitch(ctx context.Context, host contract.HostName) erro
 	})
 }
 
-// FinishAgySwitch makes the account active, and releases the held sessions, in one transaction.
-func (s *Store) FinishAgySwitch(ctx context.Context, id contract.AccountID) error {
+// FinishAgySwitch makes the account active and releases the held sessions, in one transaction. A session whose failed turn waits for the
+// old account's reset is due now, when the new account is not limited, so the retry sweep wakes it under its usual rules (a stopped or
+// cancelled timer, -1, and a paused room stay as they are).
+func (s *Store) FinishAgySwitch(ctx context.Context, id contract.AccountID, now time.Time) error {
 	return s.Write(ctx, func(tx *sql.Tx) error {
 		if err := agyRow(ctx, tx); err != nil {
 			return err
 		}
-		if _, err := tx.ExecContext(ctx, "UPDATE agy_account SET active=?1,holder=?1,held=0,target='',stuck_host='' WHERE one=1", id); err != nil {
+		if _, err := tx.ExecContext(ctx, "UPDATE agy_account SET active=?,held=0,target='',stuck_host='' WHERE one=1", id); err != nil {
 			return err
+		}
+		limited, err := s.agyLimited(ctx, tx, now)
+		if err != nil {
+			return err
+		}
+		if !limited {
+			if _, err := tx.ExecContext(ctx, "UPDATE sessions SET model_retry_at=?1 WHERE model_retry_at>?1 AND state='open' AND closed_at IS NULL AND id IN (SELECT session FROM boxes WHERE harness=?2)", now.UnixMilli(), contract.HarnessAgy); err != nil {
+				return err
+			}
 		}
 		return s.wakeAgySessions(ctx, tx)
 	})
@@ -105,7 +106,7 @@ func (s *Store) ActivateAgyAccount(ctx context.Context, id contract.AccountID) e
 		if err := agyRow(ctx, tx); err != nil {
 			return err
 		}
-		if _, err := tx.ExecContext(ctx, "UPDATE agy_account SET active=?1,holder=?1 WHERE one=1", id); err != nil {
+		if _, err := tx.ExecContext(ctx, "UPDATE agy_account SET active=? WHERE one=1", id); err != nil {
 			return err
 		}
 		_, err := tx.ExecContext(ctx, "UPDATE agy_limits SET account=? WHERE account='main'", id)
@@ -119,8 +120,8 @@ func (s *Store) AgyRunningTurns(ctx context.Context) (n int, err error) {
 	return n, err
 }
 
-// AgyAccountInUse says the account is the active one, holds the engine host's token, or is a switch's target: its token file is in use.
+// AgyAccountInUse says the account is the active one or a held switch's target: its token file is in use.
 func (s *Store) AgyAccountInUse(ctx context.Context, id contract.AccountID) (bool, error) {
 	use, err := s.AgyUse(ctx)
-	return err == nil && use.Held && use.Target == id || err == nil && (use.Active == id || use.Holder == id), err
+	return err == nil && (use.Active == id || use.Held && use.Target == id), err
 }

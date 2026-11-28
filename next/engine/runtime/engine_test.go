@@ -122,7 +122,7 @@ func TestAgySeedIsRefusedWhileASwitchIsHeldOrAnotherOpRuns(t *testing.T) {
 	if _, problem := svc.HostAgySeed(ctx, owner, contract.HostAgySeedRequest{Host: "other"}); problem != nil || f.seeded != 1 {
 		t.Fatalf("a seed with nothing held: %v %d", problem, f.seeded)
 	}
-	if err := st.BeginAgySwitch(ctx, "agy_x"); err != nil {
+	if _, err := st.BeginAgySwitch(ctx, "agy_x"); err != nil {
 		t.Fatal(err)
 	}
 	if _, problem := svc.HostAgySeed(ctx, owner, contract.HostAgySeedRequest{Host: "other"}); problem == nil || problem.Code != contract.ErrConflict || f.seeded != 1 {

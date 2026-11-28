@@ -353,7 +353,7 @@ func (l *Logins) finish(a *attempt) {
 // (the caller renames it into place, or removes it). The file at path is opened without following a link, must be a regular file, and
 // is never parsed: it is non-empty and at most 1 MiB, and that is all that is known of it. A half copy is never left.
 func CopyToken(path, folder string) (string, error) {
-	src, err := os.OpenFile(path, os.O_RDONLY|syscall.O_NOFOLLOW, 0)
+	src, err := os.OpenFile(path, os.O_RDONLY|syscall.O_NOFOLLOW|syscall.O_NONBLOCK, 0)
 	if err != nil {
 		return "", errors.New("there is no token file to copy")
 	}

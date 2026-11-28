@@ -20,6 +20,7 @@ var (
 	errAccountAction  = errors.New("account action unavailable")
 	errAccountMissing = errors.New("account not found")
 	errAgyLimits      = errors.New("an Antigravity account has no room limits")
+	errAgyBusy        = errors.New("an agy seed, switch or import is already running")
 	errAgyInUse       = errors.New("this is the active Antigravity account, or one a switch is using: switch to another account first")
 )
 
@@ -38,7 +39,11 @@ type AccountActions struct {
 	agyHosts    AgyHosts
 	// agyTurnWait is how long a switch waits for running agy turns (5 minutes), and agyTurnPoll how often it looks; tests shorten them.
 	agyTurnWait, agyTurnPoll time.Duration
-	removeMu                 sync.Mutex
+	// agyHostWait bounds one host's step of a switch (2 minutes), lock wait and copy included; afterAgyPreflight is a test hook called after a
+	// switch's checks and before the lock it takes the account under.
+	agyHostWait       time.Duration
+	afterAgyPreflight func()
+	removeMu          sync.Mutex
 }
 
 func NewAccountActions(service *Service, connections *model.Connections, quotas *model.Quotas) *AccountActions {
