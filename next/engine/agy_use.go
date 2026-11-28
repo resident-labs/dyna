@@ -269,6 +269,9 @@ func (s *AccountActions) AgyImport(ctx context.Context, caller contract.Principa
 	if req.File == "" || req.File != filepath.Base(req.File) || req.File == "." || req.File == ".." || strings.ContainsAny(req.File, "/\\\x00") {
 		return contract.AgyImportResponse{}, invalid("name the token file with --file: a plain file name in the agy accounts folder, not a path")
 	}
+	if req.File == filepath.Base(s.service.layout.HostAgyAccount()) {
+		return contract.AgyImportResponse{}, invalid("main is the folder boxes write; import the sign-in folder or a copy of the token")
+	}
 	end, ok := s.service.AgyExclusive()
 	if !ok {
 		return contract.AgyImportResponse{}, &contract.Error{Code: contract.ErrConflict, Message: errAgyBusy.Error()}

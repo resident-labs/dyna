@@ -603,6 +603,11 @@ func TestImportTakesASignInFolderAndRefusesLinksAndAFolderWithNoToken(t *testing
 	// A folder with no token, and a token that is a folder.
 	os.MkdirAll(filepath.Join(accounts, "empty", "antigravity-acp"), 0o700)
 	os.MkdirAll(filepath.Join(accounts, "dirtoken", rel), 0o700)
+	// main is the folder boxes write: refused by name, whatever it holds, with the plain message.
+	writeFile(t, mainToken(layout), tokNew)
+	if _, problem := r.actions.AgyImport(ctx, owner, contract.AgyImportRequest{Label: "Main", File: "main"}); problem == nil || problem.Code != contract.ErrInvalid || !strings.Contains(problem.Message, "main is the folder boxes write") {
+		t.Fatalf("main was accepted: %v", problem)
+	}
 	for _, name := range []string{"linkdir", "inner", "filelink", "empty", "dirtoken", "nodir"} {
 		if _, problem := r.actions.AgyImport(ctx, owner, contract.AgyImportRequest{Label: "X", File: name}); problem == nil {
 			t.Fatalf("%q was imported", name)
