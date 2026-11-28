@@ -330,6 +330,7 @@ func TestAPreflightFailureOfAHeldSwitchNamesItsHostAndAFreshOneRecordsNothing(t 
 	r.hosts.down["third"] = errors.New("ssh timed out")
 	again := NewAccountActions(r.actions.service, r.actions.connections, r.actions.quotas) // an engine restart
 	again.SetAgyHosts(r.hosts)
+	again.SetAgyLogin(r.logins)
 	if _, problem := again.AgyUse(r.ctx, owner, contract.AgyUseRequest{Account: "New"}); problem == nil || !strings.Contains(problem.Message, "third") {
 		t.Fatalf("the rerun with a host down: %v", problem)
 	}
