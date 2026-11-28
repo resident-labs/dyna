@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -13,12 +14,13 @@ import (
 
 // limitRig holds two agy sessions of one account (and a pig one) in a room, each with a ready box.
 type limitRig struct {
-	t   *testing.T
-	ctx context.Context
-	dir string
-	s   *Store
-	now time.Time
-	n   int
+	t      *testing.T
+	ctx    context.Context
+	dir    string
+	s      *Store
+	now    time.Time
+	n      int
+	kicked []contract.SessionID
 }
 
 func newLimitRig(t *testing.T) *limitRig {
@@ -28,6 +30,8 @@ func newLimitRig(t *testing.T) *limitRig {
 	if err != nil {
 		t.Fatal(err)
 	}
+	r := &limitRig{t: t, ctx: context.Background(), dir: dir, s: s, now: time.Unix(100000, 0)}
+	s.SetWake(func(ids []contract.SessionID, _ []contract.Event) { r.kicked = append(r.kicked, ids...) })
 	t.Cleanup(func() { s.Close() })
 	_, err = s.writer.Exec(`INSERT INTO rooms(id,name,created_at,cpus,mem_bytes) VALUES('r','r',0,0,0);
  INSERT INTO sessions(id,room,name,profile,state,goal,created_at) VALUES('a','r','a','p','open','',0),('b','r','b','p','open','',0),('pig','r','pig','p','open','',0);
@@ -35,7 +39,7 @@ func newLimitRig(t *testing.T) *limitRig {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return &limitRig{t: t, ctx: context.Background(), dir: dir, s: s, now: time.Unix(100000, 0)}
+	return r
 }
 
 func (r *limitRig) post(session contract.SessionID) {
@@ -119,73 +123,185 @@ func (r *limitRig) notices() []string {
 	return all
 }
 
-// A usage limit on one session holds every session of the account: they take no turn, keep their inputs, wake at the reset, and the owner
-// hears once. At the reset the sweep wakes them and they start.
+// ownerPost and enginePost leave an input for the session, waking it, from the owner and from the engine.
+func (r *limitRig) input(session contract.SessionID, from contract.Principal, wake bool) contract.DeliverySeq {
+	r.t.Helper()
+	r.n++
+	event := contract.Event{ID: contract.EventID(fmt.Sprintf("input%d", r.n)), Room: "r", Time: r.now, From: from, Body: contract.PostCreated{Text: "work"}}
+	to := contract.Principal{Kind: contract.PrincipalSession, Session: session}
+	seq, err := r.s.Post(r.ctx, event, []contract.Delivery{{To: to, Surface: contract.SurfaceSession, Reply: contract.ReplyChannel{Kind: contract.ReplyNone}, Wake: wake}})
+	if err != nil {
+		r.t.Fatal(err)
+	}
+	return contract.DeliverySeq(seq)
+}
+
+var (
+	owner  = contract.Principal{Kind: contract.PrincipalOwner}
+	engine = contract.Principal{Kind: contract.PrincipalEngine}
+)
+
+// limited puts the account under a limit through session a, as a real turn that ended on it would.
+func (r *limitRig) limited(seconds int64) {
+	r.t.Helper()
+	r.post("a")
+	r.fail("a", r.dispatch("a"), seconds, true)
+}
+
+// sweep runs the sweep that wakes retries, at the rig's time, and says which sessions it queued a dispatch for.
+func (r *limitRig) sweep() []contract.SessionID {
+	r.t.Helper()
+	r.kicked = nil
+	if err := r.s.WakeModelRetries(r.ctx, r.now); err != nil {
+		r.t.Fatal(err)
+	}
+	return r.kicked
+}
+
+func (r *limitRig) wakes(session contract.SessionID) (wake1, wake0 int) {
+	r.t.Helper()
+	return r.count("SELECT count(*) FROM deliveries WHERE to_id=? AND state='pending' AND wake=1", session), r.count("SELECT count(*) FROM deliveries WHERE to_id=? AND state='pending' AND wake=0", session)
+}
+
+// A usage limit on one session holds every session of the account: they take no turn and nothing of theirs changes, the owner hears once,
+// and at the reset the sweep deletes the row, queues a dispatch for the agy sessions, and the held input starts.
 func TestAgyLimitHoldsEverySessionOfTheAccountUntilTheReset(t *testing.T) {
 	r := newLimitRig(t)
-	r.post("a")
-	turn := r.dispatch("a")
-	if turn == "" {
-		t.Fatal("a did not start")
-	}
-	r.fail("a", turn, 3600, true)
+	r.limited(3600)
 	until := r.now.Add(time.Hour).UnixMilli()
 	if got := r.limit(); got != until {
 		t.Fatalf("limit %d, want %d", got, until)
 	}
-	r.post("b")
+	seq := r.input("b", owner, true)
 	if got := r.dispatch("b"); got != "" {
 		t.Fatalf("b took turn %q under the limit", got)
 	}
-	if got := r.retryAt("b"); got != until {
-		t.Fatalf("b retries at %d, want %d", got, until)
+	if got := r.retryAt("b"); got != 0 {
+		t.Fatalf("the gate wrote b's retry time: %d", got)
 	}
-	if n := r.count("SELECT count(*) FROM deliveries WHERE to_id='b' AND state='pending'"); n != 1 {
-		t.Fatalf("b's input did not stay pending: %d", n)
+	if w1, w0 := r.wakes("b"); w1 != 1 || w0 != 0 {
+		t.Fatalf("b's input changed: wake1 %d wake0 %d", w1, w0)
 	}
 	notices := r.notices()
 	if len(notices) != 1 || !strings.Contains(notices[0], "Antigravity quota reached; neon sessions resume at 04:46 UTC") {
 		t.Fatalf("notices %q", notices)
 	}
-	// Another input, an owner's among them, is held the same way and adds no notice and no Google call.
-	r.post("b")
+	r.input("b", owner, true)
 	if got := r.dispatch("b"); got != "" {
 		t.Fatalf("b took turn %q for a second input", got)
 	}
 	if got := r.notices(); len(got) != 1 {
 		t.Fatalf("notices repeated: %q", got)
 	}
-	// Before the reset nothing wakes; at it both do and both start.
 	r.now = r.now.Add(time.Hour - time.Second)
-	if err := r.s.WakeModelRetries(r.ctx, r.now); err != nil {
-		t.Fatal(err)
-	}
-	if n := r.count("SELECT count(*) FROM deliveries WHERE to_id IN ('a','b') AND state='pending' AND wake=1"); n != 0 {
-		t.Fatalf("woken before the reset: %d", n)
+	if kicked := r.sweep(); len(kicked) != 0 || r.limit() == 0 {
+		t.Fatalf("released before the reset: %v", kicked)
 	}
 	r.now = r.now.Add(time.Second)
-	if err := r.s.WakeModelRetries(r.ctx, r.now); err != nil {
-		t.Fatal(err)
+	kicked := r.sweep()
+	if r.limit() != 0 || !slices.Contains(kicked, "a") || !slices.Contains(kicked, "b") || slices.Contains(kicked, "pig") {
+		t.Fatalf("release: row %d, kicked %v", r.limit(), kicked)
 	}
-	for _, session := range []contract.SessionID{"a", "b"} {
-		if got := r.dispatch(session); got == "" {
-			t.Fatalf("%s did not start at the reset", session)
-		}
+	turn := r.dispatch("b")
+	if turn == "" {
+		t.Fatal("b did not start at the release")
+	}
+	var taken contract.DeliverySeq
+	if err := r.s.Read().QueryRowContext(r.ctx, "SELECT MIN(seq) FROM deliveries WHERE to_id='b' AND turn=?", turn).Scan(&taken); err != nil || taken != seq {
+		t.Fatalf("the turn took delivery %d, want the first input %d: %v", taken, seq, err)
+	}
+	if again := r.sweep(); len(again) != 0 {
+		t.Fatalf("the release kicked twice: %v", again)
 	}
 }
 
-// A held session is retrying, not failed, to the check-in that tells a parent of failures.
-func TestAgyLimitHeldSessionIsRetryingNotFailed(t *testing.T) {
+// An owner's post keeps its wake through a Stop (which clears the retry time), so at the release, with no other event, the same post starts.
+func TestAgyLimitOwnerPostThenStopStartsAtTheRelease(t *testing.T) {
 	r := newLimitRig(t)
-	r.post("a")
-	r.fail("a", r.dispatch("a"), 3600, true)
+	r.limited(3600)
+	seq := r.input("b", owner, true)
+	if r.dispatch("b") != "" {
+		t.Fatal("b started under the limit")
+	}
+	if _, _, err := r.s.RequestTurnStop(r.ctx, "b", r.now); err != nil {
+		t.Fatal(err)
+	}
+	if w1, _ := r.wakes("b"); w1 != 1 {
+		t.Fatalf("the stop cleared the owner's wake: %d", w1)
+	}
+	r.now = r.now.Add(time.Hour)
+	if kicked := r.sweep(); !slices.Contains(kicked, "b") {
+		t.Fatalf("b was not kicked: %v", kicked)
+	}
+	turn := r.dispatch("b")
+	if turn == "" {
+		t.Fatal("the owner's post did not start at the release")
+	}
+	var taken contract.DeliverySeq
+	if err := r.s.Read().QueryRowContext(r.ctx, "SELECT seq FROM deliveries WHERE to_id='b' AND turn=?", turn).Scan(&taken); err != nil || taken != seq {
+		t.Fatalf("the turn took delivery %d, want the owner's post %d: %v", taken, seq, err)
+	}
+}
+
+// What a Stop cancelled stays cancelled across the release, and an input that never woke the session still does not.
+func TestAgyLimitReleaseDoesNotRevive(t *testing.T) {
+	r := newLimitRig(t)
+	r.limited(3600)
+	r.input("b", engine, true)
+	if r.dispatch("b") != "" {
+		t.Fatal("b started under the limit")
+	}
+	if _, _, err := r.s.RequestTurnStop(r.ctx, "b", r.now); err != nil {
+		t.Fatal(err)
+	}
+	r.input("b", engine, false)
+	r.now = r.now.Add(time.Hour)
+	r.sweep()
+	if w1, w0 := r.wakes("b"); w1 != 0 || w0 != 2 {
+		t.Fatalf("after the release: wake1 %d wake0 %d", w1, w0)
+	}
+	if turn := r.dispatch("b"); turn != "" {
+		t.Fatalf("b started on inputs that never woke it: %q", turn)
+	}
+}
+
+// An idle agy session takes no compaction while the limit holds, and does again once it is released; a pig session is never affected.
+func TestAgyLimitStopsIdleCompactionUntilTheRelease(t *testing.T) {
+	r := newLimitRig(t)
+	for _, session := range []contract.SessionID{"b", "pig"} {
+		r.post(session)
+		turn := r.dispatch(session)
+		principal := contract.Principal{Kind: contract.PrincipalSession, Session: session}
+		ended := contract.Event{ID: contract.EventID("done-" + string(session)), Room: "r", Time: r.now, From: principal, Body: contract.TurnEnded{Session: session, Turn: turn, Outcome: contract.TurnCompleted}}
+		if err := r.s.EndTurn(r.ctx, session, contract.TurnOutputRequest{Turn: turn, Outcome: contract.TurnCompleted}, ended); err != nil {
+			t.Fatal(err)
+		}
+	}
+	r.limited(3600)
+	if _, due, err := r.s.CompactionDue(r.ctx, "b", true, r.now); err != nil || due {
+		t.Fatalf("b compacts under the limit: %v %v", due, err)
+	}
+	if _, due, err := r.s.CompactionDue(r.ctx, "pig", false, r.now); err != nil || !due {
+		t.Fatalf("a pig session lost its compaction: %v %v", due, err)
+	}
+	r.now = r.now.Add(time.Hour)
+	r.sweep()
+	if _, due, err := r.s.CompactionDue(r.ctx, "b", true, r.now); err != nil || !due {
+		t.Fatalf("b does not compact after the release: %v %v", due, err)
+	}
+}
+
+// A held session is not failed to the check-in: its inputs wait, which reads as pending work.
+func TestAgyLimitHeldSessionIsPendingNotFailed(t *testing.T) {
+	r := newLimitRig(t)
+	r.limited(3600)
 	r.post("b")
 	r.dispatch("b")
 	err := r.s.Write(r.ctx, func(tx *sql.Tx) error {
 		sessions, _, err := r.s.readCheckinRoom(r.ctx, tx, "r")
 		for _, s := range sessions {
-			if s.ID == "b" && (!s.Retrying || s.Failure != "") {
-				r.t.Fatalf("b: retrying %v, failure %q", s.Retrying, s.Failure)
+			if s.ID == "b" && (!s.Pending || s.Failure != "") {
+				r.t.Fatalf("b: pending %v, failure %q", s.Pending, s.Failure)
 			}
 		}
 		return err
@@ -198,8 +314,7 @@ func TestAgyLimitHeldSessionIsRetryingNotFailed(t *testing.T) {
 // With no stated reset there is no row, as before, and the next session starts.
 func TestAgyLimitWithNoStatedResetWritesNothing(t *testing.T) {
 	r := newLimitRig(t)
-	r.post("a")
-	r.fail("a", r.dispatch("a"), 0, true)
+	r.limited(0)
 	if r.limit() != 0 || len(r.notices()) != 0 {
 		t.Fatalf("a row or a notice without a reset: %d %q", r.limit(), r.notices())
 	}
@@ -235,11 +350,10 @@ func TestAgyLimitIsNotWrittenForAnotherHarness(t *testing.T) {
 	}
 }
 
-// A row at its time counts for nothing, and a pig session is never held by one.
+// A row at its time holds nothing even before the sweep has released it, and a pig session is never held.
 func TestAgyLimitPastItsTimeAndOtherHarnessesHoldNothing(t *testing.T) {
 	r := newLimitRig(t)
-	r.post("a")
-	r.fail("a", r.dispatch("a"), 60, true)
+	r.limited(60)
 	r.post("pig")
 	if r.dispatch("pig") == "" {
 		t.Fatal("a pig session was held")
@@ -251,11 +365,10 @@ func TestAgyLimitPastItsTimeAndOtherHarnessesHoldNothing(t *testing.T) {
 	}
 }
 
-// The limit is in the store: an engine restart keeps it.
-func TestAgyLimitSurvivesARestart(t *testing.T) {
+// The limit is in the store: an engine restart keeps it, and the sweep after the restart releases it.
+func TestAgyLimitSurvivesARestartAndIsReleasedAfterIt(t *testing.T) {
 	r := newLimitRig(t)
-	r.post("a")
-	r.fail("a", r.dispatch("a"), 3600, true)
+	r.limited(3600)
 	if err := r.s.Close(); err != nil {
 		t.Fatal(err)
 	}
@@ -264,9 +377,17 @@ func TestAgyLimitSurvivesARestart(t *testing.T) {
 		t.Fatal(err)
 	}
 	r.s = s
+	s.SetWake(func(ids []contract.SessionID, _ []contract.Event) { r.kicked = append(r.kicked, ids...) })
 	t.Cleanup(func() { s.Close() })
 	r.post("b")
 	if got := r.dispatch("b"); got != "" {
 		t.Fatalf("b took turn %q after a restart", got)
+	}
+	r.now = r.now.Add(time.Hour)
+	if kicked := r.sweep(); !slices.Contains(kicked, "b") || r.limit() != 0 {
+		t.Fatalf("the sweep after the restart: row %d, kicked %v", r.limit(), kicked)
+	}
+	if r.dispatch("b") == "" {
+		t.Fatal("b did not start after the release")
 	}
 }

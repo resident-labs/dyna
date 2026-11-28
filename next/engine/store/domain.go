@@ -1219,7 +1219,7 @@ func (s *Store) dispatch(ctx context.Context, session contract.SessionID, turn c
 				return nil
 			}
 			if harness == string(contract.HarnessAgy) {
-				held, err := s.holdForAgyLimit(ctx, tx, session, started.Time)
+				held, err := s.agyLimited(ctx, tx, started.Time)
 				if err != nil {
 					return err
 				}

@@ -26,7 +26,7 @@ func (s *Service) CompactBeforeStop(ctx context.Context, id contract.SessionID) 
 	if s.Stale(id) {
 		return false // This stop is for an update and a wake may be waiting on it, and an older box agent would not answer.
 	}
-	turn, due, err := s.store.CompactionDue(ctx, id, s.onAgy(ctx, id))
+	turn, due, err := s.store.CompactionDue(ctx, id, s.onAgy(ctx, id), s.now())
 	if err != nil {
 		log.Printf("session %s: compaction before stop: %v", id, err)
 		return false

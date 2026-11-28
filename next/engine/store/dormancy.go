@@ -232,13 +232,20 @@ func (s *Store) WakeTerminal(ctx context.Context, id contract.BoxID) error {
 // CompactionDue says whether a quiet stop should try a compaction first, and for which turn. A quiet period runs from the
 // session's last turn, and session.compacted names the turn it tried after, so a failed try is not repeated. A paused room
 // spends nothing, so it stops without one. With afterFailureQuiet, a session whose last turn failed stops without one either: a compaction
-// is a prompt to the model, and a failure such as a usage limit, a sign-in or a restriction would answer it with the same failure.
-func (s *Store) CompactionDue(ctx context.Context, id contract.SessionID, afterFailureQuiet bool) (contract.TurnID, bool, error) {
+// is a prompt to the model, and a failure such as a usage limit, a sign-in or a restriction would answer it with the same failure. For the
+// same reason an agy session takes none while its account's usage limit stands, whatever its last turn did.
+func (s *Store) CompactionDue(ctx context.Context, id contract.SessionID, afterFailureQuiet bool, now time.Time) (contract.TurnID, bool, error) {
 	var turn sql.NullString
 	var due bool
 	err := s.Read().QueryRowContext(ctx, `WITH last(id) AS (SELECT id FROM turns WHERE session=?1 ORDER BY started_at DESC, rowid DESC LIMIT 1)
 		SELECT (SELECT id FROM last),r.paused_at IS NULL AND NOT (?2 AND (SELECT outcome FROM turns WHERE id=(SELECT id FROM last))='failed') AND (SELECT json_extract(CAST(e.body AS TEXT),'$.turn') FROM events e WHERE e.room=s.room AND e.from_kind='session' AND e.from_id=s.id AND e.type='session.compacted' ORDER BY e.seq DESC LIMIT 1) IS NOT (SELECT id FROM last)
 		FROM sessions s JOIN rooms r ON r.id=s.room WHERE s.id=?1`, id, afterFailureQuiet).Scan(&turn, &due)
+	if err == nil && due && afterFailureQuiet {
+		var limited bool
+		if limited, err = s.agyLimited(ctx, s.Read(), now); limited {
+			due = false
+		}
+	}
 	return contract.TurnID(turn.String), due && turn.Valid, err
 }
 

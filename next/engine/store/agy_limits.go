@@ -41,21 +41,58 @@ func (s *Store) limitAgy(ctx context.Context, tx *sql.Tx, event contract.Event, 
 	return err
 }
 
-// holdForAgyLimit keeps an agy session from starting a turn while its account's limit stands: asking Google again before the reset only
-// fails again. Its inputs stay pending, without their wake, and its retry time is the reset, so the sweep that wakes model retries wakes it
-// then, as it does a session whose own turn failed; a later retry the session already has is kept. A row at or past its time counts for nothing.
-func (s *Store) holdForAgyLimit(ctx context.Context, tx *sql.Tx, session contract.SessionID, now time.Time) (bool, error) {
-	var until int64
-	err := tx.QueryRowContext(ctx, "SELECT until FROM agy_limits WHERE account=? AND until>?", agyAccount, now.UnixMilli()).Scan(&until)
-	if err == sql.ErrNoRows {
-		return false, nil
+// agyLimited says the account's usage limit stands at now: asking Google again before the reset only fails again. It is the one check
+// that decides whether an agy turn or compaction may go out, and the only state of the gate is its row; a row at or past its time counts
+// for nothing.
+func (s *Store) agyLimited(ctx context.Context, q sqlQuery, now time.Time) (bool, error) {
+	var held bool
+	err := q.QueryRowContext(ctx, "SELECT EXISTS (SELECT 1 FROM agy_limits WHERE account=? AND until>?)", agyAccount, now.UnixMilli()).Scan(&held)
+	return held, err
+}
+
+// releaseAgyLimits ends the limits that have reset: it deletes their rows and, in the same transaction, queues a dispatch for every open
+// agy session through the path a new input takes. A session with a pending waking input starts; the rest stay idle. Nothing else of a
+// held session was touched while it was held, so a Stop and an owner's post mean what they always do. A restart keeps the rows, and this
+// is what releases them.
+func (s *Store) releaseAgyLimits(ctx context.Context, now time.Time) error {
+	var due bool
+	if err := s.Read().QueryRowContext(ctx, "SELECT EXISTS (SELECT 1 FROM agy_limits WHERE until<=?)", now.UnixMilli()).Scan(&due); err != nil || !due {
+		return err
 	}
-	if err != nil {
-		return false, err
-	}
-	if _, err := tx.ExecContext(ctx, "UPDATE sessions SET model_retry_at=? WHERE id=? AND model_retry_at<?1", until, session); err != nil {
-		return false, err
-	}
-	_, err = tx.ExecContext(ctx, "UPDATE deliveries SET wake=0 WHERE to_kind=? AND to_id=? AND state='pending' AND wake=1", contract.PrincipalSession, session)
-	return err == nil, err
+	return s.Write(ctx, func(tx *sql.Tx) error {
+		result, err := tx.ExecContext(ctx, "DELETE FROM agy_limits WHERE until<=?", now.UnixMilli())
+		if err != nil {
+			return err
+		}
+		if n, err := result.RowsAffected(); err != nil || n == 0 {
+			return err
+		}
+		rows, err := tx.QueryContext(ctx, "SELECT s.id FROM sessions s JOIN boxes b ON b.session=s.id WHERE s.state='open' AND s.closed_at IS NULL AND b.harness=?", contract.HarnessAgy)
+		if err != nil {
+			return err
+		}
+		var ids []contract.SessionID
+		for rows.Next() {
+			var id contract.SessionID
+			if err := rows.Scan(&id); err != nil {
+				rows.Close()
+				return err
+			}
+			ids = append(ids, id)
+		}
+		if err := rows.Close(); err != nil {
+			return err
+		}
+		if err := rows.Err(); err != nil {
+			return err
+		}
+		for _, id := range ids {
+			// A box stopped for being quiet starts again for an input that waits, as it does for a retry that falls due.
+			if _, err := tx.ExecContext(ctx, "UPDATE boxes SET want='run' WHERE session=? AND want='stop' AND EXISTS (SELECT 1 FROM deliveries WHERE to_kind='session' AND to_id=? AND state='pending' AND wake=1)", id, id); err != nil {
+				return err
+			}
+			s.wakePending = append(s.wakePending, id)
+		}
+		return nil
+	})
 }
