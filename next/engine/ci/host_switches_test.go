@@ -22,6 +22,28 @@ func TestThePoolSkipsACIOffHost(t *testing.T) {
 	}
 }
 
+func TestExecOnlyHostNeverNeedsCISurveyOrCleanup(t *testing.T) {
+	f := newFixture(1)
+	execOnly := f.addHost(box.Host{Name: "exec-only", State: box.HostReady, ExecOnly: true, NoAgents: true})
+	normal := f.drivers["pve"]
+	f.scale(1)
+	if execOnly.listCalls != 0 || len(normal.runners) != 1 {
+		t.Errorf("scale surveyed exec-only %d times; normal host runners = %v", execOnly.listCalls, normal.runners)
+	}
+
+	f.store.repos = nil
+	f.tick(t)
+	if execOnly.listCalls != 0 || !normal.reclaimed || len(normal.runners) != 0 {
+		t.Errorf("cleanup surveyed exec-only %d times; normal host reclaimed = %v, runners = %v", execOnly.listCalls, normal.reclaimed, normal.runners)
+	}
+	f.tick(t) // reclaim the build folder the removed runner held
+	calls := normal.listCalls
+	f.tick(t)
+	if execOnly.listCalls != 0 || normal.listCalls != calls {
+		t.Errorf("clean pool surveyed again: exec-only = %d, normal = %d -> %d", execOnly.listCalls, calls, normal.listCalls)
+	}
+}
+
 // Turning ci off keeps a working runner: it finishes its job, the pool counts it, and nothing new starts beside it.
 func TestCIOffLetsRunningJobsFinish(t *testing.T) {
 	f := newFixture(3)

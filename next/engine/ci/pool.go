@@ -203,7 +203,9 @@ func (p *Pool) Tick(ctx context.Context, group *sync.WaitGroup) error {
 		if err != nil {
 			return errors.Join(append(failures, err)...)
 		}
-		if !slices.ContainsFunc(hosts, func(host box.Host) bool { return host.State == box.HostReady && !p.clean[host.Name] }) {
+		if !slices.ContainsFunc(hosts, func(host box.Host) bool {
+			return host.State == box.HostReady && !host.ExecOnly && !p.clean[host.Name]
+		}) {
 			return errors.Join(failures...)
 		}
 	}
@@ -471,7 +473,7 @@ func (p *Pool) survey(ctx context.Context, skipDegraded bool) (survey, error) {
 		if p.Health != nil {
 			host.Health = p.Health(host.Name)
 		}
-		if host.State != box.HostReady {
+		if host.State != box.HostReady || host.ExecOnly {
 			continue
 		}
 		if skipDegraded && host.Health == contract.HostDegraded && !hasPlaced[host.Name] {
