@@ -346,12 +346,6 @@ func (l Layout) HostAgyAccount() string { return filepath.Join(l.HostData, "agy"
 // HostAgyAccounts is the folder of agy account folders on the agy host: main, the one agents use, and any sign-in the owner left beside it.
 func (l Layout) HostAgyAccounts() string { return filepath.Dir(l.HostAgyAccount()) }
 
-// HostAgyMainToken is the sign-in inside main, the one file a switch installs over. Dyna never copies it out: the one read is the comparison that
-// decides whether a host is skipped, and the check of a first import marked active.
-func (l Layout) HostAgyMainToken() string {
-	return filepath.Join(l.HostAgyAccount(), "antigravity-acp", "antigravity-oauth-token")
-}
-
 // HostAgyBinary is the installed agy program on the agy host, which a box of an agy session mounts read-only.
 func (l Layout) HostAgyBinary() string { return filepath.Join(l.HostData, "agy", "antigravity") }
 

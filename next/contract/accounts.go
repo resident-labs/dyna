@@ -114,9 +114,10 @@ type AgyUseResponse struct {
 	Hosts []AgyUseHost `json:"hosts"`
 }
 
-// AgyImportRequest takes an existing sign-in as an account the owner labels: File is a plain file name in the engine host's agy accounts
-// folder, which boxes do not mount, copied whole and never read. Nothing is copied out of main. With Active the account is also recorded as
-// the one signed in now, allowed only while no account is active and only if main's token is the same bytes as the file. The owner only.
+// AgyImportRequest takes an existing sign-in as an account the owner labels: File is a plain name in the engine host's agy accounts folder, which
+// boxes do not mount, of a token file or of a sign-in folder whose antigravity-acp/antigravity-oauth-token is taken, with no link on the way;
+// it is copied whole and never read. Dyna never reads main. With Active the account is also recorded as the one signed in now, on the owner's
+// word: allowed only while no account is active. The owner only.
 type AgyImportRequest struct {
 	Label  string `json:"label"`
 	File   string `json:"file"`

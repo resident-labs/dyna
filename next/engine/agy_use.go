@@ -253,11 +253,11 @@ func (s *AccountActions) swapHost(ctx context.Context, host contract.HostName, s
 }
 
 // AgyImport is `dyna agy import LABEL --file NAME`: it takes a sign-in the owner made outside Dyna as an account the owner labels. NAME is a
-// plain file name in the engine host's agy accounts folder, which boxes do not mount; the file is copied whole, never parsed or logged, and
-// the label is the owner's. Dyna never copies a token out of main, the folder boxes write. With Active, the account is also recorded as the
-// one signed in now: allowed only while no account is active, and only if main's token is the same bytes as the imported copy (main is read
-// for that comparison alone; nothing read from it is stored or sent). The row goes in first and the file after, as for Add, under the lock
-// Remove takes.
+// plain name in the engine host's agy accounts folder, which boxes do not mount: a token file, or a sign-in folder (such as accounts/second)
+// whose antigravity-acp/antigravity-oauth-token is taken. No component of the path is a link. The token is copied whole, never parsed or
+// logged, and the label is the owner's. Dyna never reads main, the folder boxes write. With Active the account is also recorded as the one
+// signed in now, on the owner's word: allowed only while no account is active. The row goes in first and the file after, as for Add, under
+// the lock Remove takes.
 func (s *AccountActions) AgyImport(ctx context.Context, caller contract.Principal, req contract.AgyImportRequest) (contract.AgyImportResponse, *contract.Error) {
 	if caller.Kind != contract.PrincipalOwner {
 		return contract.AgyImportResponse{}, forbidden()
@@ -285,14 +285,15 @@ func (s *AccountActions) AgyImport(ctx context.Context, caller contract.Principa
 		return contract.AgyImportResponse{}, &contract.Error{Code: contract.ErrConflict, Message: "an account is active already; --active is only for the first import"}
 	}
 	layout := s.service.layout
-	tmp, err := agylogin.CopyToken(filepath.Join(layout.HostAgyAccounts(), req.File), layout.HostAgyTokens())
+	source, err := agyImportSource(layout.HostAgyAccounts(), req.File)
+	if err != nil {
+		return contract.AgyImportResponse{}, invalid(err.Error())
+	}
+	tmp, err := agylogin.CopyToken(source, layout.HostAgyTokens())
 	if err != nil {
 		return contract.AgyImportResponse{}, invalid(err.Error())
 	}
 	defer os.Remove(tmp)
-	if req.Active && !s.mainTokenIs(tmp) {
-		return contract.AgyImportResponse{}, &contract.Error{Code: contract.ErrConflict, Message: "the sign-in now in main is not that file's; nothing was imported (import it without --active, then switch to it)"}
-	}
 	id, err := store.NewAgyAccountID()
 	if err != nil {
 		return contract.AgyImportResponse{}, failure(err)
@@ -316,40 +317,23 @@ func (s *AccountActions) AgyImport(ctx context.Context, caller contract.Principa
 	return contract.AgyImportResponse{Account: id}, nil
 }
 
-// mainTokenIs says whether main's token file has the same bytes as the file at path. The one place Dyna reads main: the answer is all that
-// is kept. A path that does not resolve to the expected place under the host data folder (a link) says no, and a file of another size is not
-// read.
-func (s *AccountActions) mainTokenIs(path string) bool {
-	layout := s.service.layout
-	root, err := filepath.EvalSymlinks(layout.HostData)
+// agyImportSource is the token file an import of name reads: the file itself, or inside a folder of that name the account's token file.
+// The name, and the two folders inside it, must not be links; the file itself is opened without following one by CopyToken.
+func agyImportSource(accounts, name string) (string, error) {
+	path := filepath.Join(accounts, name)
+	info, err := os.Lstat(path)
 	if err != nil {
-		return false
+		return "", errors.New("there is no token file to copy")
 	}
-	rel, err := filepath.Rel(layout.HostData, layout.HostAgyMainToken())
-	if err != nil {
-		return false
+	if info.Mode().IsRegular() {
+		return path, nil
 	}
-	main, err := filepath.EvalSymlinks(layout.HostAgyMainToken())
-	if err != nil || main != filepath.Join(root, rel) {
-		return false
+	if !info.IsDir() {
+		return "", errors.New("there is no token file to copy")
 	}
-	return sameFile(path, main)
-}
-
-// sameFile compares two files' bytes without keeping or showing any; files of different sizes are not read.
-func sameFile(a, b string) bool {
-	ia, err := os.Stat(a)
-	if err != nil || !ia.Mode().IsRegular() {
-		return false
+	path = filepath.Join(path, "antigravity-acp")
+	if info, err := os.Lstat(path); err != nil || !info.IsDir() {
+		return "", errors.New("there is no token file to copy")
 	}
-	ib, err := os.Stat(b)
-	if err != nil || !ib.Mode().IsRegular() || ia.Size() != ib.Size() {
-		return false
-	}
-	x, err := os.ReadFile(a)
-	if err != nil {
-		return false
-	}
-	y, err := os.ReadFile(b)
-	return err == nil && string(x) == string(y)
+	return filepath.Join(path, "antigravity-oauth-token"), nil
 }

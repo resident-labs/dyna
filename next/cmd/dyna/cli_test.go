@@ -1082,7 +1082,7 @@ func TestAgyUseAndImportCLI(t *testing.T) {
 	if got := runCLI(t, f, "agy", "import", "First", "--file", "first.oauth-token.bak"); strings.TrimSpace(got) != "agy_x" || f.agyImport == nil || f.agyImport.Label != "First" || f.agyImport.File != "first.oauth-token.bak" {
 		t.Fatalf("import: %q %+v", got, f.agyImport)
 	}
-	// --active is sent as given; the engine verifies it by comparison.
+	// --active is sent as given: it is the owner's word, and the engine does not check it.
 	runCLI(t, f, "agy", "import", "Second", "--file", "second", "--active")
 	if f.agyImport.File != "second" || !f.agyImport.Active {
 		t.Fatalf("import --active: %+v", f.agyImport)

@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/resident-labs/dyna/box"
 	"github.com/resident-labs/dyna/contract"
 	"github.com/resident-labs/dyna/engine/store"
 )
@@ -43,7 +44,7 @@ func (f *fakeAgyHosts) AgyHostAnswers(_ context.Context, h contract.HostName) er
 }
 func (f *fakeAgyHosts) read(h contract.HostName) string {
 	if h == AgySource {
-		b, _ := os.ReadFile(f.rig.layout.HostAgyMainToken())
+		b, _ := os.ReadFile(mainToken(f.rig.layout))
 		return string(b)
 	}
 	return f.tokens[h]
@@ -67,7 +68,7 @@ func (f *fakeAgyHosts) AgyInstall(ctx context.Context, h contract.HostName, stor
 		return 0, false, err
 	}
 	if h == AgySource {
-		os.WriteFile(f.rig.layout.HostAgyMainToken(), b, 0o600)
+		os.WriteFile(mainToken(f.rig.layout), b, 0o600)
 	} else {
 		f.tokens[h] = string(b)
 	}
@@ -97,7 +98,7 @@ func newUseRig(t *testing.T) *useRig {
 		return id
 	}
 	r.old, r.new = add("Old", tokOld), add("New", tokNew)
-	writeFile(t, r.layout.HostAgyMainToken(), tokOld)
+	writeFile(t, mainToken(r.layout), tokOld)
 	if err := r.st.ActivateAgyAccount(r.ctx, r.old); err != nil {
 		t.Fatal(err)
 	}
@@ -177,7 +178,7 @@ func TestUseRefusesBeforeChangingAnything(t *testing.T) {
 	if _, problem := r.use("New"); problem == nil || problem.Code != contract.ErrInvalid {
 		t.Fatalf("no stored sign-in: %v", problem)
 	}
-	if u := r.state(); u.Held || u.Active != r.old || len(r.hosts.installs) != 0 || file(r.layout.HostAgyMainToken()) != tokOld || r.hosts.tokens["node"] != tokOld {
+	if u := r.state(); u.Held || u.Active != r.old || len(r.hosts.installs) != 0 || file(mainToken(r.layout)) != tokOld || r.hosts.tokens["node"] != tokOld {
 		t.Fatalf("something changed: %+v installs %v", u, r.hosts.installs)
 	}
 }
@@ -194,7 +195,7 @@ func TestUseRefusesWhenNoAccountIsActive(t *testing.T) {
 // outgoing account's stored copy stays as it was signed in.
 func TestUseInstallsEveryHostNeverCopiesBackAndActivatesInOneStep(t *testing.T) {
 	r := newUseRig(t)
-	writeFile(t, r.layout.HostAgyMainToken(), tokOld+"-REFRESHED")
+	writeFile(t, mainToken(r.layout), tokOld+"-REFRESHED")
 	out, problem := r.use("New")
 	if problem != nil {
 		t.Fatal(problem)
@@ -202,8 +203,8 @@ func TestUseInstallsEveryHostNeverCopiesBackAndActivatesInOneStep(t *testing.T) 
 	if len(out.Hosts) != 2 || out.Hosts[0].Host != AgySource || out.Hosts[1].Host != "node" || !strings.HasPrefix(out.Hosts[0].Result, "ok") || !strings.Contains(out.Hosts[0].Result, "ended 2") {
 		t.Fatalf("hosts: %+v", out.Hosts)
 	}
-	if file(r.layout.HostAgyMainToken()) != tokNew || r.hosts.tokens["node"] != tokNew {
-		t.Fatalf("tokens: main %q node %q", file(r.layout.HostAgyMainToken()), r.hosts.tokens["node"])
+	if file(mainToken(r.layout)) != tokNew || r.hosts.tokens["node"] != tokNew {
+		t.Fatalf("tokens: main %q node %q", file(mainToken(r.layout)), r.hosts.tokens["node"])
 	}
 	if got := file(r.layout.HostAgyToken(string(r.old))); got != tokOld {
 		t.Fatalf("the outgoing account's copy changed: %q", got)
@@ -218,8 +219,8 @@ func TestUseInstallsEveryHostNeverCopiesBackAndActivatesInOneStep(t *testing.T) 
 	if _, problem := r.use("Old"); problem != nil {
 		t.Fatal(problem)
 	}
-	if file(r.layout.HostAgyMainToken()) != tokOld || r.state().Active != r.old {
-		t.Fatalf("back: %q %+v", file(r.layout.HostAgyMainToken()), r.state())
+	if file(mainToken(r.layout)) != tokOld || r.state().Active != r.old {
+		t.Fatalf("back: %q %+v", file(mainToken(r.layout)), r.state())
 	}
 }
 
@@ -265,7 +266,7 @@ func TestAHeldSwitchAcceptsOnlyItsTargetAndARerunFinishes(t *testing.T) {
 	if _, err := r.st.BeginAgySwitch(r.ctx, r.new); err != nil {
 		t.Fatal(err)
 	}
-	writeFile(t, r.layout.HostAgyMainToken(), tokNew)
+	writeFile(t, mainToken(r.layout), tokNew)
 	_, problem := r.use("Old")
 	if problem == nil || problem.Code != contract.ErrConflict || !strings.Contains(problem.Message, "finish the switch to New first") {
 		t.Fatalf("the old account while held: %v", problem)
@@ -280,8 +281,8 @@ func TestAHeldSwitchAcceptsOnlyItsTargetAndARerunFinishes(t *testing.T) {
 	if !strings.Contains(out.Hosts[0].Result, "already") || len(r.hosts.installs) != 1 || r.hosts.installs[0] != "node" {
 		t.Fatalf("the rerun: %+v installs %v", out.Hosts, r.hosts.installs)
 	}
-	if file(r.layout.HostAgyToken(string(r.old))) != tokOld || file(r.layout.HostAgyMainToken()) != tokNew || r.hosts.tokens["node"] != tokNew {
-		t.Fatalf("copies: old %q main %q node %q", file(r.layout.HostAgyToken(string(r.old))), file(r.layout.HostAgyMainToken()), r.hosts.tokens["node"])
+	if file(r.layout.HostAgyToken(string(r.old))) != tokOld || file(mainToken(r.layout)) != tokNew || r.hosts.tokens["node"] != tokNew {
+		t.Fatalf("copies: old %q main %q node %q", file(r.layout.HostAgyToken(string(r.old))), file(mainToken(r.layout)), r.hosts.tokens["node"])
 	}
 	if u := r.state(); u.Held || u.Active != r.new || u.Target != "" {
 		t.Fatalf("after the rerun: %+v", u)
@@ -430,7 +431,7 @@ func TestUseWithTurnsStillRunningReleasesAndFailsWithTheCount(t *testing.T) {
 	if problem == nil || problem.Code != contract.ErrConflict || !strings.Contains(problem.Message, "2 agy turns") {
 		t.Fatalf("running turns: %v", problem)
 	}
-	if u := r.state(); u.Held || u.Active != r.old || u.Target != "" || len(r.hosts.installs) != 0 || file(r.layout.HostAgyMainToken()) != tokOld {
+	if u := r.state(); u.Held || u.Active != r.old || u.Target != "" || len(r.hosts.installs) != 0 || file(mainToken(r.layout)) != tokOld {
 		t.Fatalf("something changed: %+v", u)
 	}
 	// They end during the wait: the switch goes on.
@@ -484,7 +485,7 @@ func TestHeldSwitchRefusesRemovalOfItsAccountsAndShowsInTheList(t *testing.T) {
 func TestImportTakesAFileNeverMainAndEveryUnsafeNameIsRefused(t *testing.T) {
 	r := newAgyRig(t)
 	ctx, layout := r.ctx, r.layout
-	writeFile(t, layout.HostAgyMainToken(), tokNew)
+	writeFile(t, mainToken(layout), tokNew)
 	first := filepath.Join(layout.HostAgyAccounts(), "first.oauth-token.bak")
 	writeFile(t, first, tokOld)
 	writeFile(t, filepath.Join(layout.HostAgyAccounts(), "secret"), "OUTSIDE")
@@ -528,29 +529,15 @@ func TestImportTakesAFileNeverMainAndEveryUnsafeNameIsRefused(t *testing.T) {
 	}
 }
 
-// --active records the imported account as the one signed in now, only if main's token is the same bytes as the file, and only while none
-// is active. Main is read for the comparison alone: a difference refuses and publishes nothing, and a link in main's path is a difference.
-func TestImportActiveVerifiesMainByComparisonAndOnlyForTheFirst(t *testing.T) {
+// --active records the imported account as the one signed in now, on the owner's word, without opening main (here main does not exist, so
+// any read of it would fail the import), and only while no account is active.
+func TestImportActiveRecordsTheOwnersWordWithoutReadingMainAndOnlyForTheFirst(t *testing.T) {
 	r := newAgyRig(t)
 	ctx, layout := r.ctx, r.layout
 	writeFile(t, filepath.Join(layout.HostAgyAccounts(), "second"), tokNew)
-	writeFile(t, layout.HostAgyMainToken(), tokOld) // main holds something else
-	if _, problem := r.actions.AgyImport(ctx, owner, contract.AgyImportRequest{Label: "Second", File: "second", Active: true}); problem == nil || problem.Code != contract.ErrConflict {
-		t.Fatalf("a difference: %v", problem)
+	if _, err := os.Stat(mainToken(layout)); !os.IsNotExist(err) {
+		t.Fatal("main exists in the test")
 	}
-	if accounts, _ := r.st.AgyAccounts(ctx); len(accounts) != 0 {
-		t.Fatalf("a refused --active left %+v", accounts)
-	}
-	// A link where main's token is: a difference, whatever it points at.
-	elsewhere := filepath.Join(t.TempDir(), "same")
-	writeFile(t, elsewhere, tokNew)
-	os.Remove(layout.HostAgyMainToken())
-	os.Symlink(elsewhere, layout.HostAgyMainToken())
-	if _, problem := r.actions.AgyImport(ctx, owner, contract.AgyImportRequest{Label: "Second", File: "second", Active: true}); problem == nil {
-		t.Fatal("a linked main was accepted")
-	}
-	os.Remove(layout.HostAgyMainToken())
-	writeFile(t, layout.HostAgyMainToken(), tokNew)
 	// A limit that stood on "main" before accounts existed follows the active account.
 	sqlExec(t, r.st, "INSERT INTO agy_limits(account,until) VALUES('main',9999999999999)")
 	out, problem := r.actions.AgyImport(ctx, owner, contract.AgyImportRequest{Label: "Second", File: "second", Active: true})
@@ -563,8 +550,8 @@ func TestImportActiveVerifiesMainByComparisonAndOnlyForTheFirst(t *testing.T) {
 	if n := rows(t, r.st, "SELECT count(*) FROM agy_limits WHERE account=?", string(out.Account)); n != 1 {
 		t.Fatalf("limit rows under the account: %d", n)
 	}
-	if file(layout.HostAgyToken(string(out.Account))) != tokNew || file(layout.HostAgyMainToken()) != tokNew {
-		t.Fatal("a token changed")
+	if file(layout.HostAgyToken(string(out.Account))) != tokNew {
+		t.Fatal("the token was not copied whole")
 	}
 	// Only the first import may be active.
 	writeFile(t, filepath.Join(layout.HostAgyAccounts(), "third"), tokOld)
@@ -573,6 +560,59 @@ func TestImportActiveVerifiesMainByComparisonAndOnlyForTheFirst(t *testing.T) {
 	}
 	if accounts, _ := r.st.AgyAccounts(ctx); len(accounts) != 1 {
 		t.Fatalf("a refused --active left %+v", accounts)
+	}
+	// Without --active an import never makes an account active.
+	if _, problem := r.actions.AgyImport(ctx, owner, contract.AgyImportRequest{Label: "Third", File: "third"}); problem != nil {
+		t.Fatal(problem)
+	}
+	if u, _ := r.st.AgyUse(ctx); u.Active != out.Account {
+		t.Fatalf("an import changed the active account: %+v", u)
+	}
+}
+
+// A name may be a sign-in folder such as accounts/second: its antigravity-acp/antigravity-oauth-token is taken, whole. A link at the name, at
+// the inner folder or at the file, a folder with no token, and a token that is a folder are refused with nothing left behind.
+func TestImportTakesASignInFolderAndRefusesLinksAndAFolderWithNoToken(t *testing.T) {
+	r := newAgyRig(t)
+	ctx, layout := r.ctx, r.layout
+	accounts := layout.HostAgyAccounts()
+	rel := filepath.Join("antigravity-acp", "antigravity-oauth-token")
+	writeFile(t, filepath.Join(accounts, "second", rel), tokNew)
+	writeFile(t, filepath.Join(accounts, "second", "antigravity-acp", "conversations", "c"), "NOT-A-TOKEN")
+	out, problem := r.actions.AgyImport(ctx, owner, contract.AgyImportRequest{Label: "Second", File: "second"})
+	if problem != nil || file(layout.HostAgyToken(string(out.Account))) != tokNew {
+		t.Fatalf("folder import: %v", problem)
+	}
+	if info, _ := os.Stat(layout.HostAgyToken(string(out.Account))); info.Mode().Perm() != 0o600 {
+		t.Fatalf("mode %v", info.Mode())
+	}
+	if accounts, _ := r.st.AgyAccounts(ctx); len(accounts) != 1 {
+		t.Fatalf("accounts %+v", accounts)
+	}
+	outside := t.TempDir()
+	writeFile(t, filepath.Join(outside, rel), "OUTSIDE")
+	// The name is a link to a sign-in folder.
+	os.Symlink(outside, filepath.Join(accounts, "linkdir"))
+	// The inner folder is a link.
+	os.MkdirAll(filepath.Join(accounts, "inner"), 0o700)
+	os.Symlink(filepath.Join(outside, "antigravity-acp"), filepath.Join(accounts, "inner", "antigravity-acp"))
+	// The file is a link.
+	writeFile(t, filepath.Join(accounts, "filelink", "x"), "x")
+	os.MkdirAll(filepath.Join(accounts, "filelink", "antigravity-acp"), 0o700)
+	os.Symlink(filepath.Join(outside, rel), filepath.Join(accounts, "filelink", rel))
+	// A folder with no token, and a token that is a folder.
+	os.MkdirAll(filepath.Join(accounts, "empty", "antigravity-acp"), 0o700)
+	os.MkdirAll(filepath.Join(accounts, "dirtoken", rel), 0o700)
+	for _, name := range []string{"linkdir", "inner", "filelink", "empty", "dirtoken", "nodir"} {
+		if _, problem := r.actions.AgyImport(ctx, owner, contract.AgyImportRequest{Label: "X", File: name}); problem == nil {
+			t.Fatalf("%q was imported", name)
+		}
+	}
+	if accounts, _ := r.st.AgyAccounts(ctx); len(accounts) != 1 {
+		t.Fatalf("a refused import left an account: %+v", accounts)
+	}
+	if left, _ := filepath.Glob(filepath.Join(layout.HostAgyTokens(), ".copy-*")); len(left) != 0 {
+		t.Fatalf("half copies left: %v", left)
 	}
 }
 
@@ -593,4 +633,9 @@ func TestNoTokenTextReachesAnEventOrAResponse(t *testing.T) {
 			t.Fatalf("%q reached a response or event", s)
 		}
 	}
+}
+
+// mainToken is the sign-in inside main, which the fake host stands in for.
+func mainToken(l box.Layout) string {
+	return filepath.Join(l.HostAgyAccount(), "antigravity-acp", "antigravity-oauth-token")
 }
