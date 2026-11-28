@@ -17,6 +17,9 @@ const (
 	ProviderDeepSeek    AccountProvider = "deepseek"
 	ProviderMeta        AccountProvider = "meta"
 	ProviderAntigravity AccountProvider = "antigravity"
+	// ProviderAgy is an Antigravity CLI sign-in (`agy`), kept as a token file by the engine host. ProviderAntigravity above is the model
+	// proxy's own provider, a different thing.
+	ProviderAgy AccountProvider = "agy"
 )
 
 type AccountAction string
@@ -90,6 +93,8 @@ const (
 	ConnectFlowCallback ConnectFlow = "callback"
 	ConnectFlowDevice   ConnectFlow = "device"
 	ConnectFlowKey      ConnectFlow = "key"
+	// ConnectFlowCode: the link is opened and the code the page shows (or the page's address) is sent back as the callback's RedirectURL.
+	ConnectFlowCode ConnectFlow = "code"
 )
 
 type ConnectStatus string

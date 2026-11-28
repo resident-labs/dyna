@@ -208,8 +208,9 @@
     if (field && saved !== undefined && labelDraft !== saved) { event.preventDefault(); labelDraft = saved; labelError = ""; }
     else if (attempt) { event.preventDefault(); cancel(); }
   }
-  const ways: Record<ConnectFlow, string> = { callback: "Sign in with your plan", device: "Sign in with a code", key: "API key" };
-  const connected: Record<ConnectFlow, string> = { callback: "signed in with a plan", device: "signed in with a code", key: "API key" };
+  const ways: Record<ConnectFlow, string> = { callback: "Sign in with your plan", device: "Sign in with a code", key: "API key",
+    code: "Adds one more Antigravity sign-in. Dyna keeps it but does not use it until you switch to it." };
+  const connected: Record<ConnectFlow, string> = { callback: "signed in with a plan", device: "signed in with a code", key: "API key", code: "stored, not in use" };
   const plural = (n: number, one: string, many: string) => `${n.toLocaleString("en")} ${n === 1 ? one : many}`;
   const initial = (name: string) => name.slice(0, 1).toUpperCase();
   const clock = (at: string) => new Date(at).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
@@ -234,7 +235,17 @@
 
 <!-- A sign-in that waits: the code to enter, or the two steps of a plan sign-in. -->
 {#snippet waiting(open: AccountsConnectResponse, name: string)}
-  {#if open.flow === "device"}
+  {#if open.flow === "code"}
+    <div class="step"><span class="badge-step" class:checked={opened} aria-hidden="true">{#if opened}<Icon name="check" size={14} />{:else}1{/if}</span><p>Open this link and sign in with a DIFFERENT Google account than your other Antigravity accounts.<br />
+      <a href={open.link} target="_blank" rel="noopener noreferrer" onclick={() => opened = true}>{opened ? "Opened in your browser" : "Open sign-in"} ↗</a>
+      <button class="btn ghost" type="button" onclick={() => { void navigator.clipboard.writeText(open.link); copied = true; }}>{copied ? "Copied" : "Copy link"}</button></p></div>
+    <form class="form" onsubmit={event => { event.preventDefault(); void finish(); }}>
+      <div class="step"><span class="badge-step" aria-hidden="true">2</span><label for="callback-address">Paste the code the page shows (or the page's address).</label></div>
+      <input id="callback-address" class="input" aria-label="Code or address of the page" bind:value={redirect} placeholder="Code, or https://…" autocomplete="off" />
+      <div class="actions"><button class="btn fill" type="submit" disabled={busy || !redirect.trim()}>Finish</button><button type="button" class="btn" onclick={() => { cancel(); void panel(); }}>Cancel</button></div>
+    </form>
+    <p class="small muted">Dyna hands the code to Antigravity's sign-in and never keeps it.{#if open.expiresAt}{" "}Expires in {remaining(open.expiresAt)}.{/if}</p>
+  {:else if open.flow === "device"}
     <p>Open the provider's page and enter this code.</p>
     <div class="code"><strong>{open.code}</strong><button class="btn ghost" type="button" onclick={() => { void navigator.clipboard.writeText(open.code ?? ""); copied = true; }}>{copied ? "Copied" : "Copy"}</button></div>
     <p><a href={open.link} target="_blank" rel="noopener noreferrer">Open sign-in ↗</a></p>
@@ -291,7 +302,7 @@
       <p class="small muted">{ways[flow]}</p>
       <label class="field">Label<input class="input" bind:value={label} placeholder="Work, Personal, …" disabled={busy || !!attempt} /></label>
       {#if flow === "key"}<label class="field">API key<input class="input" type="password" bind:value={secret} autocomplete="off" disabled={busy} /></label>{/if}
-      {#if !attempt}<div class="actions"><button class="btn fill" type="submit" disabled={busy || (flow === "key" && !secret.trim())}>{flow === "callback" ? `Sign in with ${provider.displayName}` : flow === "device" ? "Get a code" : "Save key"}</button>
+      {#if !attempt}<div class="actions"><button class="btn fill" type="submit" disabled={busy || (flow === "key" && !secret.trim())}>{flow === "callback" ? `Sign in with ${provider.displayName}` : flow === "device" ? "Get a code" : flow === "code" ? "Get the sign-in link" : "Save key"}</button>
         {#if provider.alsoKey}<button class="btn" type="button" disabled={busy} onclick={() => { useKey = !useKey; secret = ""; }}>{useKey ? "Sign in instead" : "Use an API key"}</button>{/if}</div>{/if}
     </form>
     {#if attempt}{@render waiting(attempt, provider.displayName)}{/if}
@@ -302,11 +313,12 @@
 
 {#snippet account(each: AccountItem)}{@const a = each.account}{@const name = each.provider?.displayName ?? a.provider}{@const note = usageNote(each)}
   {@const windows = a.state === "sign_in_expired" ? [] : visibleWindows(each.usage?.windows ?? [])}{@const balances = a.state === "sign_in_expired" ? [] : each.usage?.balances ?? []}
-  {@const others = items?.some(o => o.account.provider === a.provider && o.account.id !== a.id)}
+  {@const others = each.provider?.connectFlow !== "code" && items?.some(o => o.account.provider === a.provider && o.account.id !== a.id)}
   <p class="small muted">{name} · {connected[each.provider?.connectFlow ?? "key"]}</p>
   <label class="field">Label<input class="input label" aria-invalid={!!labelError} autocomplete="off" bind:value={labelDraft} readonly={labelSaving}
     onblur={() => void saveLabel(a)} onkeydown={event => { if (event.key === "Enter" && !event.isComposing) { event.preventDefault(); void saveLabel(a); } }} />
     {#if labelError}<span class="problem" role="alert">{labelError}</span>{/if}</label>
+  {#if each.provider?.connectFlow !== "code"}
   <div class="section"><strong class="head">Usage{#if each.usage?.observedAt && windows.length}<span class="at">· at {clock(each.usage.observedAt)}</span>{/if}</strong>
     {#if note}<p class="small muted">{note}</p>{/if}
     {#if windows.length}<div class="meters">{#each windows as window (window.name)}<AccountMeter {window} now={loadedAt} />{/each}</div>{/if}
@@ -315,7 +327,8 @@
   <RoomsServed label="Serves" {rooms} chosen={a.rooms ?? []} {busy} set={ids => setRooms(a, ids)} />
   <RoomsServed label="Preferred by" rooms={a.rooms?.length ? rooms.filter(room => a.rooms?.includes(room.id)) : rooms} chosen={a.preferred ?? []} {busy}
     every="No room" only="These rooms" hint="These rooms use this account first whenever it has quota left, and their other accounts otherwise." set={ids => setRooms(a, a.rooms ?? [], ids)} />
-  {#if each.provider?.connectMethod === "oauth"}<div class="section"><strong class="head">Sign-in</strong>
+  {/if}
+  {#if each.provider?.connectMethod === "oauth" && each.provider.connectFlow !== "code"}<div class="section"><strong class="head">Sign-in</strong>
     {#if attempt && reconnect === a.id}{@render waiting(attempt, name)}
     {:else}<div class="actions"><button type="button" class="btn" class:fill={a.state === "sign_in_expired"} disabled={busy} onclick={() => void begin(a)}>Sign in again</button></div>
       <p class="small muted">For a changed plan, or when Dyna asks.</p>{/if}

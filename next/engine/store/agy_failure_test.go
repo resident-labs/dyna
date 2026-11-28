@@ -97,9 +97,10 @@ func TestAgyQuotaFailureWakesOnceAtTheReset(t *testing.T) {
 	if retryAt != resetAt {
 		t.Fatalf("retry at %d, want exactly the reset %d", retryAt, resetAt)
 	}
+	// The quota notice is no wake of its own; the retry wake promotes it with the rest of what waits, and the turn it starts reads it.
 	wakes := func() int {
 		var n int
-		if err := s.Read().QueryRowContext(ctx, "SELECT count(*) FROM deliveries WHERE to_id='s' AND state='pending' AND wake=1").Scan(&n); err != nil {
+		if err := s.Read().QueryRowContext(ctx, "SELECT count(*) FROM deliveries d JOIN events e ON e.seq=d.seq WHERE d.to_id='s' AND d.state='pending' AND d.wake=1 AND e.type!='session.notice'").Scan(&n); err != nil {
 			t.Fatal(err)
 		}
 		return n

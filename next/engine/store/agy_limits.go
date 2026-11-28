@@ -2,9 +2,7 @@ package store
 
 import (
 	"context"
-	"crypto/rand"
 	"database/sql"
-	"encoding/hex"
 	"fmt"
 	"time"
 
@@ -16,9 +14,10 @@ import (
 const agyAccount = "main"
 
 // limitAgy records that the account's usage limit resets after seconds, the reset an agy turn's failure stated, and keeps the later of two
-// resets. It tells the room once per limit: a limit that was already in force is not told again, whatever the turns still ending on it
-// say, since each of them states its own reset a second or two apart. The notice wakes root through the default subscription, so the owner
-// hears of it once, whatever the number of sessions the limit holds.
+// resets. It tells every room's root once per limit, in the owner's conversation with it and without waking it: a limit that was
+// already in force is not told again, whatever the turns still ending on it say, since each of them states its own reset a second or
+// two apart. The root reads the notice with its next input, so the owner hears of it once per room, whatever the number of sessions
+// the limit holds.
 func (s *Store) limitAgy(ctx context.Context, tx *sql.Tx, event contract.Event, seconds int64) error {
 	until := event.Time.Add(time.Duration(seconds) * time.Second)
 	var previous int64
@@ -32,13 +31,9 @@ func (s *Store) limitAgy(ctx context.Context, tx *sql.Tx, event contract.Event, 
 	if previous > event.Time.UnixMilli() {
 		return nil
 	}
-	var id [16]byte
-	if _, err := rand.Read(id[:]); err != nil {
-		return err
-	}
-	notice := contract.NoticePosted{Text: fmt.Sprintf("Antigravity quota reached; neon sessions resume at %s UTC", until.UTC().Format("15:04"))}
-	_, err = s.AppendEvent(tx, contract.Event{ID: contract.EventID("ev_" + hex.EncodeToString(id[:])), Room: event.Room, Time: event.Time, From: contract.Principal{Kind: contract.PrincipalEngine}, Body: notice})
-	return err
+	return s.alertRoots(ctx, tx, func(root Session) contract.EventBody {
+		return contract.SessionNotice{Session: root.ID, Text: fmt.Sprintf("Antigravity quota reached; neon sessions resume at %s UTC.", until.UTC().Format("15:04")), ClientID: fmt.Sprintf("agy-limit:%d", until.UnixMilli())}
+	}, event.Time, false, "")
 }
 
 // agyLimited says the account's usage limit stands at now: asking Google again before the reset only fails again. It is the one check

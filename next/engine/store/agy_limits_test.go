@@ -12,7 +12,7 @@ import (
 	"github.com/resident-labs/dyna/contract"
 )
 
-// limitRig holds two agy sessions of one account (and a pig one) in a room, each with a ready box.
+// limitRig holds two agy sessions of one account (and a pig one) in a room, each with a ready box. Session a is the room's root.
 type limitRig struct {
 	t      *testing.T
 	ctx    context.Context
@@ -34,7 +34,7 @@ func newLimitRig(t *testing.T) *limitRig {
 	s.SetWake(func(ids []contract.SessionID, _ []contract.Event) { r.kicked = append(r.kicked, ids...) })
 	t.Cleanup(func() { s.Close() })
 	_, err = s.writer.Exec(`INSERT INTO rooms(id,name,created_at,cpus,mem_bytes) VALUES('r','r',0,0,0);
- INSERT INTO sessions(id,room,name,profile,state,goal,created_at) VALUES('a','r','a','p','open','',0),('b','r','b','p','open','',0),('pig','r','pig','p','open','',0);
+ INSERT INTO sessions(id,room,name,profile,state,goal,created_at,parent) VALUES('a','r','a','p','open','',0,NULL),('b','r','b','p','open','',0,'a'),('pig','r','pig','p','open','',0,'a');
  INSERT INTO boxes(id,session,image,size,state,reason,slice,created_at,updated_at,harness) VALUES('ba','a','','agent','ready','','',0,0,'agy'),('bb','b','','agent','ready','','',0,0,'agy'),('bp','pig','','agent','ready','','',0,0,'pig')`)
 	if err != nil {
 		t.Fatal(err)
@@ -107,7 +107,7 @@ func (r *limitRig) limit() int64 {
 
 func (r *limitRig) notices() []string {
 	r.t.Helper()
-	rows, err := r.s.Read().QueryContext(r.ctx, "SELECT json_extract(body,'$.text') FROM events WHERE type='notice.posted' ORDER BY seq")
+	rows, err := r.s.Read().QueryContext(r.ctx, "SELECT json_extract(body,'$.text') FROM events WHERE type='session.notice' AND client_id LIKE 'agy-limit:%' ORDER BY seq")
 	if err != nil {
 		r.t.Fatal(err)
 	}
@@ -420,4 +420,26 @@ func TestAgyLimitReleaseLeavesAStoppedBoxInAPausedRoomStopped(t *testing.T) {
 		t.Fatal(err)
 	}
 	want("run")
+}
+
+// The notice goes to the owner's conversation with each room's root, once per limit and per room, and wakes nobody: another room's root
+// hears of it and a session that is not a root does not. A limit held again before it resets is TestAgyLimitKeepsTheLaterReset's.
+func TestAgyLimitNoticeGoesToEachRoot(t *testing.T) {
+	r := newLimitRig(t)
+	if _, err := r.s.writer.Exec(`INSERT INTO rooms(id,name,created_at,cpus,mem_bytes) VALUES('r2','r2',0,0,0);
+ INSERT INTO sessions(id,room,name,profile,state,goal,created_at,parent) VALUES('root2','r2','root2','p','open','',0,NULL)`); err != nil {
+		t.Fatal(err)
+	}
+	r.limited(3600)
+	if got := r.notices(); len(got) != 2 {
+		t.Fatalf("notices %q", got)
+	}
+	for _, session := range []contract.SessionID{"a", "root2"} {
+		if got := r.count("SELECT count(*) FROM deliveries d JOIN events e ON e.seq=d.seq WHERE d.to_id=? AND d.wake=0 AND e.client_id LIKE 'agy-limit:%'", session); got != 1 {
+			t.Fatalf("%s has %d quiet notices", session, got)
+		}
+	}
+	if got := r.count("SELECT count(*) FROM deliveries d JOIN events e ON e.seq=d.seq WHERE d.to_id IN ('b','pig') AND e.client_id LIKE 'agy-limit:%'"); got != 0 {
+		t.Fatalf("a child was told: %d", got)
+	}
 }

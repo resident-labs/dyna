@@ -66,7 +66,7 @@ export function usageNote(item: AccountItem): string | undefined {
   return visibleWindows(item.usage?.windows ?? []).length || item.usage?.balances?.length ? undefined : "This provider reports no usage limits.";
 }
 
-const flows: readonly ConnectFlow[] = ["callback", "device", "key"];
+const flows: readonly ConnectFlow[] = ["callback", "device", "code", "key"];
 
 // The providers Add offers: plan sign-ins, then codes, then keys, of which the first ten show until a search or Show
 // more, as the key list is long. more is how many keys wait behind Show more.

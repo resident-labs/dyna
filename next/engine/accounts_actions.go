@@ -4,10 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"os"
 	"strings"
 	"sync"
 
 	"github.com/resident-labs/dyna/contract"
+	"github.com/resident-labs/dyna/engine/agylogin"
 	"github.com/resident-labs/dyna/engine/approve"
 	"github.com/resident-labs/dyna/engine/model"
 	"github.com/resident-labs/dyna/engine/store"
@@ -16,6 +18,7 @@ import (
 var (
 	errAccountAction  = errors.New("account action unavailable")
 	errAccountMissing = errors.New("account not found")
+	errAgyLimits      = errors.New("an Antigravity account has no room limits")
 )
 
 type accountActionResult struct {
@@ -29,6 +32,7 @@ type AccountActions struct {
 	service     *Service
 	connections *model.Connections
 	quotas      *model.Quotas
+	agy         *agylogin.Logins
 	removeMu    sync.Mutex
 }
 
@@ -37,6 +41,9 @@ func NewAccountActions(service *Service, connections *model.Connections, quotas 
 	service.profileMoved = actions.dropUnservedPins
 	return actions
 }
+
+// SetAgyLogin turns on adding Antigravity accounts, which have no model proxy behind them.
+func (a *AccountActions) SetAgyLogin(logins *agylogin.Logins) { a.agy = logins }
 
 func (a *AccountActions) Entry() approve.Entry {
 	return approve.Entry{
@@ -111,6 +118,18 @@ func (s *AccountActions) runAccountAction(ctx context.Context, caller contract.P
 			if errors.Is(result.err, store.ErrPreferUnserved) {
 				return accountActionResult{}, invalid(result.err.Error())
 			}
+			if errors.Is(result.err, agylogin.ErrBusy) {
+				return accountActionResult{}, &contract.Error{Code: contract.ErrConflict, Message: result.err.Error()}
+			}
+			if errors.Is(result.err, agylogin.ErrNoProgram) || errors.Is(result.err, agylogin.ErrLink) {
+				return accountActionResult{}, &contract.Error{Code: contract.ErrUnavailable, Message: result.err.Error()}
+			}
+			if errors.Is(result.err, agylogin.ErrPaste) || errors.Is(result.err, errAgyLimits) {
+				return accountActionResult{}, invalid(result.err.Error())
+			}
+			if errors.Is(result.err, agylogin.ErrNoAttempt) {
+				return accountActionResult{}, &contract.Error{Code: contract.ErrNotFound, Message: result.err.Error()}
+			}
 			if errors.Is(result.err, errAccountMissing) {
 				return accountActionResult{}, &contract.Error{Code: contract.ErrNotFound, Message: "account not found"}
 			}
@@ -162,7 +181,18 @@ func (s *AccountActions) AccountsList(ctx context.Context, caller contract.Princ
 			}
 		}
 	}
-	return contract.AccountsListResponse{Accounts: accounts, Providers: model.AccountProviders(credentials)}, nil
+	providers := model.AccountProviders(credentials)
+	if s.agy != nil {
+		added, err := s.service.store.AgyAccounts(ctx)
+		if err != nil {
+			return contract.AccountsListResponse{}, &contract.Error{Code: contract.ErrUnavailable, Message: "accounts unavailable"}
+		}
+		for _, account := range added {
+			accounts = append(accounts, contract.Account{ID: account.ID, Provider: contract.ProviderAgy, Label: account.Label, Rooms: []contract.RoomID{}, Preferred: []contract.RoomID{}, State: contract.AccountConnected})
+		}
+		providers = append(providers, contract.AccountProviderInfo{ID: contract.ProviderAgy, DisplayName: "Antigravity", ConnectMethod: contract.ConnectOAuth, ConnectFlow: contract.ConnectFlowCode})
+	}
+	return contract.AccountsListResponse{Accounts: accounts, Providers: providers}, nil
 }
 
 func (s *AccountActions) AccountsConnect(ctx context.Context, caller contract.Principal, req contract.AccountsConnectRequest) (contract.AccountsConnectResponse, *contract.Error) {
@@ -172,6 +202,13 @@ func (s *AccountActions) AccountsConnect(ctx context.Context, caller contract.Pr
 	}
 	req.Label = label
 	result, problem := s.runAccountAction(ctx, caller, contract.AccountActionConnect, "", func(ctx context.Context) accountActionResult {
+		if req.Provider == contract.ProviderAgy {
+			if s.agy == nil {
+				return accountActionResult{err: errAccountAction}
+			}
+			started, err := s.agy.Start(label)
+			return accountActionResult{connect: contract.AccountsConnectResponse{Attempt: started.Attempt, Flow: contract.ConnectFlowCode, Link: started.Link, ExpiresAt: started.Expires}, err: err}
+		}
 		out, err := s.connections.Start(ctx, req)
 		return accountActionResult{connect: out, err: err}
 	})
@@ -201,6 +238,12 @@ func (s *AccountActions) AccountsRemove(ctx context.Context, caller contract.Pri
 	_, problem := s.runAccountAction(ctx, caller, contract.AccountActionRemove, req.AccountID, func(ctx context.Context) accountActionResult {
 		s.removeMu.Lock()
 		defer s.removeMu.Unlock()
+		if added, err := s.service.store.AgyAccountExists(ctx, req.AccountID); err != nil || added {
+			if err == nil {
+				err = s.removeAgy(ctx, req.AccountID)
+			}
+			return accountActionResult{err: err}
+		}
 		s.connections.CancelReconnect(req.AccountID)
 		id, err := s.service.store.AccountProxyID(ctx, req.AccountID)
 		if err == nil {
@@ -233,6 +276,9 @@ func (s *AccountActions) AccountsSetKey(ctx context.Context, caller contract.Pri
 
 func (s *AccountActions) AccountsConnectCallback(ctx context.Context, caller contract.Principal, req contract.AccountsConnectCallbackRequest) (contract.AccountsConnectCallbackResponse, *contract.Error) {
 	_, problem := s.runAccountAction(ctx, caller, contract.AccountActionCallback, "", func(ctx context.Context) accountActionResult {
+		if s.agy != nil && s.agy.Owns(req.Attempt) {
+			return accountActionResult{err: s.agy.Paste(req.Attempt, req.RedirectURL)}
+		}
 		return accountActionResult{err: s.connections.Callback(ctx, req)}
 	})
 	return contract.AccountsConnectCallbackResponse{}, problem
@@ -252,6 +298,16 @@ func (s *AccountActions) CompleteOAuth(ctx context.Context, completed model.OAut
 }
 
 func (s *AccountActions) AccountsConnectStatus(ctx context.Context, caller contract.Principal, req contract.AccountsConnectStatusRequest) (contract.AccountsConnectStatusResponse, *contract.Error) {
+	if s.agy != nil && s.agy.Owns(req.Attempt) {
+		if caller.Kind != contract.PrincipalOwner {
+			return contract.AccountsConnectStatusResponse{}, &contract.Error{Code: contract.ErrForbidden, Message: "forbidden"}
+		}
+		status, account, err := s.agy.Status(req.Attempt)
+		if err != nil {
+			return contract.AccountsConnectStatusResponse{}, &contract.Error{Code: contract.ErrNotFound, Message: err.Error()}
+		}
+		return contract.AccountsConnectStatusResponse{Status: status, AccountID: account}, nil
+	}
 	s.removeMu.Lock()
 	defer s.removeMu.Unlock()
 	out, err := s.connections.Status(ctx, req, func(commit func() error) error {
@@ -271,6 +327,12 @@ func (s *AccountActions) AccountsConnectStatus(ctx context.Context, caller contr
 
 func (s *AccountActions) AccountsSetLimits(ctx context.Context, caller contract.Principal, req contract.AccountsSetLimitsRequest) (contract.AccountsSetLimitsResponse, *contract.Error) {
 	_, problem := s.runAccountAction(ctx, caller, contract.AccountActionSetLimits, req.AccountID, func(ctx context.Context) accountActionResult {
+		if added, err := s.service.store.AgyAccountExists(ctx, req.AccountID); err != nil || added {
+			if err == nil {
+				err = errAgyLimits
+			}
+			return accountActionResult{err: err}
+		}
 		return accountActionResult{err: s.service.store.SetAccountRooms(ctx, req.AccountID, req.Rooms, req.Preferred)}
 	})
 	return contract.AccountsSetLimitsResponse{}, problem
@@ -284,7 +346,13 @@ func (s *AccountActions) AccountsRename(ctx context.Context, caller contract.Pri
 		return contract.AccountsRenameResponse{}, &contract.Error{Code: contract.ErrInvalid, Message: "invalid account label"}
 	}
 	_, problem := s.runAccountAction(ctx, caller, contract.AccountActionRename, req.AccountID, func(ctx context.Context) accountActionResult {
-		err := s.service.store.RenameAccount(ctx, req.AccountID, label)
+		rename := s.service.store.RenameAccount
+		if added, err := s.service.store.AgyAccountExists(ctx, req.AccountID); err != nil {
+			return accountActionResult{err: err}
+		} else if added {
+			rename = s.service.store.RenameAgyAccount
+		}
+		err := rename(ctx, req.AccountID, label)
 		if errors.Is(err, store.ErrNotFound) {
 			err = errAccountMissing
 		}
@@ -304,4 +372,18 @@ func (s *AccountActions) AccountsImportOAuth(ctx context.Context, caller contrac
 		return accountActionResult{imported: out, err: err}
 	})
 	return result.imported, problem
+}
+
+// removeAgy deletes an added Antigravity account: its token file, then its row. A missing file is not an error.
+func (s *AccountActions) removeAgy(ctx context.Context, id contract.AccountID) error {
+	if err := os.Remove(s.service.layout.HostAgyToken(string(id))); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	if err := s.service.store.RemoveAgyAccount(ctx, id); err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			return errAccountMissing
+		}
+		return err
+	}
+	return nil
 }

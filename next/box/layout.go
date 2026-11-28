@@ -346,6 +346,20 @@ func (l Layout) HostAgyAccount() string { return filepath.Join(l.HostData, "agy"
 // HostAgyBinary is the installed agy program on the agy host, which a box of an agy session mounts read-only.
 func (l Layout) HostAgyBinary() string { return filepath.Join(l.HostData, "agy", "antigravity") }
 
+// HostAgyTokens holds one stored copy of an agy sign-in token per added account, by the account's opaque id. Dyna never reads inside one.
+func (l Layout) HostAgyTokens() string { return filepath.Join(l.HostData, "agy", "tokens") }
+
+// HostAgyToken is the stored token copy of one added account.
+func (l Layout) HostAgyToken(id string) string { return filepath.Join(l.HostAgyTokens(), id) }
+
+// HostAgyLogin is the scratch profile folder of one running sign-in. It is deleted when the sign-in ends.
+func (l Layout) HostAgyLogin(name string) string {
+	return filepath.Join(l.HostData, "agy", "login-"+name)
+}
+
+// HostAgyLoginPattern finds every sign-in folder, to delete the ones an engine crash left.
+func (l Layout) HostAgyLoginPattern() string { return l.HostAgyLogin("*") }
+
 // AgyBinary is where the agy program sits in the box.
 const AgyBinary = "/opt/agy/antigravity"
 

@@ -746,10 +746,10 @@ func TestFailedThoughtLevelRestoresTheModel(t *testing.T) {
 }
 
 func TestEnvironmentCAHandling(t *testing.T) {
-	if env := environment([]string{"SSL_CERT_DIR=/certs"}, "/gd", "/t", ""); slices.ContainsFunc(env, func(s string) bool { return strings.HasPrefix(s, "SSL_CERT_FILE=") }) {
+	if env := Environment([]string{"SSL_CERT_DIR=/certs"}, "/gd", "/t", ""); slices.ContainsFunc(env, func(s string) bool { return strings.HasPrefix(s, "SSL_CERT_FILE=") }) {
 		t.Errorf("SSL_CERT_DIR set: %v", env)
 	}
-	if env := environment([]string{"gemini_api_key=k"}, "/gd", "/t", ""); slices.Contains(env, "gemini_api_key=k") {
+	if env := Environment([]string{"gemini_api_key=k"}, "/gd", "/t", ""); slices.Contains(env, "gemini_api_key=k") {
 		t.Errorf("env names are matched without case: %v", env)
 	}
 }
@@ -851,7 +851,7 @@ func TestCloseEndsTheProcessAndDone(t *testing.T) {
 }
 
 func TestEnvironmentFollowsT3(t *testing.T) {
-	env := environment([]string{"HOME=/h", "PATH=/p", "GEMINI_API_KEY=k", "GOOGLE_API_KEY=k", "BROWSER=b", "TMPDIR=/t", "KEEP=1"}, "/gd", "/tmp/x", "")
+	env := Environment([]string{"HOME=/h", "PATH=/p", "GEMINI_API_KEY=k", "GOOGLE_API_KEY=k", "BROWSER=b", "TMPDIR=/t", "KEEP=1"}, "/gd", "/tmp/x", "")
 	joined := "\n" + strings.Join(env, "\n") + "\n"
 	for _, want := range []string{"HOME=/h", "PATH=/p", "KEEP=1", "GEMINI_HOME=/gd", "AGY_ACP_FORCE_FILE_STORAGE=1", "AGY_CLI_DISABLE_AUTO_UPDATE=true",
 		"PYTHONUNBUFFERED=1", "TMPDIR=/tmp/x", "SSH_CONNECTION=127.0.0.1 0 127.0.0.1 0", "BROWSER=" + browserCommand} {
@@ -865,7 +865,7 @@ func TestEnvironmentFollowsT3(t *testing.T) {
 		}
 	}
 	// The host's SSH_CONNECTION wins over the fake one (ASUP:230-234).
-	if env := environment([]string{"SSH_CONNECTION=1 2 3 4"}, "/gd", "/tmp/x", ""); !slices.Contains(env, "SSH_CONNECTION=1 2 3 4") || slices.Contains(env, "SSH_CONNECTION=127.0.0.1 0 127.0.0.1 0") {
+	if env := Environment([]string{"SSH_CONNECTION=1 2 3 4"}, "/gd", "/tmp/x", ""); !slices.Contains(env, "SSH_CONNECTION=1 2 3 4") || slices.Contains(env, "SSH_CONNECTION=127.0.0.1 0 127.0.0.1 0") {
 		t.Errorf("env = %v", env)
 	}
 }
@@ -1221,7 +1221,7 @@ func TestAnswerArrivingBeforeTheInputsAreRecordedIsWrittenAfterThem(t *testing.T
 }
 
 func TestEnvironmentRoutesThroughTheProxyAndDropsTheHostsOwn(t *testing.T) {
-	env := environment([]string{"HOME=/h", "HTTPS_PROXY=http://other:1", "https_proxy=http://other:1", "ALL_PROXY=x", "NO_PROXY=google.com", "KEEP=1"}, "/gd", "/t", "127.0.0.1:7782")
+	env := Environment([]string{"HOME=/h", "HTTPS_PROXY=http://other:1", "https_proxy=http://other:1", "ALL_PROXY=x", "NO_PROXY=google.com", "KEEP=1"}, "/gd", "/t", "127.0.0.1:7782")
 	joined := "\n" + strings.Join(env, "\n") + "\n"
 	for _, want := range []string{"HTTPS_PROXY=http://127.0.0.1:7782", "https_proxy=http://127.0.0.1:7782", "HTTP_PROXY=http://127.0.0.1:7782", "http_proxy=http://127.0.0.1:7782", "NO_PROXY=127.0.0.1,localhost,::1", "no_proxy=127.0.0.1,localhost,::1", "KEEP=1"} {
 		if !strings.Contains(joined, "\n"+want+"\n") {
@@ -1234,7 +1234,7 @@ func TestEnvironmentRoutesThroughTheProxyAndDropsTheHostsOwn(t *testing.T) {
 		}
 	}
 	// With no proxy, the host's own settings stand and none is added.
-	if env := environment([]string{"HTTPS_PROXY=http://other:1"}, "/gd", "/t", ""); !slices.Contains(env, "HTTPS_PROXY=http://other:1") || slices.Contains(env, "NO_PROXY=127.0.0.1,localhost,::1") {
+	if env := Environment([]string{"HTTPS_PROXY=http://other:1"}, "/gd", "/t", ""); !slices.Contains(env, "HTTPS_PROXY=http://other:1") || slices.Contains(env, "NO_PROXY=127.0.0.1,localhost,::1") {
 		t.Errorf("env = %v", env)
 	}
 }

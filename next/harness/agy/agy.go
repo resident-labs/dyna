@@ -239,10 +239,16 @@ var caBundles = []string{"/etc/ssl/certs/ca-bundle.crt", "/etc/ssl/certs/ca-cert
 // Dyna has no sign-in screen for. The command has no colon, which Python would split on (ASUP:430-431).
 const browserCommand = `'/bin/sh' '-c' 'exit 0' '--' '%s'`
 
-// environment is T3's agent environment (ASUP:202-246). HOME and PATH come from base. T3's Electron-as-node variable is left
+// AcpArgs is the command line of agy's ACP server: the login and agy's own data live under geminiDir, and extra flags (the login
+// flow's --login) follow the subcommand.
+func AcpArgs(geminiDir string, extra ...string) []string {
+	return append(append([]string{"acp"}, extra...), "--gemini-dir", geminiDir, "--app-data-dir", "antigravity-acp")
+}
+
+// Environment is T3's agent environment (ASUP:202-246). HOME and PATH come from base. T3's Electron-as-node variable is left
 // out, as there is no helper to run with it. SSH_CONNECTION is the host's, else a fake one (ASUP:230-234), so the
 // 1.5 CLI keeps the login in the profile and not in the OS keyring.
-func environment(base []string, geminiDir, tmp, proxy string) []string {
+func Environment(base []string, geminiDir, tmp, proxy string) []string {
 	var env []string
 	hasCA, hasSSH, nix := false, false, ""
 	for _, kv := range base {
@@ -365,9 +371,9 @@ func (h *Harness) spawn() (p *process, err error) {
 			os.RemoveAll(tmp)
 		}
 	}()
-	cmd := exec.Command(h.cfg.Binary, "acp", "--gemini-dir", h.cfg.GeminiDir, "--app-data-dir", "antigravity-acp")
+	cmd := exec.Command(h.cfg.Binary, AcpArgs(h.cfg.GeminiDir)...)
 	cmd.Dir = h.cfg.Dir
-	cmd.Env = environment(os.Environ(), h.cfg.GeminiDir, tmp, h.cfg.Proxy)
+	cmd.Env = Environment(os.Environ(), h.cfg.GeminiDir, tmp, h.cfg.Proxy)
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	stdin, err := cmd.StdinPipe()
 	if err != nil {

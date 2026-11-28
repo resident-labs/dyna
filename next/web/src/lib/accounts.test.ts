@@ -187,3 +187,8 @@ test("a search shows every key provider it matches, past the ten", () => {
   assert.equal(found.items.length, 12);
   assert.equal(found.more, 0);
 });
+
+test("Add offers the Antigravity code sign-in after the plan and device ones and before keys", () => {
+  const agy: AccountProviderInfo = { id: "agy", displayName: "Antigravity", connectMethod: "oauth", connectFlow: "code" };
+  assert.deepEqual(providerChoices([deepseek, agy, claude], "", false).items.map(p => p.displayName), ["Claude", "Antigravity", "DeepSeek"]);
+});
