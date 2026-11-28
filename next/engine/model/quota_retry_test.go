@@ -4,6 +4,8 @@ import (
 	"database/sql"
 	"fmt"
 	"net/http"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -11,15 +13,19 @@ import (
 )
 
 func TestQuotaReadReleasesRetriesOnlyOnRecovery(t *testing.T) {
+	const healthy = `"status_code":200,"windows":[{"kind":"weekly_all","utilization":50},{"kind":"weekly_scoped","scope":"Fable","utilization":0}]`
 	for _, tc := range []struct {
 		name    string
 		reply   string
+		gap     string
 		release bool
 	}{
-		{"recovered", `"status_code":200,"windows":[{"kind":"weekly_all","utilization":50},{"kind":"weekly_scoped","scope":"Fable","utilization":0}]`, true},
-		{"still spent", `"status_code":200,"windows":[{"kind":"weekly_all","utilization":50},{"kind":"weekly_scoped","scope":"Fable","utilization":102}]`, false},
-		{"unavailable", `"status_code":500`, false},
-		{"no windows", `"status_code":200`, false},
+		{name: "recovered", reply: healthy, release: true},
+		{name: "recovered after unavailable", reply: healthy, gap: `"status_code":500`, release: true},
+		{name: "recovered after no windows", reply: healthy, gap: `"status_code":200`, release: true},
+		{name: "still spent", reply: `"status_code":200,"windows":[{"kind":"weekly_all","utilization":50},{"kind":"weekly_scoped","scope":"Fable","utilization":102}]`},
+		{name: "unavailable", reply: `"status_code":500`},
+		{name: "no windows", reply: `"status_code":200`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			ctx := t.Context()
@@ -91,6 +97,13 @@ INSERT INTO boxes(id,session,image,size,state,reason,slice,created_at,updated_at
 			if _, err := q.Read(ctx); err != nil || releases != 0 {
 				t.Fatalf("first read: releases = %d: %v", releases, err)
 			}
+			if tc.gap != "" {
+				now = now.Add(quotaAge)
+				reply = tc.gap
+				if _, err := q.Read(ctx); err != nil || releases != 0 {
+					t.Fatalf("inconclusive read: releases = %d: %v", releases, err)
+				}
+			}
 			now = now.Add(quotaAge)
 			reply = tc.reply
 			for range 2 { // a second whole read of the new value must not release again
@@ -128,5 +141,69 @@ INSERT INTO boxes(id,session,image,size,state,reason,slice,created_at,updated_at
 				t.Fatalf("turn after sweep = %q, want retry: %t", turn, tc.release)
 			}
 		})
+	}
+}
+
+func TestQuotaRecoveryIgnoresOlderCachedReadingThatFinishesLater(t *testing.T) {
+	ctx := t.Context()
+	st := quotaStore(t)
+	var now, used atomic.Int64
+	var routingCalls, releases atomic.Int32
+	now.Store(1000)
+	used.Store(50)
+	waiting, proceed := make(chan struct{}), make(chan struct{})
+	resume := sync.OnceFunc(func() { close(proceed) })
+	defer resume()
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/dyna/credentials":
+			fmt.Fprint(w, `{"credentials":[{"id":"invented","auth_index":"invented","provider":"claude","state":"unknown"}]}`)
+		case "/v0/management/auth-files/quota":
+			fmt.Fprintf(w, `{"files":[{"auth_index":"invented","status_code":200,"windows":[{"kind":"weekly_all","utilization":%d}]}]}`, used.Load())
+		case "/v8/management/routing/status":
+			if routingCalls.Add(1) == 2 {
+				close(waiting)
+				<-proceed
+			}
+			fmt.Fprint(w, `{}`)
+		default:
+			t.Errorf("unexpected request: %s", r.URL)
+		}
+	})
+	q := quotaProxy("http://fixture", quotaHandlerTransport{handler}).Quotas("key", st, func() time.Time { return time.Unix(now.Load(), 0) })
+	q.OnRecovery(func(time.Time) { releases.Add(1) })
+	if _, err := q.Read(ctx); err != nil {
+		t.Fatal(err)
+	}
+	// The second read takes the last healthy cached sample, then stalls in routing.
+	now.Add(int64(quotaAge/time.Second) - 1)
+	old := make(chan error, 1)
+	go func() { _, err := q.Read(ctx); old <- err }()
+	select {
+	case <-waiting:
+	case <-time.After(5 * time.Second):
+		t.Fatal("cached read did not reach routing")
+	}
+	// A new read refreshes the expired sample and returns spent before the old read finishes.
+	used.Store(100)
+	now.Add(1)
+	if _, err := q.Read(ctx); err != nil {
+		t.Fatal(err)
+	}
+	resume()
+	if err := <-old; err != nil {
+		t.Fatal(err)
+	}
+	if got := releases.Load(); got != 0 {
+		t.Fatalf("older healthy read released retries %d times", got)
+	}
+	// The stale snapshot must not erase the spent observation for the real recovery either.
+	used.Store(50)
+	now.Add(int64(quotaAge / time.Second))
+	if _, err := q.Read(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if got := releases.Load(); got != 1 {
+		t.Fatalf("fresh recovery released retries %d times, want 1", got)
 	}
 }
