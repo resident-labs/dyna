@@ -60,6 +60,8 @@ func (a *AccountActions) Entry() approve.Entry {
 				name = "Reconnect account"
 			case contract.AccountActionCallback:
 				name = "Complete account authorization"
+			case contract.AccountActionCancel:
+				name = "Cancel account connection"
 			case contract.AccountActionComplete:
 				name = "Check account connection"
 			case contract.AccountActionImportOAuth:
@@ -188,7 +190,12 @@ func (s *AccountActions) AccountsList(ctx context.Context, caller contract.Princ
 			return contract.AccountsListResponse{}, &contract.Error{Code: contract.ErrUnavailable, Message: "accounts unavailable"}
 		}
 		for _, account := range added {
-			accounts = append(accounts, contract.Account{ID: account.ID, Provider: contract.ProviderAgy, Label: account.Label, Rooms: []contract.RoomID{}, Preferred: []contract.RoomID{}, State: contract.AccountConnected})
+			listed := contract.Account{ID: account.ID, Provider: contract.ProviderAgy, Label: account.Label, Rooms: []contract.RoomID{}, Preferred: []contract.RoomID{}, State: contract.AccountConnected}
+			// A row whose token file is missing, which a crash between the two leaves, is listed as needing a sign-in and can be removed.
+			if _, err := os.Stat(s.service.layout.HostAgyToken(string(account.ID))); err != nil {
+				listed.State, listed.Reason = contract.AccountSignInExpired, contract.AccountCredentialMissing
+			}
+			accounts = append(accounts, listed)
 		}
 		providers = append(providers, contract.AccountProviderInfo{ID: contract.ProviderAgy, DisplayName: "Antigravity", ConnectMethod: contract.ConnectOAuth, ConnectFlow: contract.ConnectFlowCode})
 	}
@@ -297,16 +304,27 @@ func (s *AccountActions) CompleteOAuth(ctx context.Context, completed model.OAut
 	})
 }
 
+// AccountsConnectCancel ends the engine side of a sign-in: an Antigravity one is a process, which is killed and its folder deleted before this returns. The proxy flows keep no process, so the page's own cancel is enough for them and an attempt that is not the Antigravity one is not found.
+func (s *AccountActions) AccountsConnectCancel(ctx context.Context, caller contract.Principal, req contract.AccountsConnectCancelRequest) (contract.AccountsConnectCancelResponse, *contract.Error) {
+	_, problem := s.runAccountAction(ctx, caller, contract.AccountActionCancel, "", func(context.Context) accountActionResult {
+		if s.agy == nil || !s.agy.Owns(req.Attempt) {
+			return accountActionResult{err: agylogin.ErrNoAttempt}
+		}
+		return accountActionResult{err: s.agy.Cancel(req.Attempt)}
+	})
+	return contract.AccountsConnectCancelResponse{}, problem
+}
+
 func (s *AccountActions) AccountsConnectStatus(ctx context.Context, caller contract.Principal, req contract.AccountsConnectStatusRequest) (contract.AccountsConnectStatusResponse, *contract.Error) {
 	if s.agy != nil && s.agy.Owns(req.Attempt) {
 		if caller.Kind != contract.PrincipalOwner {
 			return contract.AccountsConnectStatusResponse{}, &contract.Error{Code: contract.ErrForbidden, Message: "forbidden"}
 		}
-		status, account, err := s.agy.Status(req.Attempt)
+		status, reason, account, err := s.agy.Status(req.Attempt)
 		if err != nil {
 			return contract.AccountsConnectStatusResponse{}, &contract.Error{Code: contract.ErrNotFound, Message: err.Error()}
 		}
-		return contract.AccountsConnectStatusResponse{Status: status, AccountID: account}, nil
+		return contract.AccountsConnectStatusResponse{Status: status, AccountID: account, Reason: reason}, nil
 	}
 	s.removeMu.Lock()
 	defer s.removeMu.Unlock()

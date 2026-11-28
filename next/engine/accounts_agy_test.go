@@ -23,20 +23,31 @@ const agyTokenSentinel = "SENTINEL-AGY-TOKEN-77c1"
 // fakeAgyLogin prints a valid sign-in link, reads one line and writes a token file. It is never the real program.
 const fakeAgyLogin = `#!/bin/sh
 while [ $# -gt 0 ]; do [ "$1" = --gemini-dir ] && dir=$2; shift; done
-echo "Open: $FAKE_LINK" >&2
+echo "  $FAKE_LINK"
+[ -n "$FAKE_ERR" ] && echo "$FAKE_ERR" >&2
 read line || exit 3
+[ "${FAKE_EXIT:-0}" != 0 ] && exit $FAKE_EXIT
 mkdir -p "$dir/antigravity-acp"
 printf %s "` + agyTokenSentinel + `" > "$dir/antigravity-acp/antigravity-oauth-token"
 `
 
-func TestAgyAccountIsAddedListedRenamedAndRemoved(t *testing.T) {
+type agyRig struct {
+	ctx     context.Context
+	st      *store.Store
+	layout  box.Layout
+	actions *AccountActions
+	logins  *agylogin.Logins
+}
+
+func newAgyRig(t *testing.T) *agyRig {
+	t.Helper()
 	ctx := context.Background()
 	dir := t.TempDir()
 	st, err := store.Open(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	t.Cleanup(func() { st.Close() })
 	layout := box.Layout{Data: dir, HostData: filepath.Join(dir, "host")}
 	if err := os.MkdirAll(filepath.Dir(layout.HostAgyBinary()), 0o755); err != nil {
 		t.Fatal(err)
@@ -56,11 +67,18 @@ func TestAgyAccountIsAddedListedRenamedAndRemoved(t *testing.T) {
 	actions := NewAccountActions(core, proxy.Connections("k", st, time.Now), proxy.Quotas("k", st, time.Now))
 	logins := agylogin.New(agylogin.Config{Layout: layout, NewID: store.NewAgyAccountID, Add: func(ctx context.Context, id contract.AccountID, label string) error {
 		return st.AddAgyAccount(ctx, id, label, time.Now())
-	}})
+	}, Remove: st.RemoveAgyAccount})
 	actions.SetAgyLogin(logins)
 	if err := core.ConfigureOperations(ctx, map[contract.OpKind]approve.Entry{"accounts.action": actions.Entry()}, time.Minute); err != nil {
 		t.Fatal(err)
 	}
+	return &agyRig{ctx: ctx, st: st, layout: layout, actions: actions, logins: logins}
+}
+
+func TestAgyAccountIsAddedListedRenamedAndRemoved(t *testing.T) {
+	r := newAgyRig(t)
+	ctx, st, layout, actions, logins := r.ctx, r.st, r.layout, r.actions, r.logins
+	dir := filepath.Dir(layout.HostData)
 	owner := contract.Principal{Kind: contract.PrincipalOwner}
 	if _, problem := actions.AccountsConnect(ctx, contract.Principal{Kind: contract.PrincipalSession}, contract.AccountsConnectRequest{Provider: contract.ProviderAgy, Label: "x"}); problem == nil || problem.Code != contract.ErrForbidden {
 		t.Fatalf("session: %v", problem)
@@ -135,5 +153,79 @@ func TestAgyAccountIsAddedListedRenamedAndRemoved(t *testing.T) {
 	}
 	if _, problem := actions.AccountsRemove(ctx, owner, contract.AccountsRemoveRequest{AccountID: id}); problem == nil {
 		t.Fatal("removing a removed account succeeded")
+	}
+}
+
+// Cancel through the action kills the engine side: the owner can add again at once, and nothing is left.
+func TestAgyCancelThroughTheActionFreesTheNextAdd(t *testing.T) {
+	r := newAgyRig(t)
+	owner := contract.Principal{Kind: contract.PrincipalOwner}
+	first, problem := r.actions.AccountsConnect(r.ctx, owner, contract.AccountsConnectRequest{Provider: contract.ProviderAgy, Label: "a"})
+	if problem != nil {
+		t.Fatal(problem)
+	}
+	if _, problem := r.actions.AccountsConnect(r.ctx, owner, contract.AccountsConnectRequest{Provider: contract.ProviderAgy, Label: "b"}); problem == nil || problem.Code != contract.ErrConflict || problem.Message != "an Antigravity sign-in is already in progress" {
+		t.Fatalf("while one runs: %v", problem)
+	}
+	if _, problem := r.actions.AccountsConnectCancel(r.ctx, contract.Principal{Kind: contract.PrincipalSession}, contract.AccountsConnectCancelRequest{Attempt: first.Attempt}); problem == nil || problem.Code != contract.ErrForbidden {
+		t.Fatalf("session cancel: %v", problem)
+	}
+	if _, problem := r.actions.AccountsConnectCancel(r.ctx, owner, contract.AccountsConnectCancelRequest{Attempt: "other"}); problem == nil || problem.Code != contract.ErrNotFound {
+		t.Fatalf("another attempt: %v", problem)
+	}
+	if _, problem := r.actions.AccountsConnectCancel(r.ctx, owner, contract.AccountsConnectCancelRequest{Attempt: first.Attempt}); problem != nil {
+		t.Fatal(problem)
+	}
+	if left, _ := filepath.Glob(r.layout.HostAgyLoginPattern()); len(left) != 0 {
+		t.Fatalf("folders after cancel: %v", left)
+	}
+	if _, problem := r.actions.AccountsConnect(r.ctx, owner, contract.AccountsConnectRequest{Provider: contract.ProviderAgy, Label: "b"}); problem != nil {
+		t.Fatalf("add after cancel: %v", problem)
+	}
+}
+
+// A sign-in whose output reads as a refusal ends as restricted, which the page words fixedly and offers no retry for; the text itself
+// is in no status, event or file.
+func TestAgyRefusalEndsRestricted(t *testing.T) {
+	r := newAgyRig(t)
+	t.Setenv("FAKE_EXIT", "1")
+	t.Setenv("FAKE_ERR", "Error 403: PERMISSION-DENIED-TEXT-31f")
+	owner := contract.Principal{Kind: contract.PrincipalOwner}
+	started, problem := r.actions.AccountsConnect(r.ctx, owner, contract.AccountsConnectRequest{Provider: contract.ProviderAgy, Label: "a"})
+	if problem != nil {
+		t.Fatal(problem)
+	}
+	if _, problem := r.actions.AccountsConnectCallback(r.ctx, owner, contract.AccountsConnectCallbackRequest{Attempt: started.Attempt, RedirectURL: "code"}); problem != nil {
+		t.Fatal(problem)
+	}
+	r.logins.Wait(started.Attempt)
+	status, problem := r.actions.AccountsConnectStatus(r.ctx, owner, contract.AccountsConnectStatusRequest{Attempt: started.Attempt})
+	if problem != nil || status.Status != contract.ConnectFailed || status.Reason != contract.ConnectRestricted {
+		t.Fatalf("status %+v %v", status, problem)
+	}
+	events, _ := r.st.OwnerEvents(r.ctx, 0, 100)
+	raw, _ := json.Marshal(events)
+	if bytes.Contains(raw, []byte("PERMISSION-DENIED-TEXT-31f")) {
+		t.Fatal("the refusal text reached an event")
+	}
+}
+
+// A row with no token file, which a crash between the insert and the rename leaves, is listed as needing a sign-in and can be removed.
+func TestAgyRowWithoutATokenNeedsSignInAndCanBeRemoved(t *testing.T) {
+	r := newAgyRig(t)
+	owner := contract.Principal{Kind: contract.PrincipalOwner}
+	id, _ := store.NewAgyAccountID()
+	if err := r.st.AddAgyAccount(r.ctx, id, "crashed", time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	listed, problem := r.actions.AccountsList(r.ctx, owner, contract.AccountsListRequest{})
+	if problem != nil || len(listed.Accounts) != 1 || listed.Accounts[0].State != contract.AccountSignInExpired || listed.Accounts[0].Reason != contract.AccountCredentialMissing {
+		t.Fatalf("list: %+v %v", listed, problem)
+	}
+	if _, problem := r.actions.AccountsRemove(r.ctx, owner, contract.AccountsRemoveRequest{AccountID: id}); problem != nil {
+		t.Fatal(problem)
+	}
+	if left, _ := r.st.AgyAccounts(r.ctx); len(left) != 0 {
+		t.Fatalf("row left: %v", left)
 	}
 }

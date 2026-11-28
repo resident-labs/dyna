@@ -95,6 +95,8 @@ export const reconnectUnavailable = (error: unknown) => error instanceof APIErro
 // What Remove's confirm says it deletes.
 export const removalPrompt = (method: ConnectMethod) => `Dyna deletes its ${method === "key" ? "key" : "sign-in"} where Dyna runs.`;
 
+export const invalidInput = (error: unknown) => error instanceof APIError && error.detail.code === "invalid";
+
 export const refused = (error: unknown) => error instanceof APIError && error.detail.code === "conflict";
 
 // The engine alone decides what a label may be, so the page only words its answer.

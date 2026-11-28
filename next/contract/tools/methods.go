@@ -14,6 +14,7 @@ var methodTable = []MethodEntry{
 	method(contract.MethodAccountsConnect, contract.ScopeAdmin, OwnerAccess),
 	method(contract.MethodAccountsConnectCallback, contract.ScopeAdmin, OwnerAccess),
 	method(contract.MethodAccountsConnectStatus, contract.ScopeAdmin, OwnerAccess),
+	method(contract.MethodAccountsConnectCancel, contract.ScopeAdmin, OwnerAccess),
 	method(contract.MethodAccountsList, contract.ScopeRead, OwnerAccess),
 	method(contract.MethodAccountsQuota, contract.ScopeRead, OwnerAccess),
 	method(contract.MethodAccountsReconnect, contract.ScopeAdmin, OwnerAccess),

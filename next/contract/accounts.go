@@ -31,6 +31,7 @@ const (
 	AccountActionSetKey      AccountAction = "set_key"
 	AccountActionImportOAuth AccountAction = "import_oauth"
 	AccountActionComplete    AccountAction = "complete"
+	AccountActionCancel      AccountAction = "cancel"
 	AccountActionRemove      AccountAction = "remove"
 	AccountActionSetLimits   AccountAction = "set_limits"
 	AccountActionRename      AccountAction = "rename"
@@ -133,6 +134,12 @@ type AccountsConnectCallbackRequest struct {
 	RedirectURL string `json:"redirectUrl"`
 }
 type AccountsConnectCallbackResponse struct{}
+
+// AccountsConnectCancelRequest ends a sign-in that waits, on the engine: an Antigravity sign-in is a process, which this kills and deletes. Another attempt's id is not found.
+type AccountsConnectCancelRequest struct {
+	Attempt string `json:"attempt"`
+}
+type AccountsConnectCancelResponse struct{}
 type AccountsConnectStatusRequest struct {
 	Attempt string `json:"attempt"`
 }
@@ -141,6 +148,8 @@ type ConnectFailureReason string
 const (
 	ConnectAdoptionFailed ConnectFailureReason = "adoption_failed"
 	ConnectWrongAccount   ConnectFailureReason = "wrong_account"
+	// ConnectRestricted: the sign-in's own output read as a refusal or a verification (a 403, a restriction). The page words it fixedly and offers no retry.
+	ConnectRestricted ConnectFailureReason = "restricted"
 )
 
 type AccountsConnectStatusResponse struct {

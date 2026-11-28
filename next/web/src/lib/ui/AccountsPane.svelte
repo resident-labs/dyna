@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount, tick, type Snippet } from "svelte";
   import { call, SignedOut } from "../client.ts";
-  import { accountChips, accountItems, accountLine, accountPill, addProviderError, labelRefusal, parseModelIDs, providerChoices, refused, reconnectUnavailable, removalPrompt,
+  import { accountChips, accountItems, accountLine, accountPill, addProviderError, invalidInput, labelRefusal, parseModelIDs, providerChoices, refused, reconnectUnavailable, removalPrompt,
     usageHint, usageNote, type AccountItem } from "../accounts.ts";
   import { balancesText, visibleWindows } from "../usage.ts";
   import { confirm } from "../modal.ts";
@@ -42,6 +42,8 @@
   let connectState: "idle" | "pending" | "failed" | "expired" = $state("idle");
   let error = $state(""), redirect = $state(""), copied = $state(false), opened = $state(false), now = $state(Date.now());
   let timer: ReturnType<typeof setTimeout> | undefined, generation = 0;
+  // The open Antigravity sign-in's attempt. Plain, not state: cancel() runs inside an effect that must not depend on it.
+  let codeAttempt: string | undefined;
 
   // The open account's label field.
   let saved = $derived(item?.account.label);
@@ -60,6 +62,9 @@
   }
   function refresh() { void reload(); }
   function cancel() {
+    // An Antigravity sign-in is a process on the engine, so leaving it ends it there too, and a new one can start at once.
+    if (codeAttempt) void call("accounts.connect_cancel", { attempt: codeAttempt }).catch(() => {});
+    codeAttempt = undefined;
     generation++; clearTimeout(timer);
     attempt = undefined; reconnect = undefined; connectState = "idle"; error = ""; redirect = ""; copied = false; opened = false;
   }
@@ -115,9 +120,9 @@
       now = Date.now();
       void call("accounts.connect_status", { attempt: id }).then(result => {
         if (ticket !== generation) return;
-        if (result.status === "connected") { if (reconnect) { cancel(); refresh(); } else void added(result.accountId); }
+        if (result.status === "connected") { codeAttempt = undefined; if (reconnect) { cancel(); refresh(); } else void added(result.accountId); }
         else if (result.status === "pending") watch(id, ticket);
-        else { connectState = result.status; error = result.reason === "wrong_account" ? "That sign-in belongs to a different account." : result.reason === "adoption_failed" ? "Dyna cannot reconnect this sign-in. Remove it and add it again." : ""; }
+        else { connectState = result.status; error = result.reason === "restricted" ? restrictedText : result.reason === "wrong_account" ? "That sign-in belongs to a different account." : result.reason === "adoption_failed" ? "Dyna cannot reconnect this sign-in. Remove it and add it again." : ""; }
       }, () => { if (ticket === generation) { connectState = "failed"; error = "Could not reach the service. Try again."; } });
     }, 2000);
   }
@@ -144,20 +149,21 @@
     if (popup) popup.opener = null;
     await (again ? call("accounts.reconnect", { accountId: again.id }) : call("accounts.connect", { provider: chosen.id, label })).then(result => {
       if (ticket !== generation) { popup?.close(); return; }
+      codeAttempt = result.flow === "code" ? result.attempt : undefined;
       attempt = result; reconnect = again?.id; connectState = "pending"; now = Date.now(); watch(result.attempt, ticket);
       // The button that started it is gone, so the panel keeps the focus, and Esc there cancels.
       void panel();
       if (popup) { popup.location.href = result.link; opened = true; }
     }, (reason: unknown) => {
       popup?.close();
-      if (!gone(reason) && ticket === generation) { connectState = "failed"; error = reconnectUnavailable(reason) ? "Dyna cannot reconnect this sign-in. Remove it and add it again." : refused(reason) ? "The provider did not accept the sign-in." : "Could not reach the service. Try again."; }
+      if (!gone(reason) && ticket === generation) { connectState = "failed"; error = reconnectUnavailable(reason) ? "Dyna cannot reconnect this sign-in. Remove it and add it again." : refused(reason) ? chosen.connectFlow === "code" ? "A sign-in is already in progress. Cancel it, or wait for it to end." : "The provider did not accept the sign-in." : "Could not reach the service. Try again."; }
     });
     busy = false;
   }
   async function finish() {
     if (!attempt || busy || !redirect.trim()) return;
     const ticket = generation, url = redirect; redirect = ""; busy = true;
-    await call("accounts.connect_callback", { attempt: attempt.attempt, redirectUrl: url }).catch((reason: unknown) => { if (!gone(reason) && ticket === generation) error = "Could not finish sign-in. Try again."; });
+    await call("accounts.connect_callback", { attempt: attempt.attempt, redirectUrl: url }).catch((reason: unknown) => { if (!gone(reason) && ticket === generation) error = invalidInput(reason) ? "That is not the code for this sign-in. Paste the code the page shows, or the page's address." : "Could not finish sign-in. Try again."; });
     busy = false;
   }
   async function addProvider() {
@@ -208,6 +214,8 @@
     if (field && saved !== undefined && labelDraft !== saved) { event.preventDefault(); labelDraft = saved; labelError = ""; }
     else if (attempt) { event.preventDefault(); cancel(); }
   }
+  // Google refused or held the account: the page says so in these words and offers nothing to try again; the owner decides.
+  const restrictedText = "Google refused or restricted this sign-in. Do not try again; look at the account with Google first.";
   const ways: Record<ConnectFlow, string> = { callback: "Sign in with your plan", device: "Sign in with a code", key: "API key",
     code: "Adds one more Antigravity sign-in. Dyna keeps it but does not use it until you switch to it." };
   const connected: Record<ConnectFlow, string> = { callback: "signed in with a plan", device: "signed in with a code", key: "API key", code: "stored, not in use" };
@@ -236,6 +244,7 @@
 <!-- A sign-in that waits: the code to enter, or the two steps of a plan sign-in. -->
 {#snippet waiting(open: AccountsConnectResponse, name: string)}
   {#if open.flow === "code"}
+    {#if connectState === "pending"}
     <div class="step"><span class="badge-step" class:checked={opened} aria-hidden="true">{#if opened}<Icon name="check" size={14} />{:else}1{/if}</span><p>Open this link and sign in with a DIFFERENT Google account than your other Antigravity accounts.<br />
       <a href={open.link} target="_blank" rel="noopener noreferrer" onclick={() => opened = true}>{opened ? "Opened in your browser" : "Open sign-in"} ↗</a>
       <button class="btn ghost" type="button" onclick={() => { void navigator.clipboard.writeText(open.link); copied = true; }}>{copied ? "Copied" : "Copy link"}</button></p></div>
@@ -245,6 +254,9 @@
       <div class="actions"><button class="btn fill" type="submit" disabled={busy || !redirect.trim()}>Finish</button><button type="button" class="btn" onclick={() => { cancel(); void panel(); }}>Cancel</button></div>
     </form>
     <p class="small muted">Dyna hands the code to Antigravity's sign-in and never keeps it.{#if open.expiresAt}{" "}Expires in {remaining(open.expiresAt)}.{/if}</p>
+    {:else}
+    <div class="actions"><button type="button" class="btn" onclick={() => { cancel(); void panel(); }}>Close</button></div>
+    {/if}
   {:else if open.flow === "device"}
     <p>Open the provider's page and enter this code.</p>
     <div class="code"><strong>{open.code}</strong><button class="btn ghost" type="button" onclick={() => { void navigator.clipboard.writeText(open.code ?? ""); copied = true; }}>{copied ? "Copied" : "Copy"}</button></div>

@@ -263,7 +263,7 @@ func Run(ctx context.Context, cfg Config) error {
 	accounts := engine.NewAccountActions(service, connections, quotas)
 	accounts.SetAgyLogin(agylogin.New(agylogin.Config{Layout: layout, NewID: store.NewAgyAccountID, Add: func(ctx context.Context, id contract.AccountID, label string) error {
 		return st.AddAgyAccount(ctx, id, label, time.Now())
-	}}))
+	}, Remove: st.RemoveAgyAccount}))
 	if err := service.ConfigureOperations(ctx, map[contract.OpKind]approve.Entry{"accounts.action": accounts.Entry(), "addon.global": service.AddonGlobal(), "pr.stack": service.PrStack(token, &url.URL{Scheme: "https", Host: "api.github.com"}, http.DefaultTransport), "pr.open": service.PrOpen(token, &url.URL{Scheme: "https", Host: "api.github.com"}, http.DefaultTransport), "hostexec.grant": service.HostexecGrant(), "hostexec.run": service.HostexecRunEntry(), "pool.add": service.PoolAddEntry(), "room.hosts": service.RoomHostsEntry()}, cfg.ApprovalsExpiry); err != nil {
 		return err
 	}

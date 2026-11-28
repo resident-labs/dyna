@@ -352,6 +352,9 @@ func (l Layout) HostAgyTokens() string { return filepath.Join(l.HostData, "agy",
 // HostAgyToken is the stored token copy of one added account.
 func (l Layout) HostAgyToken(id string) string { return filepath.Join(l.HostAgyTokens(), id) }
 
+// HostAgyCopyPattern finds the half-written token copies an engine crash left in the token folder.
+func (l Layout) HostAgyCopyPattern() string { return filepath.Join(l.HostAgyTokens(), ".copy-*") }
+
 // HostAgyLogin is the scratch profile folder of one running sign-in. It is deleted when the sign-in ends.
 func (l Layout) HostAgyLogin(name string) string {
 	return filepath.Join(l.HostData, "agy", "login-"+name)

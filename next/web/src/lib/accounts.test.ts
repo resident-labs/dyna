@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { accountChips, accountChoiceName, accountChoiceNote, accountItems, accountLine, accountPath, accountPill, addProviderError, labelRefusal, parseModelIDs, providerChoices, removalPrompt,
+import { accountChips, accountChoiceName, accountChoiceNote, accountItems, accountLine, accountPath, accountPill, addProviderError, invalidInput, labelRefusal, parseModelIDs, providerChoices, removalPrompt,
   reconnectUnavailable, roomChoices, usageHint, usageNote, type AccountItem } from "./accounts.ts";
 import { APIError } from "./client.ts";
 import type { Account, AccountProviderInfo, AccountUsage, ErrorCode, RoomSummary, UsageWindow } from "./contract.gen.ts";
@@ -191,4 +191,10 @@ test("a search shows every key provider it matches, past the ten", () => {
 test("Add offers the Antigravity code sign-in after the plan and device ones and before keys", () => {
   const agy: AccountProviderInfo = { id: "agy", displayName: "Antigravity", connectMethod: "oauth", connectFlow: "code" };
   assert.deepEqual(providerChoices([deepseek, agy, claude], "", false).items.map(p => p.displayName), ["Claude", "Antigravity", "DeepSeek"]);
+});
+
+test("only a typed invalid error reads as a refused paste", () => {
+  assert.equal(invalidInput(new APIError({ code: "invalid", message: "that is not the code for this sign-in" })), true);
+  assert.equal(invalidInput(new APIError({ code: "unavailable", message: "offline" })), false);
+  assert.equal(invalidInput(new Error("invalid")), false);
 });
