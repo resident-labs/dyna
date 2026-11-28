@@ -157,6 +157,7 @@ This table lists the current tables in `engine/store/schema.sql`, the authority 
 | `hosts` |
 | `agy_limits` | One row per Antigravity account, with the time its usage limit resets (the reset an agy turn stated); a session of that account starts no turn before it. |
 | `agy_accounts` | One row per added Antigravity account: an opaque id, a label and when it was added. The sign-in itself is a stored token file named by the id, outside the store. |
+| `agy_account` | One row: the added Antigravity account that is active for every agy session, the one whose sign-in the engine host's token file holds, and an unfinished switch (held, its target, the host it stopped at). While held, an agy session starts no turn. |
 | `disk_warnings` |
 | `pools` |
 | `room_shared` |

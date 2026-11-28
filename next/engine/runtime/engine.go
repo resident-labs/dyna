@@ -71,6 +71,16 @@ func (s *serviceWithHosts) HostAgySeed(ctx context.Context, caller contract.Prin
 	if problem := s.Service.AgySeedProblem(ctx, caller, req.Host); problem != nil {
 		return contract.HostAgySeedResponse{}, problem
 	}
+	end, ok := s.Service.AgyExclusive()
+	if !ok {
+		return contract.HostAgySeedResponse{}, &contract.Error{Code: contract.ErrConflict, Message: "an agy seed, switch or import is already running"}
+	}
+	defer end()
+	if held, err := s.Service.AgySwitchHeld(ctx); err != nil {
+		return contract.HostAgySeedResponse{}, &contract.Error{Code: contract.ErrUnavailable, Message: "account state unavailable"}
+	} else if held {
+		return contract.HostAgySeedResponse{}, &contract.Error{Code: contract.ErrConflict, Message: "an account switch is in progress or unfinished: a seed copies the engine host's token, which the switch is replacing; finish it first"}
+	}
 	if err := s.boxes.SeedAgy(ctx, req.Host); err != nil {
 		code := contract.ErrUnavailable
 		var seeded SeededError
@@ -267,6 +277,7 @@ func Run(ctx context.Context, cfg Config) error {
 	connections := proxy.Connections(managementKey, st, time.Now)
 	accounts := engine.NewAccountActions(service, connections, quotas)
 	accounts.SetAgyLogin(agylogin.New(agylogin.Config{Layout: layout, NewID: store.NewAgyAccountID, Publish: accounts.PublishAgy}))
+	accounts.SetAgyHosts(boxes)
 	if err := service.ConfigureOperations(ctx, map[contract.OpKind]approve.Entry{"accounts.action": accounts.Entry(), "addon.global": service.AddonGlobal(), "pr.stack": service.PrStack(token, &url.URL{Scheme: "https", Host: "api.github.com"}, http.DefaultTransport), "pr.open": service.PrOpen(token, &url.URL{Scheme: "https", Host: "api.github.com"}, http.DefaultTransport), "hostexec.grant": service.HostexecGrant(), "hostexec.run": service.HostexecRunEntry(), "pool.add": service.PoolAddEntry(), "room.hosts": service.RoomHostsEntry()}, cfg.ApprovalsExpiry); err != nil {
 		return err
 	}

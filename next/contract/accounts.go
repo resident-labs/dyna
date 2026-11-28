@@ -82,12 +82,49 @@ type Account struct {
 	Reason    AccountFailureReason `json:"reason,omitempty"`
 	// Models are what the proxy routes for this account.
 	Models []string `json:"models,omitempty"`
+	// Active is set on the one Antigravity account every agy session uses.
+	Active bool `json:"active,omitempty"`
 }
 type AccountsListRequest struct{}
 type AccountsListResponse struct {
 	Providers []AccountProviderInfo `json:"providers"`
 	Accounts  []Account             `json:"accounts"`
+	// AgySwitch is set while an Antigravity account switch is held, in progress or left unfinished.
+	AgySwitch *AgySwitch `json:"agySwitch,omitempty"`
 }
+
+// AgySwitch is a held switch of the active Antigravity account: the account it moves to, and the host it stopped at, when it did.
+type AgySwitch struct {
+	Target AccountID `json:"target"`
+	Host   HostName  `json:"host,omitempty"`
+}
+
+// AgyUseRequest switches the Antigravity account every agy session uses, by id or by label. It runs for minutes at worst: it waits for
+// running agy turns to end, then swaps the sign-in host by host. The owner only.
+type AgyUseRequest struct {
+	Account string `json:"account"`
+}
+
+// AgyUseHost is how one host ended: its result, "ok" or "ok, already", with the count of agy processes ended.
+type AgyUseHost struct {
+	Host   HostName `json:"host"`
+	Result string   `json:"result"`
+}
+type AgyUseResponse struct {
+	Hosts []AgyUseHost `json:"hosts"`
+}
+
+// AgyImportRequest takes an existing sign-in as an account the owner labels. With no File it is the one agy holds on the engine host now,
+// and that account becomes the active one. With File, a plain file name in the engine host's agy accounts folder, it is that token, and the
+// account is not active. The file is copied whole and never read. The owner only.
+type AgyImportRequest struct {
+	Label string `json:"label"`
+	File  string `json:"file,omitempty"`
+}
+type AgyImportResponse struct {
+	Account AccountID `json:"account"`
+}
+
 type ConnectFlow string
 
 const (

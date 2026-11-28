@@ -51,6 +51,8 @@ const (
 	MethodHostAdd                 Method = "host.add"
 	MethodHostSetLimits           Method = "host.set_limits"
 	MethodHostAgySeed             Method = "host.agy_seed"
+	MethodAgyUse                  Method = "agy.use"
+	MethodAgyImport               Method = "agy.import"
 	MethodHostSet                 Method = "host.set"
 	MethodHostList                Method = "host.list"
 	MethodAccountsList            Method = "accounts.list"

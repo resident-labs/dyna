@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { accountChips, accountChoiceName, accountChoiceNote, accountItems, accountLine, accountPath, accountPill, addProviderError, invalidInput, loginUnfinished, pasteFailure, pollFailure, labelRefusal, parseModelIDs, providerChoices, removalPrompt,
+import { switchProblem, accountChips, accountChoiceName, accountChoiceNote, accountItems, accountLine, accountPath, accountPill, addProviderError, invalidInput, loginUnfinished, pasteFailure, pollFailure, labelRefusal, parseModelIDs, providerChoices, removalPrompt,
   reconnectUnavailable, roomChoices, usageHint, usageNote, type AccountItem } from "./accounts.ts";
 import { APIError } from "./client.ts";
 import type { Account, AccountProviderInfo, AccountUsage, ErrorCode, RoomSummary, UsageWindow } from "./contract.gen.ts";
@@ -212,4 +212,15 @@ test("a status poll that fails for an Antigravity sign-in gives the fixed messag
   assert.equal(pollFailure("code"), loginUnfinished);
   assert.equal(pollFailure("device"), "Could not reach the service. Try again.");
   assert.match(loginUnfinished, /stop and tell root/);
+});
+
+test("an Antigravity account row says whether it is the one in use, with a pill for it, and the title reads Add an Antigravity account", () => {
+  const base = { id: "agy_a", provider: "agy", label: "Second", rooms: [], preferred: [], state: "connected" } as unknown as Account;
+  assert.equal(accountPill(base), undefined);
+  assert.deepEqual(accountPill({ ...base, active: true }), { tone: "working", label: "Active" });
+  const line = (account: Account) => accountLine({ account, provider: undefined, usage: undefined, name: "Second" } as unknown as AccountItem);
+  assert.equal(line(base), "Stored, not in use");
+  assert.equal(line({ ...base, active: true }), "Used by every Antigravity session");
+  assert.equal(switchProblem(new APIError({ code: "conflict", message: "2 agy turns are still running" })), "2 agy turns are still running");
+  assert.match(switchProblem(new Error("x")), /Try again/);
 });

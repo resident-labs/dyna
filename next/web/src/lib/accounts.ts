@@ -29,14 +29,17 @@ export const accountChips: Chip<AccountItem>[] = [
 ];
 
 // The typed alerts are the only colored account states (spec 5.12).
-export function accountPill(account: Account): { tone: "error" | "warning"; label: string } | undefined {
+export function accountPill(account: Account): { tone: "error" | "warning" | "working"| "warning"; label: string } | undefined {
   if (account.state === "sign_in_expired") return { tone: "error", label: "Sign-in expired" };
   if (account.state === "quota_low") return { tone: "warning", label: "Low usage" };
+  if (account.active) return { tone: "working", label: "Active" };
   return undefined;
 }
 
 // A row's second line: the rooms it serves and those that prefer it, then one value for a state the row's bars cannot show.
 export function accountLine({ account, usage }: AccountItem): string {
+  // An added Antigravity account has no rooms, usage or models of its own: it is the one every agy session uses, or it is stored.
+  if (account.provider === "agy") return account.active ? "Used by every Antigravity session" : "Stored, not in use";
   const count = (n: number) => `${n.toLocaleString("en")} ${n === 1 ? "room" : "rooms"}`;
   const n = account.rooms?.length ?? 0, preferred = account.preferred?.length ?? 0;
   const rooms = (n ? count(n) : "Every room") + (preferred ? ` · preferred by ${count(preferred)}` : "");
@@ -109,6 +112,9 @@ export function pasteFailure(flow: ConnectFlow, error: unknown): { text: string;
 
 // A status poll that failed to arrive: the Antigravity flow cannot be told to retry, as the sign-in may already have ended.
 export const pollFailure = (flow: ConnectFlow) => flow === "code" ? loginUnfinished : "Could not reach the service. Try again.";
+
+// An Antigravity switch or import that failed: the engine's own sentence, which never carries a sign-in.
+export const switchProblem = (error: unknown) => error instanceof APIError ? error.detail.message : "Could not switch the account. Try again.";
 
 export const refused = (error: unknown) => error instanceof APIError && error.detail.code === "conflict";
 

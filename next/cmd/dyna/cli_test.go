@@ -70,6 +70,8 @@ type fakeClient struct {
 	host           contract.HostAddRequest
 	hostLimit      *contract.HostSetLimitsRequest
 	agySeed        *contract.HostAgySeedRequest
+	agyUse         *contract.AgyUseRequest
+	agyImport      *contract.AgyImportRequest
 	hostSet        *contract.HostSetRequest
 	profiles       []contract.ProfileEntry
 	profileSet     *contract.ProfileSetRequest
@@ -223,6 +225,14 @@ func (f *fakeClient) HostList(context.Context, contract.HostListRequest) (contra
 func (f *fakeClient) HostAdd(_ context.Context, q contract.HostAddRequest) (contract.HostAddResponse, error) {
 	f.host = q
 	return contract.HostAddResponse{NoSwap: f.hostNoSwap}, nil
+}
+func (f *fakeClient) AgyUse(_ context.Context, q contract.AgyUseRequest) (contract.AgyUseResponse, error) {
+	f.agyUse = &q
+	return contract.AgyUseResponse{Hosts: []contract.AgyUseHost{{Host: "hermeslab", Result: "ok"}}}, nil
+}
+func (f *fakeClient) AgyImport(_ context.Context, q contract.AgyImportRequest) (contract.AgyImportResponse, error) {
+	f.agyImport = &q
+	return contract.AgyImportResponse{Account: "agy_x"}, nil
 }
 func (f *fakeClient) HostAgySeed(_ context.Context, q contract.HostAgySeedRequest) (contract.HostAgySeedResponse, error) {
 	f.agySeed = &q
@@ -1061,5 +1071,19 @@ func TestAgySeedMapsHost(t *testing.T) {
 	runCLI(t, f, "agy", "seed", "node")
 	if f.agySeed == nil || f.agySeed.Host != "node" {
 		t.Fatalf("%+v", f.agySeed)
+	}
+}
+
+func TestAgyUseAndImportCLI(t *testing.T) {
+	f := &fakeClient{}
+	if got := runCLI(t, f, "agy", "use", "second"); strings.TrimSpace(got) != "hermeslab: ok" || f.agyUse == nil || f.agyUse.Account != "second" {
+		t.Fatalf("use: %q %+v", got, f.agyUse)
+	}
+	if got := runCLI(t, f, "agy", "import", "First", "--file", "first.oauth-token.bak"); strings.TrimSpace(got) != "agy_x" || f.agyImport == nil || f.agyImport.Label != "First" || f.agyImport.File != "first.oauth-token.bak" {
+		t.Fatalf("import: %q %+v", got, f.agyImport)
+	}
+	runCLI(t, f, "agy", "import", "Main")
+	if f.agyImport.File != "" {
+		t.Fatalf("import of main: %+v", f.agyImport)
 	}
 }

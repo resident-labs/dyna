@@ -11,9 +11,10 @@ import (
 	"github.com/resident-labs/dyna/contract"
 )
 
-// agyAccount is the one Antigravity account every neon session uses. A second account would make it a column of the box; until then it is
-// a name, and the table already holds a row per account.
-const agyAccount = "main"
+// agyKey is the key of the active account's row in agy_limits: its id once an account is active, and "main", the one signed-in account
+// from before accounts were added, until then. Importing the signed-in account renames the "main" row to its id, and a switch makes the
+// other account's row, if it has one, the one that applies.
+const agyKey = `COALESCE(NULLIF((SELECT active FROM agy_account),''),'main')`
 
 // limitAgy records that the account's usage limit resets after seconds, the reset an agy turn's failure stated, and keeps the later of two
 // resets. It tells the room once per limit: a limit that was already in force is not told again, whatever the turns still ending on it
@@ -22,11 +23,11 @@ const agyAccount = "main"
 func (s *Store) limitAgy(ctx context.Context, tx *sql.Tx, event contract.Event, seconds int64) error {
 	until := event.Time.Add(time.Duration(seconds) * time.Second)
 	var previous int64
-	err := tx.QueryRowContext(ctx, "SELECT until FROM agy_limits WHERE account=?", agyAccount).Scan(&previous)
+	err := tx.QueryRowContext(ctx, "SELECT until FROM agy_limits WHERE account="+agyKey).Scan(&previous)
 	if err != nil && err != sql.ErrNoRows {
 		return err
 	}
-	if _, err := tx.ExecContext(ctx, "INSERT INTO agy_limits(account,until) VALUES(?1,?2) ON CONFLICT(account) DO UPDATE SET until=MAX(until,?2)", agyAccount, until.UnixMilli()); err != nil {
+	if _, err := tx.ExecContext(ctx, "INSERT INTO agy_limits(account,until) SELECT "+agyKey+",?1 WHERE true ON CONFLICT(account) DO UPDATE SET until=MAX(until,?1)", until.UnixMilli()); err != nil {
 		return err
 	}
 	if previous > event.Time.UnixMilli() {
@@ -41,12 +42,13 @@ func (s *Store) limitAgy(ctx context.Context, tx *sql.Tx, event contract.Event, 
 	return err
 }
 
-// agyLimited says the account's usage limit stands at now: asking Google again before the reset only fails again. It is the one check
-// that decides whether an agy turn or compaction may go out, and the only state of the gate is its row; a row at or past its time counts
-// for nothing.
+// agyLimited says no agy turn or compaction may go out now: the active account's usage limit stands at now (asking Google again before
+// the reset only fails again), or an account switch is held, whose token swap must not meet a running agy. It is the one check that decides
+// this, for dispatch, the idle compaction and the retry wake alike, and its state is two rows; a limit row at or past its time counts for
+// nothing.
 func (s *Store) agyLimited(ctx context.Context, q sqlQuery, now time.Time) (bool, error) {
 	var held bool
-	err := q.QueryRowContext(ctx, "SELECT EXISTS (SELECT 1 FROM agy_limits WHERE account=? AND until>?)", agyAccount, now.UnixMilli()).Scan(&held)
+	err := q.QueryRowContext(ctx, "SELECT EXISTS (SELECT 1 FROM agy_limits WHERE account="+agyKey+" AND until>?) OR COALESCE((SELECT held FROM agy_account),0)=1", now.UnixMilli()).Scan(&held)
 	return held, err
 }
 
@@ -67,28 +69,31 @@ func (s *Store) releaseAgyLimits(ctx context.Context, now time.Time) error {
 		if n, err := result.RowsAffected(); err != nil || n == 0 {
 			return err
 		}
-		rows, err := tx.QueryContext(ctx, "SELECT s.id FROM sessions s JOIN boxes b ON b.session=s.id WHERE s.state='open' AND s.closed_at IS NULL AND b.harness=?", contract.HarnessAgy)
-		if err != nil {
-			return err
-		}
-		var ids []contract.SessionID
-		for rows.Next() {
-			var id contract.SessionID
-			if err := rows.Scan(&id); err != nil {
-				rows.Close()
-				return err
-			}
-			ids = append(ids, id)
-		}
-		if err := rows.Close(); err != nil {
-			return err
-		}
-		if err := rows.Err(); err != nil {
-			return err
-		}
-		for _, id := range ids {
-			s.wakePending = append(s.wakePending, id)
-		}
-		return nil
+		return s.wakeAgySessions(ctx, tx)
 	})
+}
+
+// wakeAgySessions queues a dispatch for every open agy session, for the streams that are connected, when what held them ends.
+func (s *Store) wakeAgySessions(ctx context.Context, tx *sql.Tx) error {
+	rows, err := tx.QueryContext(ctx, "SELECT s.id FROM sessions s JOIN boxes b ON b.session=s.id WHERE s.state='open' AND s.closed_at IS NULL AND b.harness=?", contract.HarnessAgy)
+	if err != nil {
+		return err
+	}
+	var ids []contract.SessionID
+	for rows.Next() {
+		var id contract.SessionID
+		if err := rows.Scan(&id); err != nil {
+			rows.Close()
+			return err
+		}
+		ids = append(ids, id)
+	}
+	if err := rows.Close(); err != nil {
+		return err
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	s.wakePending = append(s.wakePending, ids...)
+	return nil
 }

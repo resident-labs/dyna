@@ -349,23 +349,18 @@ func (l *Logins) finish(a *attempt) {
 	a.set(contract.ConnectConnected, id)
 }
 
-// store copies the token file whole beside its final name, then publishes: the account row first and the file's rename after, in one
-// critical section with Remove. A crash between the two leaves a listed account with no sign-in, which the owner sees and can remove;
-// the half copy is deleted at the next start.
-func (l *Logins) store(a *attempt) (contract.AccountID, error) {
-	id, err := l.cfg.NewID()
+// CopyToken copies the token file at path whole into a new .copy-* file in folder, which it makes if needed, and returns that file's name
+// (the caller renames it into place, or removes it). The file at path is opened without following a link, must be a regular file, and
+// is never parsed: it is non-empty and at most 1 MiB, and that is all that is known of it. A half copy is never left.
+func CopyToken(path, folder string) (string, error) {
+	src, err := os.OpenFile(path, os.O_RDONLY|syscall.O_NOFOLLOW, 0)
 	if err != nil {
-		return "", err
-	}
-	src, err := os.OpenFile(filepath.Join(a.dir, filepath.FromSlash(tokenName)), os.O_RDONLY|syscall.O_NOFOLLOW, 0)
-	if err != nil {
-		return "", err
+		return "", errors.New("there is no token file to copy")
 	}
 	defer src.Close()
 	if info, err := src.Stat(); err != nil || !info.Mode().IsRegular() {
-		return "", errors.New("the sign-in left no token file")
+		return "", errors.New("there is no token file to copy")
 	}
-	folder := l.cfg.Layout.HostAgyTokens()
 	if err := os.MkdirAll(folder, 0o700); err != nil {
 		return "", err
 	}
@@ -373,7 +368,6 @@ func (l *Logins) store(a *attempt) (contract.AccountID, error) {
 	if err != nil {
 		return "", err
 	}
-	defer os.Remove(tmp.Name())
 	n, err := io.Copy(tmp, io.LimitReader(src, maxToken+1))
 	if err == nil && (n == 0 || n > maxToken) {
 		err = errors.New("the token file is empty or too large")
@@ -385,10 +379,27 @@ func (l *Logins) store(a *attempt) (contract.AccountID, error) {
 		err = cerr
 	}
 	if err != nil {
+		os.Remove(tmp.Name())
 		return "", err
 	}
+	return tmp.Name(), nil
+}
+
+// store copies the token file whole beside its final name, then publishes: the account row first and the file's rename after, in one
+// critical section with Remove. A crash between the two leaves a listed account with no sign-in, which the owner sees and can remove;
+// the half copy is deleted at the next start.
+func (l *Logins) store(a *attempt) (contract.AccountID, error) {
+	id, err := l.cfg.NewID()
+	if err != nil {
+		return "", err
+	}
+	tmp, err := CopyToken(filepath.Join(a.dir, filepath.FromSlash(tokenName)), l.cfg.Layout.HostAgyTokens())
+	if err != nil {
+		return "", err
+	}
+	defer os.Remove(tmp)
 	err = l.cfg.Publish(context.Background(), id, a.label, func() error {
-		return os.Rename(tmp.Name(), l.cfg.Layout.HostAgyToken(string(id)))
+		return os.Rename(tmp, l.cfg.Layout.HostAgyToken(string(id)))
 	})
 	if err != nil {
 		return "", err

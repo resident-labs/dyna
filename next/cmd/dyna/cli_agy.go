@@ -1,6 +1,8 @@
 package main
 
 import (
+	"fmt"
+
 	"github.com/resident-labs/dyna/contract"
 	"github.com/spf13/cobra"
 )
@@ -11,6 +13,22 @@ func agyCommand(getClient func() client) *cobra.Command {
 		_, err := getClient().HostAgySeed(cmd.Context(), contract.HostAgySeedRequest{Host: contract.HostName(args[0])})
 		return err
 	}}
-	agy.AddCommand(seed)
+	use := &cobra.Command{Use: "use ACCOUNT", Short: "Make an Antigravity account the one every agy session uses", Long: "Switch the Antigravity account that every agy session uses to ACCOUNT, an added account by its label or id. Only the owner does this, and only by this command or the Settings button: it is never offered in a quota notice and never happens by itself. It refuses before changing anything when the account is unknown, a seed or an import is running, no account is active yet (run `dyna agy import` first), or any agy host does not answer. Then no agy session takes a turn until it ends: it waits up to 5 minutes for running agy turns to end (if any remain it releases and says how many), swaps the sign-in host by host, hermeslab first, and ends every agy process on each host, so work agy left running there is ended and the next turn starts a new process on the same conversation. It prints one line per host. If a host fails the switch is left unfinished and agy sessions stay held; run it again (a host that already has the account's token is skipped) or switch back to the old account. It can take minutes, and the command waits with no timeout of its own, so do not wrap it in a short one. The sign-in is moved as a file and never read or logged.", Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
+		out, err := getClient().AgyUse(cmd.Context(), contract.AgyUseRequest{Account: args[0]})
+		for _, h := range out.Hosts {
+			fmt.Fprintf(cmd.OutOrStdout(), "%s: %s\n", h.Host, h.Result)
+		}
+		return err
+	}}
+	var file string
+	import_ := &cobra.Command{Use: "import LABEL", Short: "Take an existing Antigravity sign-in as an account", Long: "Take an Antigravity sign-in made outside Dyna as an account with the label you choose. With no --file it is the sign-in the engine host holds now (hermeslab's main folder), and the new account becomes the active one, since main holds it; it is refused while an account is already active. With --file NAME it is that token file from the engine host's agy accounts folder (a plain file name there, not a path, not a link), as an account that is not active. The file is copied whole and never read, parsed or logged; the only check is that two copies of main match. Only the owner, and only on the engine host.", Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
+		out, err := getClient().AgyImport(cmd.Context(), contract.AgyImportRequest{Label: args[0], File: file})
+		if err == nil {
+			fmt.Fprintf(cmd.OutOrStdout(), "%s\n", out.Account)
+		}
+		return err
+	}}
+	import_.Flags().StringVar(&file, "file", "", "a token file name in the agy accounts folder; with none, main's own sign-in")
+	agy.AddCommand(seed, use, import_)
 	return agy
 }

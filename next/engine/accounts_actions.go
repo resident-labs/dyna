@@ -20,6 +20,7 @@ var (
 	errAccountAction  = errors.New("account action unavailable")
 	errAccountMissing = errors.New("account not found")
 	errAgyLimits      = errors.New("an Antigravity account has no room limits")
+	errAgyInUse       = errors.New("this is the active Antigravity account, or one a switch is using: switch to another account first")
 )
 
 type accountActionResult struct {
@@ -34,7 +35,10 @@ type AccountActions struct {
 	connections *model.Connections
 	quotas      *model.Quotas
 	agy         *agylogin.Logins
-	removeMu    sync.Mutex
+	agyHosts    AgyHosts
+	// agyTurnWait is how long a switch waits for running agy turns (5 minutes), and agyTurnPoll how often it looks; tests shorten them.
+	agyTurnWait, agyTurnPoll time.Duration
+	removeMu                 sync.Mutex
 }
 
 func NewAccountActions(service *Service, connections *model.Connections, quotas *model.Quotas) *AccountActions {
@@ -130,6 +134,9 @@ func (s *AccountActions) runAccountAction(ctx context.Context, caller contract.P
 			if errors.Is(result.err, agylogin.ErrNoAttempt) {
 				return accountActionResult{}, &contract.Error{Code: contract.ErrNotFound, Message: result.err.Error()}
 			}
+			if errors.Is(result.err, errAgyInUse) {
+				return accountActionResult{}, &contract.Error{Code: contract.ErrConflict, Message: result.err.Error()}
+			}
 			if errors.Is(result.err, errAccountMissing) {
 				return accountActionResult{}, &contract.Error{Code: contract.ErrNotFound, Message: "account not found"}
 			}
@@ -183,12 +190,17 @@ func (s *AccountActions) AccountsList(ctx context.Context, caller contract.Princ
 	}
 	providers := model.AccountProviders(credentials)
 	if s.agy != nil {
+		use, err := s.service.store.AgyUse(ctx)
+		if err != nil {
+			return contract.AccountsListResponse{}, &contract.Error{Code: contract.ErrUnavailable, Message: "accounts unavailable"}
+		}
 		added, err := s.service.store.AgyAccounts(ctx)
 		if err != nil {
 			return contract.AccountsListResponse{}, &contract.Error{Code: contract.ErrUnavailable, Message: "accounts unavailable"}
 		}
 		for _, account := range added {
 			listed := contract.Account{ID: account.ID, Provider: contract.ProviderAgy, Label: account.Label, Rooms: []contract.RoomID{}, Preferred: []contract.RoomID{}, State: contract.AccountConnected}
+			listed.Active = account.ID == use.Active
 			// A row whose token file is missing, which a crash between the two leaves, is listed as needing a sign-in and can be removed.
 			if _, err := os.Stat(s.service.layout.HostAgyToken(string(account.ID))); err != nil {
 				listed.State, listed.Reason = contract.AccountSignInExpired, contract.AccountCredentialMissing
@@ -197,7 +209,13 @@ func (s *AccountActions) AccountsList(ctx context.Context, caller contract.Princ
 		}
 		providers = append(providers, contract.AccountProviderInfo{ID: contract.ProviderAgy, DisplayName: "Antigravity", ConnectMethod: contract.ConnectOAuth, ConnectFlow: contract.ConnectFlowCode})
 	}
-	return contract.AccountsListResponse{Accounts: accounts, Providers: providers}, nil
+	out := contract.AccountsListResponse{Accounts: accounts, Providers: providers}
+	if s.agy != nil {
+		if use, err := s.service.store.AgyUse(ctx); err == nil && use.Held {
+			out.AgySwitch = &contract.AgySwitch{Target: use.Target, Host: use.StuckHost}
+		}
+	}
+	return out, nil
 }
 
 func (s *AccountActions) AccountsConnect(ctx context.Context, caller contract.Principal, req contract.AccountsConnectRequest) (contract.AccountsConnectResponse, *contract.Error) {
@@ -408,6 +426,11 @@ func (s *AccountActions) PublishAgy(ctx context.Context, id contract.AccountID, 
 
 // removeAgy deletes an added Antigravity account: its token file, then its row. A missing file is not an error.
 func (s *AccountActions) removeAgy(ctx context.Context, id contract.AccountID) error {
+	if inUse, err := s.service.store.AgyAccountInUse(ctx, id); err != nil {
+		return err
+	} else if inUse {
+		return errAgyInUse
+	}
 	if err := os.Remove(s.service.layout.HostAgyToken(string(id))); err != nil && !errors.Is(err, os.ErrNotExist) {
 		return err
 	}

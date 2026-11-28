@@ -343,6 +343,14 @@ func (l Layout) HostGit(repo contract.RepoName) (string, error) {
 // HostAgyAccount is the signed-in agy profile folder on the agy host, which a box of an agy session mounts read-write. Dyna never reads it.
 func (l Layout) HostAgyAccount() string { return filepath.Join(l.HostData, "agy", "accounts", "main") }
 
+// HostAgyAccounts is the folder of agy account folders on the agy host: main, the one agents use, and any sign-in the owner left beside it.
+func (l Layout) HostAgyAccounts() string { return filepath.Dir(l.HostAgyAccount()) }
+
+// HostAgyMainToken is the sign-in inside main, the one file a switch swaps. Dyna copies it whole and never reads inside it.
+func (l Layout) HostAgyMainToken() string {
+	return filepath.Join(l.HostAgyAccount(), "antigravity-acp", "antigravity-oauth-token")
+}
+
 // HostAgyBinary is the installed agy program on the agy host, which a box of an agy session mounts read-only.
 func (l Layout) HostAgyBinary() string { return filepath.Join(l.HostData, "agy", "antigravity") }
 
