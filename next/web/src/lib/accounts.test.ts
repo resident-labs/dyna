@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { accountChips, accountChoiceName, accountChoiceNote, accountItems, accountLine, accountPath, accountPill, addProviderError, invalidInput, loginUnfinished, pasteFailure, pollFailure, labelRefusal, parseModelIDs, providerChoices, removalPrompt,
+import { agyUse, switchProblem, accountChips, accountChoiceName, accountChoiceNote, accountItems, accountLine, accountPath, accountPill, addProviderError, invalidInput, loginUnfinished, pasteFailure, pollFailure, labelRefusal, parseModelIDs, providerChoices, removalPrompt,
   reconnectUnavailable, roomChoices, usageHint, usageNote, type AccountItem } from "./accounts.ts";
 import { APIError } from "./client.ts";
 import type { Account, AccountProviderInfo, AccountUsage, ErrorCode, RoomSummary, UsageWindow } from "./contract.gen.ts";
@@ -212,4 +212,32 @@ test("a status poll that fails for an Antigravity sign-in gives the fixed messag
   assert.equal(pollFailure("code"), loginUnfinished);
   assert.equal(pollFailure("device"), "Could not reach the service. Try again.");
   assert.match(loginUnfinished, /stop and tell root/);
+});
+
+test("an Antigravity account row says whether it is the one in use, with a pill for it, and the title reads Add an Antigravity account", () => {
+  const base = { id: "agy_a", provider: "agy", label: "Second", rooms: [], preferred: [], state: "connected" } as unknown as Account;
+  assert.equal(accountPill(base), undefined);
+  assert.deepEqual(accountPill({ ...base, active: true }), { tone: "working", label: "Active" });
+  const line = (account: Account) => accountLine({ account, provider: undefined, usage: undefined, name: "Second" } as unknown as AccountItem);
+  assert.equal(line(base), "Stored, not in use");
+  assert.equal(line({ ...base, active: true }), "Used by every Antigravity session");
+  assert.equal(switchProblem(new APIError({ code: "conflict", message: "2 agy turns are still running" })), "2 agy turns are still running");
+  assert.match(switchProblem(new Error("x")), /Try again/);
+});
+
+test("an unfinished Antigravity switch offers only finishing it, on its target, and names the host", () => {
+  const account = (id: string, active = false) => ({ id, provider: "agy", label: id, rooms: [], preferred: [], state: "connected", active }) as unknown as Account;
+  const held = { target: "agy_new", host: "node" };
+  const target = agyUse(account("agy_new"), held, "New");
+  assert.equal(target.button, "Finish switch to New");
+  assert.match(target.note, /Switch to New not finished: host node/);
+  for (const other of [account("agy_old", true), account("agy_third")]) {
+    const shown = agyUse(other, held, "New");
+    assert.equal(shown.button, undefined);
+    assert.match(shown.note, /Switch to New not finished: host node/);
+    assert.doesNotMatch(shown.note, /back|old/i);
+  }
+  assert.equal(agyUse(account("agy_new"), { target: "agy_new" }, "New").note.includes("host"), false);
+  assert.equal(agyUse(account("agy_new"), undefined, undefined).button, "Use this account");
+  assert.equal(agyUse(account("agy_old", true), undefined, undefined).button, undefined);
 });

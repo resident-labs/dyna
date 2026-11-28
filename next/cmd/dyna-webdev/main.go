@@ -62,6 +62,12 @@ func (devService) HostAdd(context.Context, contract.Principal, contract.HostAddR
 	return contract.HostAddResponse{}, &contract.Error{Code: contract.ErrUnavailable, Message: "webdev uses only " + host}
 }
 
+func (devService) AgyUse(context.Context, contract.Principal, contract.AgyUseRequest) (contract.AgyUseResponse, *contract.Error) {
+	return contract.AgyUseResponse{}, &contract.Error{Code: contract.ErrUnavailable, Message: "webdev switches no account"}
+}
+func (devService) AgyImport(context.Context, contract.Principal, contract.AgyImportRequest) (contract.AgyImportResponse, *contract.Error) {
+	return contract.AgyImportResponse{}, &contract.Error{Code: contract.ErrUnavailable, Message: "webdev imports no account"}
+}
 func (devService) HostAgySeed(context.Context, contract.Principal, contract.HostAgySeedRequest) (contract.HostAgySeedResponse, *contract.Error) {
 	return contract.HostAgySeedResponse{}, &contract.Error{Code: contract.ErrUnavailable, Message: "webdev seeds no host"}
 }

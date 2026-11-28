@@ -118,6 +118,8 @@ type Service interface {
 	RoomDelete(context.Context, contract.Principal, contract.RoomDeleteRequest) (contract.RoomDeleteResponse, *contract.Error)
 	HostSetLimits(context.Context, contract.Principal, contract.HostSetLimitsRequest) (contract.HostSetLimitsResponse, *contract.Error)
 	HostAgySeed(context.Context, contract.Principal, contract.HostAgySeedRequest) (contract.HostAgySeedResponse, *contract.Error)
+	AgyUse(context.Context, contract.Principal, contract.AgyUseRequest) (contract.AgyUseResponse, *contract.Error)
+	AgyImport(context.Context, contract.Principal, contract.AgyImportRequest) (contract.AgyImportResponse, *contract.Error)
 	HostSet(context.Context, contract.Principal, contract.HostSetRequest) (contract.HostSetResponse, *contract.Error)
 	OwnerTimezone(context.Context, contract.Principal, contract.OwnerTimezoneRequest) (contract.OwnerTimezoneResponse, *contract.Error)
 	RoomSet(context.Context, contract.Principal, contract.RoomSetRequest) (contract.RoomSetResponse, *contract.Error)

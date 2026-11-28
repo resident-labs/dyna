@@ -2,10 +2,10 @@
   import { onMount, tick, type Snippet } from "svelte";
   import { call, SignedOut } from "../client.ts";
   import { accountChips, accountItems, accountLine, accountPill, addProviderError, loginUnfinished, pasteFailure, pollFailure, labelRefusal, parseModelIDs, providerChoices, refused, reconnectUnavailable, removalPrompt,
-    usageHint, usageNote, type AccountItem } from "../accounts.ts";
+    agyUse, switchProblem, usageHint, usageNote, type AccountItem } from "../accounts.ts";
   import { balancesText, visibleWindows } from "../usage.ts";
   import { confirm } from "../modal.ts";
-  import type { Account, AccountProviderInfo, AccountUsage, AccountsConnectResponse, ConnectFlow, RoomSummary } from "../contract.gen.ts";
+  import type { Account, AccountProviderInfo, AccountUsage, AccountsConnectResponse, AgySwitch, AgyUseHost, ConnectFlow, RoomSummary } from "../contract.gen.ts";
   import Icon from "./Icon.svelte";
   import Avatar from "./Avatar.svelte";
   import StatusPill from "./StatusPill.svelte";
@@ -45,6 +45,18 @@
   // The open Antigravity sign-in's attempt. Plain, not state: cancel() runs inside an effect that must not depend on it.
   let codeAttempt: string | undefined;
 
+  // An Antigravity switch left unfinished, from the list, and the one a click runs: its progress text and each host's result.
+  let agySwitch: AgySwitch | undefined = $state();
+  let switching = $state(false), switched: AgyUseHost[] = $state([]);
+  async function useAccount(a: Account) {
+    if (switching) return;
+    switching = true; switched = []; problem = "";
+    await call("agy.use", { account: a.id }).then(result => { switched = result.hosts ?? []; },
+      (reason: unknown) => { if (!gone(reason)) problem = switchProblem(reason); });
+    switching = false;
+    await reload();
+  }
+
   // The open account's label field.
   let saved = $derived(item?.account.label);
   let labelDraft = $state(""), labelError = $state(""), labelSaving = $state(false);
@@ -57,7 +69,7 @@
   function reload() {
     void call("accounts.quota", {}).then(result => { usage = result.accounts ?? []; loadedAt = Date.now(); }, () => {});
     void call("room.list", {}).then(result => { rooms = result.rooms ?? []; }, () => {});
-    return call("accounts.list", {}).then(result => { providers = result.providers ?? []; accounts = result.accounts ?? []; failed = false; },
+    return call("accounts.list", {}).then(result => { providers = result.providers ?? []; accounts = result.accounts ?? []; agySwitch = result.agySwitch ?? undefined; failed = false; },
       (reason: unknown) => { if (!gone(reason) && !accounts) failed = true; });
   }
   function refresh() { void reload(); }
@@ -221,7 +233,7 @@
   }
   const ways: Record<ConnectFlow, string> = { callback: "Sign in with your plan", device: "Sign in with a code", key: "API key",
     code: "Adds one more Antigravity sign-in. Dyna keeps it but does not use it until you switch to it." };
-  const connected: Record<ConnectFlow, string> = { callback: "signed in with a plan", device: "signed in with a code", key: "API key", code: "stored, not in use" };
+  const connected: Record<ConnectFlow, string> = { callback: "signed in with a plan", device: "signed in with a code", key: "API key", code: "stored" };
   const plural = (n: number, one: string, many: string) => `${n.toLocaleString("en")} ${n === 1 ? one : many}`;
   const initial = (name: string) => name.slice(0, 1).toUpperCase();
   const clock = (at: string) => new Date(at).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
@@ -248,7 +260,7 @@
 {#snippet waiting(open: AccountsConnectResponse, name: string)}
   {#if open.flow === "code"}
     {#if connectState === "pending"}
-    <div class="step"><span class="badge-step" class:checked={opened} aria-hidden="true">{#if opened}<Icon name="check" size={14} />{:else}1{/if}</span><p>Open this link and sign in with a DIFFERENT Google account than your other Antigravity accounts.<br />
+    <div class="step"><span class="badge-step" class:checked={opened} aria-hidden="true">{#if opened}<Icon name="check" size={14} />{:else}1{/if}</span><p>Open this link and sign in with a different Google account than your other Antigravity accounts.<br />
       <a href={open.link} target="_blank" rel="noopener noreferrer" onclick={() => opened = true}>{opened ? "Opened in your browser" : "Open sign-in"} ↗</a>
       <button class="btn ghost" type="button" onclick={() => { void navigator.clipboard.writeText(open.link); copied = true; }}>{copied ? "Copied" : "Copy link"}</button></p></div>
     <form class="form" onsubmit={event => { event.preventDefault(); void finish(); }}>
@@ -333,6 +345,11 @@
   <label class="field">Label<input class="input label" aria-invalid={!!labelError} autocomplete="off" bind:value={labelDraft} readonly={labelSaving}
     onblur={() => void saveLabel(a)} onkeydown={event => { if (event.key === "Enter" && !event.isComposing) { event.preventDefault(); void saveLabel(a); } }} />
     {#if labelError}<span class="problem" role="alert">{labelError}</span>{/if}</label>
+  {#if each.provider?.connectFlow === "code"}{@const use = agyUse(a, agySwitch, (accounts ?? []).find(x => x.id === agySwitch?.target)?.label)}<div class="section"><strong class="head">Use</strong>
+    <p class={use.held ? "problem" : "small muted"} role={use.held ? "alert" : undefined}>{use.note}</p>
+    {#if use.button}<div class="actions"><button type="button" class="btn" disabled={switching || a.state !== "connected"} onclick={() => void useAccount(a)}>{switching ? "Switching…" : use.button}</button></div>{/if}
+    {#if switching}<p class="small muted" role="status">Switching the account on each host. This can take a few minutes.</p>{/if}
+    {#each switched as host}<p class="small">{host.host}: {host.result}</p>{/each}</div>{/if}
   {#if each.provider?.connectFlow !== "code"}
   <div class="section"><strong class="head">Usage{#if each.usage?.observedAt && windows.length}<span class="at">· at {clock(each.usage.observedAt)}</span>{/if}</strong>
     {#if note}<p class="small muted">{note}</p>{/if}
@@ -372,7 +389,7 @@
 
 <!-- svelte-ignore a11y_no_static_element_interactions: Esc is caught on its way down, before ListDetail closes the detail with it. -->
 <div class="keys" onkeydowncapture={escape}>
-<ListDetail bar={header} empty={items?.length === 0} label="Accounts" title={creating ? (picked === "new" ? "Add provider" : provider ? `Add a ${provider.displayName} account` : "Add an account") : item?.name ?? "Not found"}
+<ListDetail bar={header} empty={items?.length === 0} label="Accounts" title={creating ? (picked === "new" ? "Add provider" : provider ? (provider.connectFlow === "code" ? `Add an ${provider.displayName} account` : `Add a ${provider.displayName} account`) : "Add an account") : item?.name ?? "Not found"}
   open={creating || (!!accounts && selected !== undefined)} onselect={select} onclose={close} {list} {detail} {summary} />
 </div>
 

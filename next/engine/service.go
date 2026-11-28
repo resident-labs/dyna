@@ -123,6 +123,7 @@ type Service struct {
 	toolCalls              map[contract.SessionID]map[string]seenCall // under transcriptMu
 	agents                 agentRuns
 	layout                 box.Layout
+	agyOps                 agyOps
 	browserMu              sync.Mutex
 	browserLocks           map[string]*sync.Mutex
 	browserJars            map[string]*browser.Jar

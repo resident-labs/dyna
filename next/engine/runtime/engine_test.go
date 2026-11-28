@@ -103,3 +103,50 @@ func TestHostAddChecksNameAndSSHAtTheBoundary(t *testing.T) {
 		t.Fatalf("error=%v called=%v", err, f.called)
 	}
 }
+
+// A seed copies main, whose token a switch replaces: it is refused while a switch is held or another seed, switch or import runs, and
+// nothing is copied then.
+func TestAgySeedIsRefusedWhileASwitchIsHeldOrAnotherOpRuns(t *testing.T) {
+	ctx := context.Background()
+	st, err := store.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	if err := st.AddHost(ctx, box.Host{Name: "other", CPUs: 8, MemBytes: 4096}); err != nil {
+		t.Fatal(err)
+	}
+	f := &seedCounter{}
+	svc := &serviceWithHosts{Service: engine.New(st, nil, nil, time.Now), boxes: f}
+	owner := contract.Principal{Kind: contract.PrincipalOwner}
+	if _, problem := svc.HostAgySeed(ctx, owner, contract.HostAgySeedRequest{Host: "other"}); problem != nil || f.seeded != 1 {
+		t.Fatalf("a seed with nothing held: %v %d", problem, f.seeded)
+	}
+	if _, err := st.BeginAgySwitch(ctx, "agy_x"); err != nil {
+		t.Fatal(err)
+	}
+	if _, problem := svc.HostAgySeed(ctx, owner, contract.HostAgySeedRequest{Host: "other"}); problem == nil || problem.Code != contract.ErrConflict || f.seeded != 1 {
+		t.Fatalf("a seed while held: %v %d", problem, f.seeded)
+	}
+	if err := st.AbortAgySwitch(ctx); err != nil {
+		t.Fatal(err)
+	}
+	end, ok := svc.Service.AgyExclusive()
+	if !ok {
+		t.Fatal("exclusive refused")
+	}
+	if _, problem := svc.HostAgySeed(ctx, owner, contract.HostAgySeedRequest{Host: "other"}); problem == nil || problem.Code != contract.ErrConflict || f.seeded != 1 {
+		t.Fatalf("a seed while another op runs: %v %d", problem, f.seeded)
+	}
+	end()
+	if _, problem := svc.HostAgySeed(ctx, owner, contract.HostAgySeedRequest{Host: "other"}); problem != nil || f.seeded != 2 {
+		t.Fatalf("a seed after both ended: %v %d", problem, f.seeded)
+	}
+}
+
+type seedCounter struct {
+	fakeRegistrar
+	seeded int
+}
+
+func (s *seedCounter) SeedAgy(context.Context, contract.HostName) error { s.seeded++; return nil }

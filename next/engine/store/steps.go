@@ -6,7 +6,7 @@ import (
 	"strconv"
 )
 
-const schemaVersion = 136
+const schemaVersion = 137
 
 const agentsTable = `CREATE TABLE agents (id TEXT PRIMARY KEY, session TEXT NOT NULL REFERENCES sessions(id), turn TEXT NOT NULL, name TEXT NOT NULL, state TEXT NOT NULL, transcript TEXT NOT NULL DEFAULT '', start_offset INTEGER NOT NULL DEFAULT 0, started_at INTEGER NOT NULL, ended_at INTEGER NOT NULL DEFAULT 0, model TEXT NOT NULL DEFAULT '', input_tokens INTEGER NOT NULL DEFAULT 0, output_tokens INTEGER NOT NULL DEFAULT 0, cache_read_tokens INTEGER NOT NULL DEFAULT 0, cache_write_tokens INTEGER NOT NULL DEFAULT 0)`
 
@@ -16,6 +16,8 @@ var steps = map[int][]string{
 	// agy: when an account's usage limit resets, from the stated reset of a turn that ended on it. Sessions of an agy account take no turn before then.
 	134: {`CREATE TABLE IF NOT EXISTS agy_limits (account TEXT PRIMARY KEY, until INTEGER NOT NULL)`},
 	135: {`CREATE TABLE IF NOT EXISTS agy_accounts (id TEXT PRIMARY KEY, label TEXT NOT NULL, created INTEGER NOT NULL)`},
+	// agy: which added account is active for every agy session, whose sign-in the engine host's token file holds, and an unfinished switch (held, its target and the host it stopped at). One row.
+	136: {`CREATE TABLE IF NOT EXISTS agy_account (one INTEGER PRIMARY KEY CHECK (one=1), active TEXT NOT NULL DEFAULT '', held INTEGER NOT NULL DEFAULT 0, target TEXT NOT NULL DEFAULT '', stuck_host TEXT NOT NULL DEFAULT '')`},
 	133: {`ALTER TABLE room_repos ADD COLUMN step_branch_expiry INTEGER NOT NULL DEFAULT 0`},
 	// A GitHub poll may outlive deletion and re-creation of a repository registration.
 	131: {`CREATE TABLE IF NOT EXISTS repo_registrations (repo TEXT PRIMARY KEY REFERENCES repos(repo) ON DELETE CASCADE, generation TEXT NOT NULL)`, `INSERT INTO repo_registrations(repo,generation) SELECT repo,lower(hex(randomblob(16))) FROM repos WHERE true ON CONFLICT(repo) DO NOTHING`},

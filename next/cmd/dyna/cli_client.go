@@ -41,6 +41,8 @@ type client interface {
 	HostAdd(context.Context, contract.HostAddRequest) (contract.HostAddResponse, error)
 	HostSetLimits(context.Context, contract.HostSetLimitsRequest) (contract.HostSetLimitsResponse, error)
 	HostAgySeed(context.Context, contract.HostAgySeedRequest) (contract.HostAgySeedResponse, error)
+	AgyUse(context.Context, contract.AgyUseRequest) (contract.AgyUseResponse, error)
+	AgyImport(context.Context, contract.AgyImportRequest) (contract.AgyImportResponse, error)
 	HostSet(context.Context, contract.HostSetRequest) (contract.HostSetResponse, error)
 	OwnerTimezone(context.Context, contract.OwnerTimezoneRequest) (contract.OwnerTimezoneResponse, error)
 	BrowserCreate(context.Context, contract.BrowserCreateRequest) (contract.BrowserCreateResponse, error)
@@ -276,6 +278,14 @@ func (c *socketClient) SessionStop(ctx context.Context, q contract.SessionStopRe
 
 func (c *socketClient) RoomCreate(ctx context.Context, q contract.RoomCreateRequest) (contract.RoomCreateResponse, error) {
 	return call[contract.RoomCreateRequest, contract.RoomCreateResponse](ctx, c, contract.MethodRoomCreate, q)
+}
+
+func (c *socketClient) AgyUse(ctx context.Context, q contract.AgyUseRequest) (contract.AgyUseResponse, error) {
+	return call[contract.AgyUseRequest, contract.AgyUseResponse](ctx, c, contract.MethodAgyUse, q)
+}
+
+func (c *socketClient) AgyImport(ctx context.Context, q contract.AgyImportRequest) (contract.AgyImportResponse, error) {
+	return call[contract.AgyImportRequest, contract.AgyImportResponse](ctx, c, contract.MethodAgyImport, q)
 }
 
 func (c *socketClient) HostAgySeed(ctx context.Context, q contract.HostAgySeedRequest) (contract.HostAgySeedResponse, error) {
