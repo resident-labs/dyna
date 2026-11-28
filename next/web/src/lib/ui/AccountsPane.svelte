@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount, tick, type Snippet } from "svelte";
   import { call, SignedOut } from "../client.ts";
-  import { accountChips, accountItems, accountLine, accountPill, addProviderError, invalidInput, labelRefusal, parseModelIDs, providerChoices, refused, reconnectUnavailable, removalPrompt,
+  import { accountChips, accountItems, accountLine, accountPill, addProviderError, loginUnfinished, pasteFailure, pollFailure, labelRefusal, parseModelIDs, providerChoices, refused, reconnectUnavailable, removalPrompt,
     usageHint, usageNote, type AccountItem } from "../accounts.ts";
   import { balancesText, visibleWindows } from "../usage.ts";
   import { confirm } from "../modal.ts";
@@ -123,7 +123,7 @@
         if (result.status === "connected") { codeAttempt = undefined; if (reconnect) { cancel(); refresh(); } else void added(result.accountId); }
         else if (result.status === "pending") watch(id, ticket);
         else { connectState = result.status; error = attempt?.flow === "code" ? loginUnfinished : result.reason === "wrong_account" ? "That sign-in belongs to a different account." : result.reason === "adoption_failed" ? "Dyna cannot reconnect this sign-in. Remove it and add it again." : ""; }
-      }, () => { if (ticket === generation) { connectState = "failed"; error = "Could not reach the service. Try again."; } });
+      }, () => { if (ticket === generation) { connectState = "failed"; error = pollFailure(attempt?.flow ?? "key"); } });
     }, 2000);
   }
   function remaining(at: string) {
@@ -163,7 +163,12 @@
   async function finish() {
     if (!attempt || busy || !redirect.trim()) return;
     const ticket = generation, url = redirect; redirect = ""; busy = true;
-    await call("accounts.connect_callback", { attempt: attempt.attempt, redirectUrl: url }).catch((reason: unknown) => { if (!gone(reason) && ticket === generation) error = invalidInput(reason) ? "That is not the code for this sign-in. Paste the code the page shows, or the page's address." : "Could not finish sign-in. Try again."; });
+    await call("accounts.connect_callback", { attempt: attempt.attempt, redirectUrl: url }).catch((reason: unknown) => {
+      if (gone(reason) || ticket !== generation) return;
+      const failed = pasteFailure(attempt?.flow ?? "key", reason);
+      error = failed.text;
+      if (failed.ended) connectState = "failed";
+    });
     busy = false;
   }
   async function addProvider() {
@@ -214,8 +219,6 @@
     if (field && saved !== undefined && labelDraft !== saved) { event.preventDefault(); labelDraft = saved; labelError = ""; }
     else if (attempt) { event.preventDefault(); cancel(); }
   }
-  // Every Antigravity sign-in that ends without success says this and nothing of what agy printed: Dyna reads none of it, and an owner who sees a Google refusal must not retry.
-  const loginUnfinished = "The login did not finish. If Google showed a verification or restriction message, stop and tell root; otherwise use Add again.";
   const ways: Record<ConnectFlow, string> = { callback: "Sign in with your plan", device: "Sign in with a code", key: "API key",
     code: "Adds one more Antigravity sign-in. Dyna keeps it but does not use it until you switch to it." };
   const connected: Record<ConnectFlow, string> = { callback: "signed in with a plan", device: "signed in with a code", key: "API key", code: "stored, not in use" };

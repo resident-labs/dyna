@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { accountChips, accountChoiceName, accountChoiceNote, accountItems, accountLine, accountPath, accountPill, addProviderError, invalidInput, labelRefusal, parseModelIDs, providerChoices, removalPrompt,
+import { accountChips, accountChoiceName, accountChoiceNote, accountItems, accountLine, accountPath, accountPill, addProviderError, invalidInput, loginUnfinished, pasteFailure, pollFailure, labelRefusal, parseModelIDs, providerChoices, removalPrompt,
   reconnectUnavailable, roomChoices, usageHint, usageNote, type AccountItem } from "./accounts.ts";
 import { APIError } from "./client.ts";
 import type { Account, AccountProviderInfo, AccountUsage, ErrorCode, RoomSummary, UsageWindow } from "./contract.gen.ts";
@@ -197,4 +197,19 @@ test("only a typed invalid error reads as a refused paste", () => {
   assert.equal(invalidInput(new APIError({ code: "invalid", message: "that is not the code for this sign-in" })), true);
   assert.equal(invalidInput(new APIError({ code: "unavailable", message: "offline" })), false);
   assert.equal(invalidInput(new Error("invalid")), false);
+});
+
+test("a late paste to an Antigravity sign-in that ended gives the fixed message and no Finish; an invalid paste stays editable", () => {
+  const late = pasteFailure("code", new APIError({ code: "not_found", message: "no such sign-in is waiting" }));
+  assert.deepEqual(late, { text: loginUnfinished, ended: true });
+  const invalid = pasteFailure("code", new APIError({ code: "invalid", message: "that is not the code for this sign-in" }));
+  assert.equal(invalid.ended, false);
+  assert.match(invalid.text, /not the code for this sign-in/);
+  assert.deepEqual(pasteFailure("callback", new APIError({ code: "not_found", message: "x" })), { text: "Could not finish sign-in. Try again.", ended: false });
+});
+
+test("a status poll that fails for an Antigravity sign-in gives the fixed message, not a retry hint", () => {
+  assert.equal(pollFailure("code"), loginUnfinished);
+  assert.equal(pollFailure("device"), "Could not reach the service. Try again.");
+  assert.match(loginUnfinished, /stop and tell root/);
 });
