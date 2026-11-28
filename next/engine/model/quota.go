@@ -27,6 +27,7 @@ const quotaRefreshTimeout = 30 * time.Second
 type quotaEntry struct {
 	at    time.Time
 	usage contract.AccountUsage
+	spent bool // last conclusive reading; an unreadable sample does not change it
 	// passive marks a reading that proves nothing about the sign-in, so ObservedState
 	// ignores it: the provider reported nothing the engine could read.
 	passive bool
@@ -36,11 +37,13 @@ type Quotas struct {
 	management managementClient
 	store      AccountStore
 	now        func() time.Time
+	onRecovery func(time.Time)
 	slots      chan struct{}
 	reads      singleflight.Group
 	mu         sync.Mutex
 	cache      map[string]quotaEntry
 	generation uint64
+	recovered  bool // fresh samples detected a recovery not yet published by a whole Read
 	// latest is the last whole Read, and latestAt when it finished or was last asked for.
 	latest   []contract.AccountUsage
 	latestAt time.Time
@@ -50,11 +53,15 @@ func (p *Proxy) Quotas(key string, st AccountStore, now func() time.Time) *Quota
 	return &Quotas{management: managementClient{client: p.client, key: key}, store: st, now: now, slots: make(chan struct{}, quotaReads), cache: make(map[string]quotaEntry)}
 }
 
+// OnRecovery registers a hook before reads begin. A whole Read publishes any newly observed quota recoveries together.
+func (q *Quotas) OnRecovery(hook func(time.Time)) { q.onRecovery = hook }
+
 // Clear drops observations after an account is removed.
 func (q *Quotas) Clear() {
 	q.mu.Lock()
 	clear(q.cache)
 	q.generation++
+	q.recovered = false
 	q.mu.Unlock()
 }
 
@@ -121,8 +128,14 @@ func (q *Quotas) Read(ctx context.Context) (contract.AccountsQuotaResponse, erro
 	reads.Wait()
 	q.markActive(ctx, bound, result.Accounts)
 	q.mu.Lock()
-	q.latest, q.latestAt = result.Accounts, q.now()
+	recovered := q.recovered
+	q.recovered = false
+	now := q.now()
+	q.latest, q.latestAt = result.Accounts, now
 	q.mu.Unlock()
+	if recovered && q.onRecovery != nil {
+		q.onRecovery(now)
+	}
 	return result, nil
 }
 
@@ -229,7 +242,15 @@ func (q *Quotas) usage(ctx context.Context, file Credential, account contract.Ac
 		usage, passive := quotaUsage(file, account.ID, data, err)
 		q.mu.Lock()
 		if q.generation == generation {
-			q.cache[file.Index] = quotaEntry{at: q.now(), usage: usage, passive: passive}
+			// The singleflight above orders fresh samples per credential. A Read finishing
+			// later with an older cached result cannot change this observation.
+			spent := q.cache[file.Index].spent
+			if usage.Cause == contract.UsageOK && len(usage.Windows) > 0 {
+				wasSpent := spent
+				spent = slices.ContainsFunc(usage.Windows, func(w contract.UsageWindow) bool { return w.UsedPercent >= 100 })
+				q.recovered = q.recovered || wasSpent && !spent
+			}
+			q.cache[file.Index] = quotaEntry{at: q.now(), usage: usage, passive: passive, spent: spent}
 		}
 		q.mu.Unlock()
 		return usage, nil

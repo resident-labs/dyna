@@ -19,6 +19,16 @@ const legacyModelRetryPending = `(s.model_retry_at=0 AND s.model_retries>0
   AND e.seq>COALESCE((SELECT MAX(c.seq) FROM events c WHERE c.room=s.room AND c.type='turn.ended'
    AND json_extract(c.body,'$.session')=s.id AND json_extract(c.body,'$.outcome')='completed'),0)))`
 
+// ReleaseModelRetries makes future proxy-model retries due on the next sweep. Antigravity has its own quota gate.
+func (s *Store) ReleaseModelRetries(ctx context.Context, now time.Time) error {
+	return s.Write(ctx, func(tx *sql.Tx) error {
+		_, err := tx.ExecContext(ctx, `UPDATE sessions AS s SET model_retry_at=?1
+WHERE s.state='open' AND s.closed_at IS NULL AND s.model_retry_at>0 AND s.model_retry_at>?1
+AND EXISTS (SELECT 1 FROM boxes b WHERE b.session=s.id AND b.harness!=?2)`, now.UnixMilli(), contract.HarnessAgy)
+		return err
+	})
+}
+
 // model_retry_at is a positive deadline, -1 for a deferred failure with no
 // scheduled wake, or 0 once settled. Only positive values are timestamps.
 // WakeModelRetries returns due failed-turn deliveries to the normal wake path.
