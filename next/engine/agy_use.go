@@ -24,9 +24,9 @@ type AgyHosts interface {
 	// AgyHostAnswers is nil when the host answers and has an account folder to put a token in.
 	AgyHostAnswers(ctx context.Context, host contract.HostName) error
 	// AgyInstall puts the stored file in as the host's token, under the host's lock: if the host's token already is that file it does nothing
-	// and says so (same); otherwise it ends the host's agy servers (and fails if one stays), copies the host's current token to takeback when
-	// that is not empty, installs the file, compares, and returns how many servers it ended.
-	AgyInstall(ctx context.Context, host contract.HostName, stored, takeback string) (killed int, same bool, err error)
+	// and says so (same); otherwise it ends the host's agy servers (and fails if one stays), installs the file, compares, and returns how
+	// many servers it ended. The host's live token is never copied out.
+	AgyInstall(ctx context.Context, host contract.HostName, stored string) (killed int, same bool, err error)
 }
 
 // SetAgyHosts gives the switch its hosts.
@@ -80,19 +80,19 @@ func (s *AccountActions) agyAccountOf(ctx context.Context, name string) (store.A
 // AgyUse is `dyna agy use`: it makes an added account the one every agy session uses. The owner only, never offered in the quota notice and
 // never automatic.
 //
-//  1. Refuse before anything changes: an unknown account or one with no stored sign-in, nothing active to take back, a seed, switch or
-//     import running, or an agy host that does not answer.
+//  1. Refuse before anything changes: an unknown account or one with no stored sign-in, no account active yet (the sign-in on the engine
+//     host would be overwritten unstored), a seed, switch or import running, or an agy host that does not answer. When the switch is
+//     already held, a host that does not answer is recorded as its stuck host.
 //  2. Hold: one stored flag, which the quota gate reads with the usage limit (agyLimited), so no agy turn, idle compaction or retry wake
 //     goes out.
 //  3. Wait up to the bound for running agy turns to end; if any remain, release and fail with their count.
 //  4. Host by host, the engine host first, each step bounded (agyHostWait): the host's script, under its lock, does nothing where the token
-//     already is the account's, and elsewhere ends the agy servers (a failure to end one fails the host), takes the outgoing sign-in back to
-//     its stored copy (the engine host only) and swaps the token.
+//     already is the account's, and elsewhere ends the agy servers (a failure to end one fails the host) and installs the stored
+//     copy. The live token in main is never copied back: a stored copy is the sign-in as it was signed in.
 //  5. All done: the account is active and the hold is released, in one transaction. A host failed: the hold stays, and the host is named.
 //
 // A switch left unfinished stays held and is finished by running it again for the same account; nothing else is accepted while it is held,
-// and there is no cancel: finish it, then switch back. The active account changes only when every host is done, so a take-back always goes
-// to it. It runs for minutes at worst, and the request has no timeout of its own.
+// and there is no cancel: finish it, then switch back. The active account changes only when every host is done. It runs for minutes at worst, and the request has no timeout of its own.
 func (s *AccountActions) AgyUse(ctx context.Context, caller contract.Principal, req contract.AgyUseRequest) (contract.AgyUseResponse, *contract.Error) {
 	if caller.Kind != contract.PrincipalOwner {
 		return contract.AgyUseResponse{}, forbidden()
@@ -117,7 +117,7 @@ func (s *AccountActions) AgyUse(ctx context.Context, caller contract.Principal, 
 		return contract.AgyUseResponse{}, &contract.Error{Code: contract.ErrConflict, Message: fmt.Sprintf("a switch to %s is unfinished; finish the switch to %s first", s.agyLabel(ctx, use.Target), s.agyLabel(ctx, use.Target))}
 	}
 	if use.Active == "" {
-		return contract.AgyUseResponse{}, invalid("no account is active yet: the sign-in on the engine host would be lost; import it first with `dyna agy import LABEL`")
+		return contract.AgyUseResponse{}, invalid("no account is active yet: the sign-in on the engine host would be overwritten; import it first with `dyna agy import LABEL --file NAME --active`")
 	}
 	if use.Active == target.ID && !use.Held {
 		return contract.AgyUseResponse{}, &contract.Error{Code: contract.ErrConflict, Message: fmt.Sprintf("%s is the active account already", target.Label)}
@@ -132,6 +132,10 @@ func (s *AccountActions) AgyUse(ctx context.Context, caller contract.Principal, 
 	}
 	for _, host := range hosts {
 		if err := s.agyHosts.AgyHostAnswers(ctx, host); err != nil {
+			// A held switch names the host it cannot finish on, for the pane after a reload or a restart; a fresh one records nothing.
+			if use.Held {
+				s.service.store.StickAgySwitch(ctx, host)
+			}
 			return contract.AgyUseResponse{}, &contract.Error{Code: contract.ErrUnavailable, Message: fmt.Sprintf("host %s does not answer (%v); nothing was changed", host, err)}
 		}
 	}
@@ -160,7 +164,7 @@ func (s *AccountActions) AgyUse(ctx context.Context, caller contract.Principal, 
 	}
 	var done []contract.AgyUseHost
 	for _, host := range hosts {
-		result, err := s.swapHost(ctx, host, use.Active, stored)
+		result, err := s.swapHost(ctx, host, stored)
 		if err != nil {
 			s.service.store.StickAgySwitch(ctx, host)
 			return contract.AgyUseResponse{Hosts: done}, &contract.Error{Code: contract.ErrUnavailable, Message: fmt.Sprintf("host %s: %v; the switch is not finished and agy sessions stay held; run the same switch again", host, err)}
@@ -227,20 +231,15 @@ func (s *AccountActions) agyLabel(ctx context.Context, id contract.AccountID) st
 	return string(id)
 }
 
-// swapHost makes one host's token the stored file's, or says it already was, within agyHostWait. The engine host takes the outgoing
-// account's sign-in back to that account's stored copy, which a live agy may have refreshed; the others have no copy to take back.
-func (s *AccountActions) swapHost(ctx context.Context, host contract.HostName, outgoing contract.AccountID, stored string) (string, error) {
+// swapHost makes one host's token the stored file's, or says it already was, within agyHostWait.
+func (s *AccountActions) swapHost(ctx context.Context, host contract.HostName, stored string) (string, error) {
 	wait := s.agyHostWait
 	if wait == 0 {
 		wait = 2 * time.Minute
 	}
 	ctx, cancel := context.WithTimeout(ctx, wait)
 	defer cancel()
-	takeback := ""
-	if host == AgySource {
-		takeback = s.service.layout.HostAgyToken(string(outgoing))
-	}
-	killed, same, err := s.agyHosts.AgyInstall(ctx, host, stored, takeback)
+	killed, same, err := s.agyHosts.AgyInstall(ctx, host, stored)
 	if errors.Is(err, context.DeadlineExceeded) {
 		return "", fmt.Errorf("did not finish within %s", wait)
 	}
@@ -253,11 +252,12 @@ func (s *AccountActions) swapHost(ctx context.Context, host contract.HostName, o
 	return fmt.Sprintf("ok, ended %d agy processes (work agy left running there is ended)", killed), nil
 }
 
-// AgyImport is `dyna agy import`: it takes a sign-in the owner made outside Dyna as an account the owner labels. With no file it is the
-// one main holds on the engine host now, and the account becomes the active one (main holds it); a second import of main is refused while
-// an account is active. With a file name in the engine host's agy accounts folder, it is that token, inactive. The token is copied whole,
-// twice for main and compared (a live agy may refresh it meanwhile; one retry), and never parsed or logged: the compare is the only check,
-// and the label is the owner's. The row goes in first and the file after, as for Add, under the lock Remove takes.
+// AgyImport is `dyna agy import LABEL --file NAME`: it takes a sign-in the owner made outside Dyna as an account the owner labels. NAME is a
+// plain file name in the engine host's agy accounts folder, which boxes do not mount; the file is copied whole, never parsed or logged, and
+// the label is the owner's. Dyna never copies a token out of main, the folder boxes write. With Active, the account is also recorded as the
+// one signed in now: allowed only while no account is active, and only if main's token is the same bytes as the imported copy (main is read
+// for that comparison alone; nothing read from it is stored or sent). The row goes in first and the file after, as for Add, under the lock
+// Remove takes.
 func (s *AccountActions) AgyImport(ctx context.Context, caller contract.Principal, req contract.AgyImportRequest) (contract.AgyImportResponse, *contract.Error) {
 	if caller.Kind != contract.PrincipalOwner {
 		return contract.AgyImportResponse{}, forbidden()
@@ -265,6 +265,9 @@ func (s *AccountActions) AgyImport(ctx context.Context, caller contract.Principa
 	label, ok := model.CleanAccountLabel(req.Label)
 	if !ok {
 		return contract.AgyImportResponse{}, invalid("invalid account label")
+	}
+	if req.File == "" || req.File != filepath.Base(req.File) || req.File == "." || req.File == ".." || strings.ContainsAny(req.File, "/\\\x00") {
+		return contract.AgyImportResponse{}, invalid("name the token file with --file: a plain file name in the agy accounts folder, not a path")
 	}
 	end, ok := s.service.AgyExclusive()
 	if !ok {
@@ -278,27 +281,18 @@ func (s *AccountActions) AgyImport(ctx context.Context, caller contract.Principa
 	if use.Held {
 		return contract.AgyImportResponse{}, &contract.Error{Code: contract.ErrConflict, Message: "an account switch is unfinished; finish it first"}
 	}
+	if req.Active && use.Active != "" {
+		return contract.AgyImportResponse{}, &contract.Error{Code: contract.ErrConflict, Message: "an account is active already; --active is only for the first import"}
+	}
 	layout := s.service.layout
-	folder := layout.HostAgyTokens()
-	var tmp string
-	activate := false
-	if req.File == "" {
-		if use.Active != "" {
-			return contract.AgyImportResponse{}, &contract.Error{Code: contract.ErrConflict, Message: "an account is active already, and main holds its sign-in: importing main again would add it twice"}
-		}
-		if tmp, err = copyStableToken(layout.HostAgyMainToken(), folder); err != nil {
-			return contract.AgyImportResponse{}, &contract.Error{Code: contract.ErrUnavailable, Message: err.Error()}
-		}
-		activate = true
-	} else {
-		if req.File != filepath.Base(req.File) || req.File == "." || req.File == ".." || strings.ContainsAny(req.File, "/\\\x00") {
-			return contract.AgyImportResponse{}, invalid("the file is a plain file name in the agy accounts folder, not a path")
-		}
-		if tmp, err = agylogin.CopyToken(filepath.Join(layout.HostAgyAccounts(), req.File), folder); err != nil {
-			return contract.AgyImportResponse{}, invalid(err.Error())
-		}
+	tmp, err := agylogin.CopyToken(filepath.Join(layout.HostAgyAccounts(), req.File), layout.HostAgyTokens())
+	if err != nil {
+		return contract.AgyImportResponse{}, invalid(err.Error())
 	}
 	defer os.Remove(tmp)
+	if req.Active && !s.mainTokenIs(tmp) {
+		return contract.AgyImportResponse{}, &contract.Error{Code: contract.ErrConflict, Message: "the sign-in now in main is not that file's; nothing was imported (import it without --active, then switch to it)"}
+	}
 	id, err := store.NewAgyAccountID()
 	if err != nil {
 		return contract.AgyImportResponse{}, failure(err)
@@ -308,7 +302,7 @@ func (s *AccountActions) AgyImport(ctx context.Context, caller contract.Principa
 		if err := os.Rename(tmp, dest); err != nil {
 			return err
 		}
-		if activate {
+		if req.Active {
 			if err := s.service.store.ActivateAgyAccount(ctx, id); err != nil {
 				os.Remove(dest)
 				return err
@@ -322,31 +316,36 @@ func (s *AccountActions) AgyImport(ctx context.Context, caller contract.Principa
 	return contract.AgyImportResponse{Account: id}, nil
 }
 
-// copyStableToken copies the file twice and compares the copies, because a live agy may refresh it while it is read; one retry. It returns
-// the first copy, which the caller renames into place or removes.
-func copyStableToken(path, folder string) (string, error) {
-	for range 2 {
-		first, err := agylogin.CopyToken(path, folder)
-		if err != nil {
-			return "", err
-		}
-		second, err := agylogin.CopyToken(path, folder)
-		if err != nil {
-			os.Remove(first)
-			return "", err
-		}
-		same := sameFile(first, second)
-		os.Remove(second)
-		if same {
-			return first, nil
-		}
-		os.Remove(first)
+// mainTokenIs says whether main's token file has the same bytes as the file at path. The one place Dyna reads main: the answer is all that
+// is kept. A path that does not resolve to the expected place under the host data folder (a link) says no, and a file of another size is not
+// read.
+func (s *AccountActions) mainTokenIs(path string) bool {
+	layout := s.service.layout
+	root, err := filepath.EvalSymlinks(layout.HostData)
+	if err != nil {
+		return false
 	}
-	return "", errors.New("the sign-in changed while it was copied, twice; try again")
+	rel, err := filepath.Rel(layout.HostData, layout.HostAgyMainToken())
+	if err != nil {
+		return false
+	}
+	main, err := filepath.EvalSymlinks(layout.HostAgyMainToken())
+	if err != nil || main != filepath.Join(root, rel) {
+		return false
+	}
+	return sameFile(path, main)
 }
 
-// sameFile compares two files' bytes without keeping or showing any.
+// sameFile compares two files' bytes without keeping or showing any; files of different sizes are not read.
 func sameFile(a, b string) bool {
+	ia, err := os.Stat(a)
+	if err != nil || !ia.Mode().IsRegular() {
+		return false
+	}
+	ib, err := os.Stat(b)
+	if err != nil || !ib.Mode().IsRegular() || ia.Size() != ib.Size() {
+		return false
+	}
 	x, err := os.ReadFile(a)
 	if err != nil {
 		return false

@@ -64,9 +64,9 @@ func twice(path string) (io.Reader, int64, func(), error) {
 	return io.MultiReader(io.NewSectionReader(f, 0, size), io.NewSectionReader(f, 0, size)), size, func() { f.Close() }, nil
 }
 
-// AgyInstall swaps the host's token for the stored file, after copying the current one to takeback when that is not empty, and returns
-// how many agy servers it ended, or same when the host had the token already: the host's script decides that under its lock.
-func (b *Boxes) AgyInstall(ctx context.Context, name contract.HostName, stored, takeback string) (int, bool, error) {
+// AgyInstall installs the stored file as the host's token and returns how many agy servers it ended, or same when the host had it already:
+// the host's script decides that under its lock.
+func (b *Boxes) AgyInstall(ctx context.Context, name contract.HostName, stored string) (int, bool, error) {
 	host, err := b.host(ctx, name)
 	if err != nil {
 		return 0, false, err
@@ -76,8 +76,5 @@ func (b *Boxes) AgyInstall(ctx context.Context, name contract.HostName, stored, 
 		return 0, false, err
 	}
 	defer closeFile()
-	if takeback == "" {
-		takeback = "-"
-	}
-	return host.InstallAgyToken(ctx, b.Layout, takeback, size, r)
+	return host.InstallAgyToken(ctx, b.Layout, size, r)
 }

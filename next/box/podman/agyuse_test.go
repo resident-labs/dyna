@@ -15,22 +15,21 @@ import (
 
 const tokenSentinel = "SENTINEL-NEW-TOKEN-5d1e"
 
-// useFolder is an agy folder with an old token, and a folder for stored copies with the outgoing account's.
-func useFolder(t *testing.T) (dir, stored string) {
+// useFolder is an agy folder with an old token and a conversation.
+func useFolder(t *testing.T) string {
 	t.Helper()
-	dir = t.TempDir()
+	dir := t.TempDir()
 	write(t, dir+"/"+agyTokenRel, "OLD-TOKEN", 0o600)
 	write(t, dir+"/accounts/main/antigravity-acp/conversations/c", "CONVERSATION", 0o600)
-	stored = t.TempDir() + "/old-account"
-	write(t, stored, "STALE-COPY", 0o600)
-	return dir, stored
+	return dir
 }
 
 func twice(token string) []byte { return []byte(token + token) }
 
-func TestInstallTakesBackSwapsAndComparesAndLeavesTheRest(t *testing.T) {
-	dir, stored := useFolder(t)
-	out, err := shell(t, twice(tokenSentinel), agyInstallScript, dir, stored, "23", box.AgyBinary, contract.AgyGeminiDir)
+// An install replaces the token and nothing else, and the live token it replaces is copied nowhere.
+func TestInstallSwapsComparesAndLeavesTheRest(t *testing.T) {
+	dir := useFolder(t)
+	out, err := shell(t, twice(tokenSentinel), agyInstallScript, dir, "23", box.AgyBinary, contract.AgyGeminiDir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -43,65 +42,50 @@ func TestInstallTakesBackSwapsAndComparesAndLeavesTheRest(t *testing.T) {
 	if info, _ := os.Stat(dir + "/" + agyTokenRel); info.Mode().Perm() != 0o600 {
 		t.Fatalf("token mode %v", info.Mode())
 	}
-	// The outgoing token went back to its stored copy, whole, privately.
-	if got, _ := os.ReadFile(stored); string(got) != "OLD-TOKEN" {
-		t.Fatalf("take-back %q", got)
-	}
-	if info, _ := os.Stat(stored); info.Mode().Perm() != 0o600 {
-		t.Fatalf("take-back mode %v", info.Mode())
-	}
 	if got, _ := os.ReadFile(dir + "/accounts/main/antigravity-acp/conversations/c"); string(got) != "CONVERSATION" {
 		t.Fatalf("the conversation folder changed: %q", got)
 	}
-	for _, folder := range []string{dir + "/accounts/main/antigravity-acp", filepath.Dir(stored)} {
-		if left, _ := filepath.Glob(folder + "/.*-*"); len(left) != 0 {
-			t.Fatalf("temporaries left in %s: %v", folder, left)
+	if left, _ := filepath.Glob(dir + "/accounts/main/antigravity-acp/.*-*"); len(left) != 0 {
+		t.Fatalf("temporaries left: %v", left)
+	}
+	filepath.WalkDir(dir, func(path string, entry os.DirEntry, err error) error {
+		if data, _ := os.ReadFile(path); err == nil && !entry.IsDir() && strings.Contains(string(data), "OLD-TOKEN") {
+			t.Errorf("the replaced token was copied to %s", path)
 		}
-	}
-	// Without a take-back (a host that is not the engine host) nothing is copied.
-	other, _ := useFolder(t)
-	if _, err := shell(t, twice(tokenSentinel), agyInstallScript, other, "-", "23", box.AgyBinary, contract.AgyGeminiDir); err != nil {
-		t.Fatal(err)
-	}
-	if got, _ := os.ReadFile(other + "/" + agyTokenRel); string(got) != tokenSentinel {
-		t.Fatalf("token %q", got)
-	}
+		return nil
+	})
 }
 
 func TestInstallChangesNothingOnAShortStreamOrAMissingFolder(t *testing.T) {
-	dir, stored := useFolder(t)
-	_, err := shell(t, []byte("SHORT"), agyInstallScript, dir, stored, "23", box.AgyBinary, contract.AgyGeminiDir)
+	dir := useFolder(t)
+	_, err := shell(t, []byte("SHORT"), agyInstallScript, dir, "23", box.AgyBinary, contract.AgyGeminiDir)
 	if exitCode(err) != agyInstallExitSize {
 		t.Fatalf("short stream: %v", err)
 	}
 	if got, _ := os.ReadFile(dir + "/" + agyTokenRel); string(got) != "OLD-TOKEN" {
 		t.Fatalf("token changed: %q", got)
 	}
-	if got, _ := os.ReadFile(stored); string(got) != "STALE-COPY" {
-		t.Fatalf("the stored copy was replaced before the swap could not be made: %q", got)
-	}
 	if left, _ := filepath.Glob(dir + "/accounts/main/antigravity-acp/.dyna-token.*"); len(left) != 0 {
 		t.Fatalf("temporary left: %v", left)
 	}
-	_, err = shell(t, twice(tokenSentinel), agyInstallScript, t.TempDir(), "-", "23", box.AgyBinary, contract.AgyGeminiDir)
+	_, err = shell(t, twice(tokenSentinel), agyInstallScript, t.TempDir(), "23", box.AgyBinary, contract.AgyGeminiDir)
 	if exitCode(err) != agyInstallExitNone {
 		t.Fatalf("host with no account folder: %v", err)
 	}
-	// A take-back that cannot be made (no current token) stops before anything is changed.
+	// A host with the folder and no token yet gets it.
 	bare := t.TempDir()
 	os.MkdirAll(bare+"/accounts/main/antigravity-acp", 0o700)
-	_, err = shell(t, twice(tokenSentinel), agyInstallScript, bare, stored, "23", box.AgyBinary, contract.AgyGeminiDir)
-	if exitCode(err) != agyInstallExitCopy {
-		t.Fatalf("no current token to take back: %v", err)
+	if _, err = shell(t, twice(tokenSentinel), agyInstallScript, bare, "23", box.AgyBinary, contract.AgyGeminiDir); err != nil {
+		t.Fatalf("no current token: %v", err)
 	}
-	if _, err := os.Stat(bare + "/" + agyTokenRel); !os.IsNotExist(err) {
-		t.Fatalf("a token was installed: %v", err)
+	if got, _ := os.ReadFile(bare + "/" + agyTokenRel); string(got) != tokenSentinel {
+		t.Fatalf("token %q", got)
 	}
 }
 
 func TestInstallFailsWhenTheSecondCopyDiffers(t *testing.T) {
-	dir, _ := useFolder(t)
-	_, err := shell(t, []byte(tokenSentinel+"SENTINEL-OTHER-TOKEN-5d1"), agyInstallScript, dir, "-", "23", box.AgyBinary, contract.AgyGeminiDir)
+	dir := useFolder(t)
+	_, err := shell(t, []byte(tokenSentinel+"SENTINEL-OTHER-TOKEN-5d1"), agyInstallScript, dir, "23", box.AgyBinary, contract.AgyGeminiDir)
 	if exitCode(err) != agyInstallExitCheck {
 		t.Fatalf("a differing second copy: %v", err)
 	}
@@ -111,7 +95,7 @@ func TestInstallFailsWhenTheSecondCopyDiffers(t *testing.T) {
 // --login, another folder), an agy with another account folder, a shell whose arguments merely contain the text, and an unrelated process
 // are left alone. Each fake runs a shell with exactly the argv it stands for.
 func TestInstallEndsOnlyTheBoxesAgyServer(t *testing.T) {
-	dir, _ := useFolder(t)
+	dir := useFolder(t)
 	work := t.TempDir()
 	write(t, work+"/acp", "sleep 60\n", 0o644)
 	start := func(argv ...string) *exec.Cmd {
@@ -132,7 +116,7 @@ func TestInstallEndsOnlyTheBoxesAgyServer(t *testing.T) {
 		"text in argv":  start("/bin/sh", "-c", "sleep 60 # antigravity acp --gemini-dir "+contract.AgyGeminiDir+" --app-data-dir antigravity-acp"),
 	}
 	time.Sleep(300 * time.Millisecond) // the shells have exec'd: their command lines are what the script reads
-	out, err := shell(t, twice(tokenSentinel), agyInstallScript, dir, "-", "23", box.AgyBinary, contract.AgyGeminiDir)
+	out, err := shell(t, twice(tokenSentinel), agyInstallScript, dir, "23", box.AgyBinary, contract.AgyGeminiDir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -155,7 +139,7 @@ func TestInstallEndsOnlyTheBoxesAgyServer(t *testing.T) {
 
 // A swap and a seed take the same lock: a swap waits while the lock is held. The wait is a bounded negative check.
 func TestInstallWaitsForTheSeedsLock(t *testing.T) {
-	dir, _ := useFolder(t)
+	dir := useFolder(t)
 	holder := exec.Command("bash", "-c", `exec 9> "$1/.seed.lock"; flock -x 9; echo held; read x`, "dyna", dir)
 	in, _ := holder.StdinPipe()
 	stdout, _ := holder.StdoutPipe()
@@ -169,7 +153,7 @@ func TestInstallWaitsForTheSeedsLock(t *testing.T) {
 	}
 	done := make(chan error, 1)
 	go func() {
-		_, err := shell(t, twice(tokenSentinel), agyInstallScript, dir, "-", "23", box.AgyBinary, contract.AgyGeminiDir)
+		_, err := shell(t, twice(tokenSentinel), agyInstallScript, dir, "23", box.AgyBinary, contract.AgyGeminiDir)
 		done <- err
 	}()
 	select {
@@ -192,27 +176,24 @@ func TestInstallWaitsForTheSeedsLock(t *testing.T) {
 }
 
 // The comparison with the host's token is made by the script, under the lock: a host that has the incoming token already does nothing and
-// takes nothing back, so the stored copy of the outgoing account is left alone.
+// does nothing at all.
 func TestInstallDoesNothingWhenTheHostHasTheTokenAlready(t *testing.T) {
-	dir, stored := useFolder(t)
+	dir := useFolder(t)
 	write(t, dir+"/"+agyTokenRel, tokenSentinel, 0o600)
-	out, err := shell(t, twice(tokenSentinel), agyInstallScript, dir, stored, "23", box.AgyBinary, contract.AgyGeminiDir)
+	out, err := shell(t, twice(tokenSentinel), agyInstallScript, dir, "23", box.AgyBinary, contract.AgyGeminiDir)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(string(out), "dyna-agy-same") || strings.Contains(string(out), "dyna-agy-killed") {
 		t.Fatalf("output %q", out)
 	}
-	if got, _ := os.ReadFile(stored); string(got) != "STALE-COPY" {
-		t.Fatalf("the stored copy was overwritten: %q", got)
-	}
 }
 
 // An older install that finishes between the engine's decision and this script's lock must not let this run copy the incoming account's live
-// token over the outgoing account's stored copy: the comparison is made after the lock is taken. A holder stands for the older install: it
+// token anywhere: the comparison is made after the lock is taken. A holder stands for the older install: it
 // holds the lock, and on release writes the incoming token into place.
-func TestInstallComparesAfterTheLockSoALateFinishedSwapIsNotTakenBack(t *testing.T) {
-	dir, stored := useFolder(t)
+func TestInstallComparesAfterTheLockSoALateFinishedSwapIsLeftAlone(t *testing.T) {
+	dir := useFolder(t)
 	holder := exec.Command("bash", "-c", `exec 9> "$1/.seed.lock"; flock -x 9; echo held; read x; printf %s "$3" > "$1/$2"`, "dyna", dir, agyTokenRel, tokenSentinel)
 	in, _ := holder.StdinPipe()
 	stdout, _ := holder.StdoutPipe()
@@ -230,7 +211,7 @@ func TestInstallComparesAfterTheLockSoALateFinishedSwapIsNotTakenBack(t *testing
 	}
 	done := make(chan result, 1)
 	go func() {
-		out, err := shell(t, twice(tokenSentinel), agyInstallScript, dir, stored, "23", box.AgyBinary, contract.AgyGeminiDir)
+		out, err := shell(t, twice(tokenSentinel), agyInstallScript, dir, "23", box.AgyBinary, contract.AgyGeminiDir)
 		done <- result{out, err}
 	}()
 	select {
@@ -247,15 +228,12 @@ func TestInstallComparesAfterTheLockSoALateFinishedSwapIsNotTakenBack(t *testing
 	case <-time.After(10 * time.Second):
 		t.Fatal("the script did not run after the lock was released")
 	}
-	if got, _ := os.ReadFile(stored); string(got) != "STALE-COPY" {
-		t.Fatalf("the incoming account's token was copied over the outgoing copy: %q", got)
-	}
 }
 
-// A process that survives the kill fails the host, and nothing is swapped or taken back. DYNA_AGY_KILL is the test seam: a kill that does
+// A process that survives the kill fails the host, and nothing is swapped. DYNA_AGY_KILL is the test seam: a kill that does
 // nothing.
 func TestInstallFailsWhenAnAgyServerSurvivesTheKill(t *testing.T) {
-	dir, stored := useFolder(t)
+	dir := useFolder(t)
 	work := t.TempDir()
 	write(t, work+"/acp", "sleep 60\n", 0o644)
 	cmd := &exec.Cmd{Path: "/bin/sh", Args: []string{box.AgyBinary, "acp", "--gemini-dir", contract.AgyGeminiDir, "--app-data-dir", "antigravity-acp"}, Dir: work}
@@ -266,15 +244,12 @@ func TestInstallFailsWhenAnAgyServerSurvivesTheKill(t *testing.T) {
 	t.Cleanup(func() { syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL); cmd.Wait() })
 	time.Sleep(300 * time.Millisecond)
 	t.Setenv("DYNA_AGY_KILL", "true")
-	_, err := shell(t, twice(tokenSentinel), agyInstallScript, dir, stored, "23", box.AgyBinary, contract.AgyGeminiDir)
+	_, err := shell(t, twice(tokenSentinel), agyInstallScript, dir, "23", box.AgyBinary, contract.AgyGeminiDir)
 	if exitCode(err) != agyInstallExitKill {
 		t.Fatalf("a surviving server: %v", err)
 	}
 	if got, _ := os.ReadFile(dir + "/" + agyTokenRel); string(got) != "OLD-TOKEN" {
 		t.Fatalf("token changed: %q", got)
-	}
-	if got, _ := os.ReadFile(stored); string(got) != "STALE-COPY" {
-		t.Fatalf("the stored copy changed: %q", got)
 	}
 }
 
@@ -296,10 +271,10 @@ func TestAgyPackKeepsTheSignInFile(t *testing.T) {
 }
 
 // The account folder is writable from an agy box, so an agent can plant a link at the token path or on the way to it: the host fails, nothing
-// is installed, the stored copy of the outgoing account is untouched, and the link's target is neither read nor changed.
+// is installed, and the link's target is neither read nor changed.
 func TestInstallRefusesALinkedTokenOrFolder(t *testing.T) {
 	for _, what := range []string{"token", "folder", "accounts"} {
-		dir, stored := useFolder(t)
+		dir := useFolder(t)
 		outside := t.TempDir() + "/unrelated"
 		write(t, outside, "UNRELATED-FILE", 0o600)
 		token := dir + "/" + agyTokenRel
@@ -321,18 +296,12 @@ func TestInstallRefusesALinkedTokenOrFolder(t *testing.T) {
 			os.Symlink(elsewhere, dir+"/accounts")
 			outside = elsewhere + "/main/antigravity-acp/antigravity-oauth-token"
 		}
-		_, err := shell(t, twice(tokenSentinel), agyInstallScript, dir, stored, "23", box.AgyBinary, contract.AgyGeminiDir)
+		_, err := shell(t, twice(tokenSentinel), agyInstallScript, dir, "23", box.AgyBinary, contract.AgyGeminiDir)
 		if exitCode(err) != agyInstallExitLink {
 			t.Fatalf("%s link: %v", what, err)
 		}
-		if got, _ := os.ReadFile(stored); string(got) != "STALE-COPY" {
-			t.Fatalf("%s link: the stored copy changed: %q", what, got)
-		}
 		if got, _ := os.ReadFile(outside); string(got) != "UNRELATED-FILE" {
 			t.Fatalf("%s link: the link's target changed: %q", what, got)
-		}
-		if left, _ := filepath.Glob(filepath.Dir(stored) + "/.copy-*"); len(left) != 0 {
-			t.Fatalf("%s link: a copy was left: %v", what, left)
 		}
 	}
 }

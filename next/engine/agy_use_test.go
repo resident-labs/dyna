@@ -33,7 +33,6 @@ type fakeAgyHosts struct {
 	failOn   map[contract.HostName]error // AgyInstall
 	installs []contract.HostName         // the installs that changed a token; a host that had it already is not one
 	stall    map[contract.HostName]bool  // AgyInstall waits for its context
-	takeback map[contract.HostName]string
 }
 
 func (f *fakeAgyHosts) AgyHostNames(context.Context) ([]contract.HostName, error) {
@@ -49,7 +48,7 @@ func (f *fakeAgyHosts) read(h contract.HostName) string {
 	}
 	return f.tokens[h]
 }
-func (f *fakeAgyHosts) AgyInstall(ctx context.Context, h contract.HostName, stored, takeback string) (int, bool, error) {
+func (f *fakeAgyHosts) AgyInstall(ctx context.Context, h contract.HostName, stored string) (int, bool, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	b, _ := os.ReadFile(stored)
@@ -58,7 +57,6 @@ func (f *fakeAgyHosts) AgyInstall(ctx context.Context, h contract.HostName, stor
 		return 0, true, nil
 	}
 	f.installs = append(f.installs, h)
-	f.takeback[h] = takeback
 	if f.stall[h] {
 		f.mu.Unlock()
 		<-ctx.Done()
@@ -67,11 +65,6 @@ func (f *fakeAgyHosts) AgyInstall(ctx context.Context, h contract.HostName, stor
 	}
 	if err := f.failOn[h]; err != nil {
 		return 0, false, err
-	}
-	if takeback != "" {
-		if err := os.WriteFile(takeback, []byte(f.read(h)), 0o600); err != nil {
-			return 0, false, err
-		}
 	}
 	if h == AgySource {
 		os.WriteFile(f.rig.layout.HostAgyMainToken(), b, 0o600)
@@ -92,7 +85,7 @@ func newUseRig(t *testing.T) *useRig {
 	t.Helper()
 	r := &useRig{agyRig: newAgyRig(t)}
 	r.hosts = &fakeAgyHosts{rig: r.agyRig, names: []contract.HostName{AgySource, "node"}, tokens: map[contract.HostName]string{"node": tokOld},
-		down: map[contract.HostName]error{}, failOn: map[contract.HostName]error{}, stall: map[contract.HostName]bool{}, takeback: map[contract.HostName]string{}}
+		down: map[contract.HostName]error{}, failOn: map[contract.HostName]error{}, stall: map[contract.HostName]bool{}}
 	r.actions.SetAgyHosts(r.hosts)
 	r.actions.agyTurnWait, r.actions.agyTurnPoll = 200*time.Millisecond, 20*time.Millisecond
 	add := func(label, token string) contract.AccountID {
@@ -197,9 +190,10 @@ func TestUseRefusesWhenNoAccountIsActive(t *testing.T) {
 	}
 }
 
-func TestUseSwapsEveryHostTakesBackAndActivatesInOneStep(t *testing.T) {
+// A switch installs the stored copy on every host and never copies the live token back: a refreshed token in main is replaced, and the
+// outgoing account's stored copy stays as it was signed in.
+func TestUseInstallsEveryHostNeverCopiesBackAndActivatesInOneStep(t *testing.T) {
 	r := newUseRig(t)
-	// The main token is the live one: agy refreshed it, so the take-back must carry THAT, not the old stored copy.
 	writeFile(t, r.layout.HostAgyMainToken(), tokOld+"-REFRESHED")
 	out, problem := r.use("New")
 	if problem != nil {
@@ -211,12 +205,8 @@ func TestUseSwapsEveryHostTakesBackAndActivatesInOneStep(t *testing.T) {
 	if file(r.layout.HostAgyMainToken()) != tokNew || r.hosts.tokens["node"] != tokNew {
 		t.Fatalf("tokens: main %q node %q", file(r.layout.HostAgyMainToken()), r.hosts.tokens["node"])
 	}
-	if got := file(r.layout.HostAgyToken(string(r.old))); got != tokOld+"-REFRESHED" {
-		t.Fatalf("the take-back is %q", got)
-	}
-	// The take-back is asked of the engine host only, and goes to the account that held the token.
-	if r.hosts.takeback[AgySource] != r.layout.HostAgyToken(string(r.old)) || r.hosts.takeback["node"] != "" {
-		t.Fatalf("take-backs: %v", r.hosts.takeback)
+	if got := file(r.layout.HostAgyToken(string(r.old))); got != tokOld {
+		t.Fatalf("the outgoing account's copy changed: %q", got)
 	}
 	if u := r.state(); u.Active != r.new || u.Held || u.StuckHost != "" || u.Target != "" {
 		t.Fatalf("state: %+v", u)
@@ -224,11 +214,11 @@ func TestUseSwapsEveryHostTakesBackAndActivatesInOneStep(t *testing.T) {
 	if got := r.hosts.installs; len(got) != 2 || got[0] != AgySource {
 		t.Fatalf("order: %v", got)
 	}
-	// Cancel is a use of the old account: it swaps back, and the new account's copy takes the new token back.
+	// Switching back, once the first switch is done, installs the old account's stored copy.
 	if _, problem := r.use("Old"); problem != nil {
 		t.Fatal(problem)
 	}
-	if file(r.layout.HostAgyMainToken()) != tokOld+"-REFRESHED" || r.state().Active != r.old {
+	if file(r.layout.HostAgyMainToken()) != tokOld || r.state().Active != r.old {
 		t.Fatalf("back: %q %+v", file(r.layout.HostAgyMainToken()), r.state())
 	}
 }
@@ -250,7 +240,7 @@ func TestUseWithAHostFailingStaysHeldNamesItAndARerunSkipsHostsDone(t *testing.T
 	}
 	// The failed host is back; the re-run skips the engine host, whose token compares equal, and the take-back is not repeated.
 	r.hosts.failOn = map[contract.HostName]error{}
-	r.hosts.installs, r.hosts.takeback = nil, map[contract.HostName]string{}
+	r.hosts.installs = nil
 	out, problem = r.use("New")
 	if problem != nil {
 		t.Fatal(problem)
@@ -267,9 +257,9 @@ func TestUseWithAHostFailingStaysHeldNamesItAndARerunSkipsHostsDone(t *testing.T
 }
 
 // A switch whose hermeslab swap finished but whose result was lost (the engine went down, or the caller left) is held with its target.
-// Only a run for that target is accepted: it finds hermeslab done, takes nothing back, and finishes; the old account is refused with the
+// Only a run for that target is accepted: it finds hermeslab done and finishes; the old account is refused with the
 // text, and the old account's stored copy is never overwritten with the new token.
-func TestAHeldSwitchAcceptsOnlyItsTargetAndARerunFinishesWithoutATakeBack(t *testing.T) {
+func TestAHeldSwitchAcceptsOnlyItsTargetAndARerunFinishes(t *testing.T) {
 	r := newUseRig(t)
 	// The state a lost result leaves: held for the new account, hermeslab already holding the new token, node not swapped.
 	if _, err := r.st.BeginAgySwitch(r.ctx, r.new); err != nil {
@@ -302,23 +292,6 @@ func TestAHeldSwitchAcceptsOnlyItsTargetAndARerunFinishesWithoutATakeBack(t *tes
 	}
 }
 
-// A refreshed outgoing token (one that matches no stored copy) is taken back on the rerun, to the outgoing account: it is the active one
-// until every host is done.
-func TestARerunTakesBackAnOutgoingTokenThatDiffersFromTheTarget(t *testing.T) {
-	r := newUseRig(t)
-	r.hosts.failOn["node"] = errors.New("x")
-	writeFile(t, r.layout.HostAgyMainToken(), tokOld+"-REFRESHED")
-	r.use("New")                                               // hermeslab swapped (and took the refreshed token back); node failed
-	writeFile(t, r.layout.HostAgyMainToken(), tokOld+"-AGAIN") // something put another outgoing token there before the rerun
-	r.hosts.failOn = map[contract.HostName]error{}
-	if _, problem := r.use("New"); problem != nil {
-		t.Fatal(problem)
-	}
-	if file(r.layout.HostAgyToken(string(r.old))) != tokOld+"-AGAIN" || file(r.layout.HostAgyMainToken()) != tokNew {
-		t.Fatalf("old %q main %q", file(r.layout.HostAgyToken(string(r.old))), file(r.layout.HostAgyMainToken()))
-	}
-}
-
 // An engine restart keeps the held switch: the target and the refusal come from the stored row.
 func TestAHeldSwitchSurvivesAnEngineRestart(t *testing.T) {
 	r := newUseRig(t)
@@ -335,6 +308,34 @@ func TestAHeldSwitchSurvivesAnEngineRestart(t *testing.T) {
 	r.hosts.failOn = map[contract.HostName]error{}
 	if _, problem := again.AgyUse(r.ctx, owner, contract.AgyUseRequest{Account: "New"}); problem != nil {
 		t.Fatal(problem)
+	}
+}
+
+// A preflight failure while the switch is already held records the host that failed, so the pane names it after a reload or a restart; a
+// fresh switch whose preflight fails records nothing and holds nothing.
+func TestAPreflightFailureOfAHeldSwitchNamesItsHostAndAFreshOneRecordsNothing(t *testing.T) {
+	r := newUseRig(t)
+	r.hosts.down["node"] = errors.New("ssh timed out")
+	if _, problem := r.use("New"); problem == nil {
+		t.Fatal("a fresh switch with a host down went on")
+	}
+	if u := r.state(); u.Held || u.StuckHost != "" {
+		t.Fatalf("a fresh preflight failure left %+v", u)
+	}
+	r.hosts.down = map[contract.HostName]error{}
+	r.hosts.failOn["node"] = errors.New("x")
+	r.use("New") // hermeslab done, node failed: held, stuck at node
+	r.hosts.failOn = map[contract.HostName]error{}
+	r.hosts.names = []contract.HostName{AgySource, "node", "third"}
+	r.hosts.down["third"] = errors.New("ssh timed out")
+	again := NewAccountActions(r.actions.service, r.actions.connections, r.actions.quotas) // an engine restart
+	again.SetAgyHosts(r.hosts)
+	if _, problem := again.AgyUse(r.ctx, owner, contract.AgyUseRequest{Account: "New"}); problem == nil || !strings.Contains(problem.Message, "third") {
+		t.Fatalf("the rerun with a host down: %v", problem)
+	}
+	listed, _ := again.AccountsList(r.ctx, owner, contract.AccountsListRequest{})
+	if listed.AgySwitch == nil || listed.AgySwitch.Target != r.new || listed.AgySwitch.Host != "third" {
+		t.Fatalf("the list does not name the host: %+v", listed.AgySwitch)
 	}
 }
 
@@ -479,47 +480,33 @@ func TestHeldSwitchRefusesRemovalOfItsAccountsAndShowsInTheList(t *testing.T) {
 		t.Fatalf("removed the target: %v", problem)
 	}
 }
-
-func TestImportMainIsActiveAndAFileIsNotAndEveryUnsafeNameIsRefused(t *testing.T) {
+func TestImportTakesAFileNeverMainAndEveryUnsafeNameIsRefused(t *testing.T) {
 	r := newAgyRig(t)
 	ctx, layout := r.ctx, r.layout
 	writeFile(t, layout.HostAgyMainToken(), tokNew)
 	first := filepath.Join(layout.HostAgyAccounts(), "first.oauth-token.bak")
 	writeFile(t, first, tokOld)
 	writeFile(t, filepath.Join(layout.HostAgyAccounts(), "secret"), "OUTSIDE")
-	// A limit that stood on "main" before accounts existed follows the imported account.
-	sqlExec(t, r.st, "INSERT INTO agy_limits(account,until) VALUES('main',9999999999999)")
-	out, problem := r.actions.AgyImport(ctx, owner, contract.AgyImportRequest{Label: " Second "})
-	if problem != nil {
-		t.Fatal(problem)
+	// No file: nothing is copied out of main.
+	if _, problem := r.actions.AgyImport(ctx, owner, contract.AgyImportRequest{Label: "Main"}); problem == nil || problem.Code != contract.ErrInvalid {
+		t.Fatalf("an import with no file: %v", problem)
 	}
-	if file(layout.HostAgyToken(string(out.Account))) != tokNew {
-		t.Fatal("main's token was not copied whole")
+	if accounts, _ := r.st.AgyAccounts(ctx); len(accounts) != 0 {
+		t.Fatalf("an import with no file left %+v", accounts)
+	}
+	out, problem := r.actions.AgyImport(ctx, owner, contract.AgyImportRequest{Label: " First ", File: "first.oauth-token.bak"})
+	if problem != nil || file(layout.HostAgyToken(string(out.Account))) != tokOld {
+		t.Fatalf("file import: %v", problem)
 	}
 	if info, _ := os.Stat(layout.HostAgyToken(string(out.Account))); info.Mode().Perm() != 0o600 {
 		t.Fatalf("mode %v", info.Mode())
 	}
-	if u, _ := r.st.AgyUse(ctx); u.Active != out.Account || u.Held {
-		t.Fatalf("state %+v", u)
-	}
-	if n := rows(t, r.st, "SELECT count(*) FROM agy_limits WHERE account=?", string(out.Account)); n != 1 {
-		t.Fatalf("limit rows under the account: %d", n)
+	if u, _ := r.st.AgyUse(ctx); u.Active != "" {
+		t.Fatalf("a file import made an account active: %+v", u)
 	}
 	accounts, _ := r.st.AgyAccounts(ctx)
-	if len(accounts) != 1 || accounts[0].Label != "Second" {
+	if len(accounts) != 1 || accounts[0].Label != "First" {
 		t.Fatalf("accounts %+v", accounts)
-	}
-	// A second import of main is refused while an account is active.
-	if _, problem := r.actions.AgyImport(ctx, owner, contract.AgyImportRequest{Label: "Again"}); problem == nil || problem.Code != contract.ErrConflict {
-		t.Fatalf("second main import: %v", problem)
-	}
-	// A file is an account that is not active.
-	file1, problem := r.actions.AgyImport(ctx, owner, contract.AgyImportRequest{Label: "First", File: "first.oauth-token.bak"})
-	if problem != nil || file(layout.HostAgyToken(string(file1.Account))) != tokOld {
-		t.Fatalf("file import: %v", problem)
-	}
-	if u, _ := r.st.AgyUse(ctx); u.Active != out.Account {
-		t.Fatalf("a file import changed the active account: %+v", u)
 	}
 	// Names that are not plain names in the accounts folder, a link, a folder and a missing file.
 	os.Symlink(filepath.Join(layout.HostAgyAccounts(), "secret"), filepath.Join(layout.HostAgyAccounts(), "link"))
@@ -529,43 +516,62 @@ func TestImportMainIsActiveAndAFileIsNotAndEveryUnsafeNameIsRefused(t *testing.T
 			t.Fatalf("%q was imported", name)
 		}
 	}
-	if accounts, _ := r.st.AgyAccounts(ctx); len(accounts) != 2 {
+	if accounts, _ := r.st.AgyAccounts(ctx); len(accounts) != 1 {
 		t.Fatalf("a refused import left an account: %+v", accounts)
 	}
 	if left, _ := filepath.Glob(filepath.Join(layout.HostAgyTokens(), ".copy-*")); len(left) != 0 {
 		t.Fatalf("half copies left: %v", left)
 	}
-	if _, problem := r.actions.AgyImport(ctx, contract.Principal{Kind: contract.PrincipalSession}, contract.AgyImportRequest{Label: "X"}); problem == nil || problem.Code != contract.ErrForbidden {
+	if _, problem := r.actions.AgyImport(ctx, contract.Principal{Kind: contract.PrincipalSession}, contract.AgyImportRequest{Label: "X", File: "first.oauth-token.bak"}); problem == nil || problem.Code != contract.ErrForbidden {
 		t.Fatalf("a session imported: %v", problem)
 	}
 }
 
-func TestImportOfMainThatKeepsChangingIsRefused(t *testing.T) {
+// --active records the imported account as the one signed in now, only if main's token is the same bytes as the file, and only while none
+// is active. Main is read for the comparison alone: a difference refuses and publishes nothing, and a link in main's path is a difference.
+func TestImportActiveVerifiesMainByComparisonAndOnlyForTheFirst(t *testing.T) {
 	r := newAgyRig(t)
-	writeFile(t, r.layout.HostAgyMainToken(), "ONE")
-	stop := make(chan struct{})
-	done := make(chan struct{})
-	go func() {
-		defer close(done)
-		for i := 0; ; i++ {
-			select {
-			case <-stop:
-				return
-			default:
-			}
-			os.WriteFile(r.layout.HostAgyMainToken(), []byte{byte('a' + i%26), byte('a' + i/26%26)}, 0o600)
-		}
-	}()
-	_, problem := r.actions.AgyImport(r.ctx, owner, contract.AgyImportRequest{Label: "Live"})
-	close(stop)
-	<-done
-	// A writer racing two copies may be missed by luck; what must hold is that a success is whole and a failure leaves nothing.
-	accounts, _ := r.st.AgyAccounts(r.ctx)
-	if problem != nil && len(accounts) != 0 {
-		t.Fatalf("a refused import left %+v", accounts)
+	ctx, layout := r.ctx, r.layout
+	writeFile(t, filepath.Join(layout.HostAgyAccounts(), "second"), tokNew)
+	writeFile(t, layout.HostAgyMainToken(), tokOld) // main holds something else
+	if _, problem := r.actions.AgyImport(ctx, owner, contract.AgyImportRequest{Label: "Second", File: "second", Active: true}); problem == nil || problem.Code != contract.ErrConflict {
+		t.Fatalf("a difference: %v", problem)
 	}
-	if left, _ := filepath.Glob(filepath.Join(r.layout.HostAgyTokens(), ".copy-*")); len(left) != 0 {
-		t.Fatalf("half copies left: %v", left)
+	if accounts, _ := r.st.AgyAccounts(ctx); len(accounts) != 0 {
+		t.Fatalf("a refused --active left %+v", accounts)
+	}
+	// A link where main's token is: a difference, whatever it points at.
+	elsewhere := filepath.Join(t.TempDir(), "same")
+	writeFile(t, elsewhere, tokNew)
+	os.Remove(layout.HostAgyMainToken())
+	os.Symlink(elsewhere, layout.HostAgyMainToken())
+	if _, problem := r.actions.AgyImport(ctx, owner, contract.AgyImportRequest{Label: "Second", File: "second", Active: true}); problem == nil {
+		t.Fatal("a linked main was accepted")
+	}
+	os.Remove(layout.HostAgyMainToken())
+	writeFile(t, layout.HostAgyMainToken(), tokNew)
+	// A limit that stood on "main" before accounts existed follows the active account.
+	sqlExec(t, r.st, "INSERT INTO agy_limits(account,until) VALUES('main',9999999999999)")
+	out, problem := r.actions.AgyImport(ctx, owner, contract.AgyImportRequest{Label: "Second", File: "second", Active: true})
+	if problem != nil {
+		t.Fatal(problem)
+	}
+	if u, _ := r.st.AgyUse(ctx); u.Active != out.Account || u.Held {
+		t.Fatalf("state %+v", u)
+	}
+	if n := rows(t, r.st, "SELECT count(*) FROM agy_limits WHERE account=?", string(out.Account)); n != 1 {
+		t.Fatalf("limit rows under the account: %d", n)
+	}
+	if file(layout.HostAgyToken(string(out.Account))) != tokNew || file(layout.HostAgyMainToken()) != tokNew {
+		t.Fatal("a token changed")
+	}
+	// Only the first import may be active.
+	writeFile(t, filepath.Join(layout.HostAgyAccounts(), "third"), tokOld)
+	if _, problem := r.actions.AgyImport(ctx, owner, contract.AgyImportRequest{Label: "Third", File: "third", Active: true}); problem == nil || problem.Code != contract.ErrConflict {
+		t.Fatalf("a second --active: %v", problem)
+	}
+	if accounts, _ := r.st.AgyAccounts(ctx); len(accounts) != 1 {
+		t.Fatalf("a refused --active left %+v", accounts)
 	}
 }
 
@@ -576,7 +582,8 @@ func TestNoTokenTextReachesAnEventOrAResponse(t *testing.T) {
 	if problem != nil {
 		t.Fatal(problem)
 	}
-	imported, _ := r.actions.AgyImport(r.ctx, owner, contract.AgyImportRequest{Label: "x"})
+	writeFile(t, filepath.Join(r.layout.HostAgyAccounts(), "x.bak"), tokNew)
+	imported, _ := r.actions.AgyImport(r.ctx, owner, contract.AgyImportRequest{Label: "x", File: "x.bak"})
 	listed, _ := r.actions.AccountsList(r.ctx, owner, contract.AccountsListRequest{})
 	events, _ := r.st.OwnerEvents(r.ctx, 0, 1000)
 	raw, _ := json.Marshal([]any{out, imported, listed, events})

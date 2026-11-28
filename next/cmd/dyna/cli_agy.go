@@ -21,14 +21,17 @@ func agyCommand(getClient func() client) *cobra.Command {
 		return err
 	}}
 	var file string
-	import_ := &cobra.Command{Use: "import LABEL", Short: "Take an existing Antigravity sign-in as an account", Long: "Take an Antigravity sign-in made outside Dyna as an account with the label you choose. With no --file it is the sign-in the engine host holds now (hermeslab's main folder), and the new account becomes the active one, since main holds it; it is refused while an account is already active. With --file NAME it is that token file from the engine host's agy accounts folder (a plain file name there, not a path, not a link), as an account that is not active. The file is copied whole and never read, parsed or logged; the only check is that two copies of main match. Only the owner, and only on the engine host.", Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
-		out, err := getClient().AgyImport(cmd.Context(), contract.AgyImportRequest{Label: args[0], File: file})
+	var active bool
+	import_ := &cobra.Command{Use: "import LABEL", Short: "Take an existing Antigravity sign-in as an account", Long: "Take an Antigravity sign-in made outside Dyna as an account with the label you choose. --file NAME is required: a token file in the engine host's agy accounts folder (a plain file name there, not a path, not a link; boxes do not mount that folder). It is copied whole and never read, parsed or logged, and nothing is ever copied out of main. With --active the account is also recorded as the one signed in now; that is allowed only while no account is active, and only if main's sign-in is the same bytes as the file (main is read for that comparison alone). Only the owner, and only on the engine host.", Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
+		out, err := getClient().AgyImport(cmd.Context(), contract.AgyImportRequest{Label: args[0], File: file, Active: active})
 		if err == nil {
 			fmt.Fprintf(cmd.OutOrStdout(), "%s\n", out.Account)
 		}
 		return err
 	}}
-	import_.Flags().StringVar(&file, "file", "", "a token file name in the agy accounts folder; with none, main's own sign-in")
+	import_.Flags().StringVar(&file, "file", "", "a token file name in the agy accounts folder (required)")
+	import_.Flags().BoolVar(&active, "active", false, "record it as the account signed in now (main's sign-in must be the same bytes; only while none is active)")
+	_ = import_.MarkFlagRequired("file")
 	agy.AddCommand(seed, use, import_)
 	return agy
 }

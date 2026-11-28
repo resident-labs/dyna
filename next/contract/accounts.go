@@ -114,12 +114,13 @@ type AgyUseResponse struct {
 	Hosts []AgyUseHost `json:"hosts"`
 }
 
-// AgyImportRequest takes an existing sign-in as an account the owner labels. With no File it is the one agy holds on the engine host now,
-// and that account becomes the active one. With File, a plain file name in the engine host's agy accounts folder, it is that token, and the
-// account is not active. The file is copied whole and never read. The owner only.
+// AgyImportRequest takes an existing sign-in as an account the owner labels: File is a plain file name in the engine host's agy accounts
+// folder, which boxes do not mount, copied whole and never read. Nothing is copied out of main. With Active the account is also recorded as
+// the one signed in now, allowed only while no account is active and only if main's token is the same bytes as the file. The owner only.
 type AgyImportRequest struct {
-	Label string `json:"label"`
-	File  string `json:"file,omitempty"`
+	Label  string `json:"label"`
+	File   string `json:"file"`
+	Active bool   `json:"active,omitempty"`
 }
 type AgyImportResponse struct {
 	Account AccountID `json:"account"`
