@@ -148,8 +148,6 @@ type ConnectFailureReason string
 const (
 	ConnectAdoptionFailed ConnectFailureReason = "adoption_failed"
 	ConnectWrongAccount   ConnectFailureReason = "wrong_account"
-	// ConnectRestricted: the sign-in's own output read as a refusal or a verification (a 403, a restriction). The page words it fixedly and offers no retry.
-	ConnectRestricted ConnectFailureReason = "restricted"
 )
 
 type AccountsConnectStatusResponse struct {

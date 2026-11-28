@@ -17,7 +17,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"regexp"
 	"strings"
 	"sync"
 	"syscall"
@@ -29,8 +28,6 @@ import (
 )
 
 var (
-	// ErrBusy means a sign-in is already running: one at a time.
-	ErrBusy = errors.New("an Antigravity sign-in is already in progress")
 	// ErrNoProgram means the agy program is not installed on this host.
 	ErrNoProgram = errors.New("the Antigravity program is not installed on this host")
 	// ErrLink means agy printed no sign-in link, or one that is not Google's authorization page for Antigravity.
@@ -50,29 +47,25 @@ const (
 	maxCode     = 2048
 	maxState    = 512
 	maxLine     = 16 << 20   // T3 maxStdoutLineBytes
-	maxKeep     = 2 * maxURL // how much of a line is kept: a link past maxURL still reads as too long after its indent is trimmed, and a refusal is searched for
+	maxKeep     = 2 * maxURL // how much of a line is kept: a link past maxURL still reads as too long after its indent is trimmed
 	linkStart   = "https://accounts.google.com/"
 	defaultLife = 5 * time.Minute
 	defaultFind = 30 * time.Second
 )
 
-// restricted matches what Google or agy says when an account is refused or held for verification. Only the fact that a line matched is
-// kept, never the line.
-var restricted = regexp.MustCompile(`(?i)\b403\b|verif|restrict|suspend|violat|forbidden`)
-
-// Config is what a Logins needs. Add records the account row before its token file is put in place, and Remove undoes that row if the
-// file cannot be; NewID makes the opaque id the file is named by.
+// Config is what a Logins needs. Publish makes an account exist: it records the row, runs install (which puts the token file in place)
+// and undoes the row if install fails, all under the lock Remove takes, so a Remove never sees half of it. NewID makes the opaque id the
+// file is named by.
 type Config struct {
-	Layout box.Layout
-	Add    func(ctx context.Context, id contract.AccountID, label string) error
-	Remove func(ctx context.Context, id contract.AccountID) error
-	NewID  func() (contract.AccountID, error)
-	Now    func() time.Time
+	Layout  box.Layout
+	Publish func(ctx context.Context, id contract.AccountID, label string, install func() error) error
+	NewID   func() (contract.AccountID, error)
+	Now     func() time.Time
 	// Life is how long a sign-in may take (5 minutes) and FindLink how long agy has to print its link (30 seconds); tests shorten them.
 	Life, FindLink time.Duration
 }
 
-// Logins runs one sign-in at a time and remembers the last one's result.
+// Logins runs one sign-in at a time and remembers the last one's result. A new Start ends the one still waiting.
 type Logins struct {
 	cfg Config
 	mu  sync.Mutex
@@ -91,14 +84,11 @@ type attempt struct {
 	done    chan struct{} // closed once the sign-in has ended and its folder is gone
 	exited  chan struct{} // closed once agy has exited; exitErr is set before the close, so any number of receives see it
 	exitErr error
-	drained chan struct{} // closed once both output streams have been read to their end
 
-	mu         sync.Mutex
-	pasted     bool
-	restricted bool
-	status     contract.ConnectStatus
-	reason     contract.ConnectFailureReason
-	account    contract.AccountID
+	mu      sync.Mutex
+	pasted  bool
+	status  contract.ConnectStatus
+	account contract.AccountID
 }
 
 // New returns the sign-in runner, after deleting the sign-in folders and half-written token copies an engine crash left behind.
@@ -128,21 +118,23 @@ type Started struct {
 	Expires time.Time
 }
 
-// Start runs agy's sign-in and returns the link it prints. The sign-in then waits for Paste, for at most Life.
+// Start runs agy's sign-in and returns the link it prints. The sign-in then waits for Paste, for at most Life. A sign-in still waiting
+// is ended first (killed, joined, its scratch folder deleted), so a lost Cancel or a quick Cancel then Add is never refused. Only the
+// owner starts one, so replacing is safe; a Paste for the replaced attempt finds no such sign-in.
 func (l *Logins) Start(label string) (Started, error) {
 	if _, err := os.Stat(l.cfg.Layout.HostAgyBinary()); err != nil {
 		return Started{}, ErrNoProgram
 	}
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	if l.cur != nil && l.cur.get() == contract.ConnectPending {
-		return Started{}, ErrBusy
+	if l.cur != nil {
+		l.cur.stop()
 	}
 	var raw [12]byte
 	if _, err := rand.Read(raw[:]); err != nil {
 		return Started{}, err
 	}
-	a := &attempt{id: hex.EncodeToString(raw[:]), label: label, status: contract.ConnectPending, cancel: make(chan struct{}), done: make(chan struct{}), exited: make(chan struct{}), drained: make(chan struct{}), expires: l.cfg.Now().Add(l.cfg.Life)}
+	a := &attempt{id: hex.EncodeToString(raw[:]), label: label, status: contract.ConnectPending, cancel: make(chan struct{}), done: make(chan struct{}), exited: make(chan struct{}), expires: l.cfg.Now().Add(l.cfg.Life)}
 	link, err := l.launch(a)
 	if err != nil {
 		return Started{}, err
@@ -204,19 +196,14 @@ func (l *Logins) launch(a *attempt) (string, error) {
 	outW.Close()
 	errW.Close()
 	a.cmd, a.stdin = cmd, stdin
-	// The link is a trimmed stdout line that starts with Google's address, as in T3. Stderr is read and dropped; both streams are only
-	// searched for a refusal, and nothing read is logged.
+	// The link is a trimmed stdout line that starts with Google's address, as in T3. Every other line, and all of stderr, is read so agy
+	// never blocks on a full pipe, and dropped: nothing agy prints is parsed, kept or logged.
 	found := make(chan string, 1)
-	var readers sync.WaitGroup
-	readers.Add(2)
-	go func() { readers.Wait(); close(a.drained) }()
 	go func() {
-		defer readers.Done()
 		defer stdout.Close()
 		sent := false
 		ok := readLines(stdout, func(line string) {
-			a.scan(line)
-			if line = strings.TrimSpace(line); !sent && strings.HasPrefix(line, linkStart) {
+			if line = strings.TrimFunc(line, isSpace); !sent && strings.HasPrefix(line, linkStart) {
 				sent = true
 				found <- line
 			}
@@ -226,9 +213,8 @@ func (l *Logins) launch(a *attempt) (string, error) {
 		}
 	}()
 	go func() {
-		defer readers.Done()
 		defer stderr.Close()
-		readLines(stderr, a.scan)
+		readLines(stderr, func(string) {})
 	}()
 	go func() { a.exitErr = cmd.Wait(); close(a.exited) }()
 	find := time.NewTimer(l.cfg.FindLink)
@@ -275,15 +261,6 @@ func readLines(r io.Reader, each func(string)) bool {
 	}
 }
 
-// scan notes that a line reads as a refusal.
-func (a *attempt) scan(line string) {
-	if restricted.MatchString(line) {
-		a.mu.Lock()
-		a.restricted = true
-		a.mu.Unlock()
-	}
-}
-
 // validLink is T3's check of the authorization URL for the code flow (antigravityAuthSupport.ts:579-612): Google's page, no userinfo or
 // fragment, no whitespace, one each of state, redirect_uri and response_type, and that redirect exactly. It returns the state.
 func validLink(raw string) (state string, ok bool) {
@@ -291,7 +268,7 @@ func validLink(raw string) (state string, ok bool) {
 		return "", false
 	}
 	u, err := url.Parse(raw)
-	if err != nil || u.Scheme != "https" || u.Host != "accounts.google.com" || u.Path != "/o/oauth2/auth" || u.User != nil || u.Fragment != "" {
+	if err != nil || u.Scheme != "https" || u.Host != "accounts.google.com" || u.EscapedPath() != "/o/oauth2/auth" || u.User != nil || u.Fragment != "" {
 		return "", false
 	}
 	q, err := url.ParseQuery(u.RawQuery)
@@ -309,7 +286,7 @@ func validLink(raw string) (state string, ok bool) {
 // whose origin and path are the redirect, with no userinfo, one state equal to this sign-in's and one non-empty code. What is returned is
 // exactly what agy is sent: the code, or the whole address, undecoded.
 func validResponse(state, response string) (string, bool) {
-	value := strings.TrimSpace(response)
+	value := strings.TrimFunc(response, isSpace)
 	if len(value) >= 1 && len(value) <= maxCode && !strings.ContainsFunc(value, func(r rune) bool {
 		return !(r < 128 && (r == '_' || r == '.' || r == '/' || r == '~' || r == '-' || r >= '0' && r <= '9' || r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z'))
 	}) {
@@ -319,7 +296,7 @@ func validResponse(state, response string) (string, bool) {
 		return "", false
 	}
 	u, err := url.Parse(value)
-	if err != nil || u.Scheme+"://"+u.Host+u.Path != redirectURI || u.User != nil {
+	if err != nil || u.Scheme+"://"+u.Host+u.EscapedPath() != redirectURI || u.User != nil {
 		return "", false
 	}
 	q, err := url.ParseQuery(u.RawQuery)
@@ -336,49 +313,45 @@ func isSpace(r rune) bool {
 
 func killGroup(cmd *exec.Cmd) { syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL) }
 
-// finish ends the sign-in: on a clean exit it stores the token and the account, on a cancel or the time limit it kills agy, and whatever
-// the end it deletes the folder.
+// finish ends the sign-in and deletes its folder. It first joins with the process: agy exits by itself, or a Cancel or the time limit
+// kills it and the exit is waited for. Then the exit decides, not who asked: a clean exit (agy took the code and wrote its token) stores
+// the account even when a Cancel or the time limit came in the same moment, because the sign-in did happen; a Cancel after the exit
+// changes nothing. Any other exit is a failure, or an expiry when the time limit ended it. Nothing agy printed is read for the verdict.
 func (l *Logins) finish(a *attempt) {
 	defer close(a.done)
 	defer os.RemoveAll(a.dir)
 	timeout := time.NewTimer(l.cfg.Life)
 	defer timeout.Stop()
+	expired := false
 	select {
 	case <-a.exited:
-		// What agy printed last is read before the end is judged; a stream a stray child holds open is not waited on for long.
-		select {
-		case <-a.drained:
-		case <-time.After(2 * time.Second):
-		}
-		if a.exitErr != nil {
-			a.mu.Lock()
-			reason := contract.ConnectFailureReason("")
-			if a.restricted {
-				reason = contract.ConnectRestricted
-			}
-			a.mu.Unlock()
-			a.set(contract.ConnectFailed, reason, "")
-			return
-		}
-		id, err := l.store(a)
-		if err != nil {
-			a.set(contract.ConnectFailed, "", "")
-			return
-		}
-		a.set(contract.ConnectConnected, "", id)
 	case <-a.cancel:
 		killGroup(a.cmd)
 		<-a.exited
-		a.set(contract.ConnectFailed, "", "")
 	case <-timeout.C:
+		expired = true
 		killGroup(a.cmd)
 		<-a.exited
-		a.set(contract.ConnectExpired, "", "")
 	}
+	if a.exitErr != nil {
+		if expired {
+			a.set(contract.ConnectExpired, "")
+		} else {
+			a.set(contract.ConnectFailed, "")
+		}
+		return
+	}
+	id, err := l.store(a)
+	if err != nil {
+		a.set(contract.ConnectFailed, "")
+		return
+	}
+	a.set(contract.ConnectConnected, id)
 }
 
-// store copies the token file whole beside its final name, records the account, and only then puts the file in place. A crash between
-// the two leaves a listed account with no sign-in, which the owner sees and can remove; the half copy is deleted at the next start.
+// store copies the token file whole beside its final name, then publishes: the account row first and the file's rename after, in one
+// critical section with Remove. A crash between the two leaves a listed account with no sign-in, which the owner sees and can remove;
+// the half copy is deleted at the next start.
 func (l *Logins) store(a *attempt) (contract.AccountID, error) {
 	id, err := l.cfg.NewID()
 	if err != nil {
@@ -414,11 +387,10 @@ func (l *Logins) store(a *attempt) (contract.AccountID, error) {
 	if err != nil {
 		return "", err
 	}
-	if err := l.cfg.Add(context.Background(), id, a.label); err != nil {
-		return "", err
-	}
-	if err := os.Rename(tmp.Name(), l.cfg.Layout.HostAgyToken(string(id))); err != nil {
-		l.cfg.Remove(context.Background(), id)
+	err = l.cfg.Publish(context.Background(), id, a.label, func() error {
+		return os.Rename(tmp.Name(), l.cfg.Layout.HostAgyToken(string(id)))
+	})
+	if err != nil {
 		return "", err
 	}
 	return id, nil
@@ -436,15 +408,30 @@ func (l *Logins) Paste(attemptID, text string) error {
 		return ErrPaste
 	}
 	a.mu.Lock()
-	defer a.mu.Unlock()
-	if a.pasted {
+	first := !a.pasted
+	a.pasted = true
+	a.mu.Unlock()
+	if !first {
 		return ErrPaste
 	}
-	a.pasted = true
+	// The write is outside the lock: agy may never read its input, and Cancel must still get through. Cancel kills agy, which ends a
+	// blocked write with an error.
 	if _, err := io.WriteString(a.stdin, line+"\n"); err != nil {
 		return fmt.Errorf("%w: the sign-in has ended", ErrNoAttempt)
 	}
 	return nil
+}
+
+// stop ends the sign-in and returns once it has ended and its folder is gone. Stopping one that has ended is a no-op.
+func (a *attempt) stop() {
+	a.mu.Lock()
+	select {
+	case <-a.cancel:
+	default:
+		close(a.cancel)
+	}
+	a.mu.Unlock()
+	<-a.done
 }
 
 // Cancel ends the sign-in that waits: it kills agy, waits for it, and deletes the folder, so a new Start works at once. A sign-in that
@@ -454,27 +441,19 @@ func (l *Logins) Cancel(attemptID string) error {
 	if a == nil {
 		return ErrNoAttempt
 	}
-	a.mu.Lock()
-	select {
-	case <-a.cancel:
-	default:
-		close(a.cancel)
-	}
-	a.mu.Unlock()
-	<-a.done
+	a.stop()
 	return nil
 }
 
-// Status is the result of the last sign-in: pending while it waits, then connected with the new account, failed (with a reason when
-// agy's output read as a refusal) or expired.
-func (l *Logins) Status(attemptID string) (contract.ConnectStatus, contract.ConnectFailureReason, contract.AccountID, error) {
+// Status is the result of the last sign-in: pending while it waits, then connected with the new account, failed or expired.
+func (l *Logins) Status(attemptID string) (contract.ConnectStatus, contract.AccountID, error) {
 	a := l.attempt(attemptID)
 	if a == nil {
-		return "", "", "", ErrNoAttempt
+		return "", "", ErrNoAttempt
 	}
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	return a.status, a.reason, a.account, nil
+	return a.status, a.account, nil
 }
 
 // Owns says whether the attempt is the last sign-in this runner started, finished or not.
@@ -502,8 +481,8 @@ func (a *attempt) get() contract.ConnectStatus {
 	return a.status
 }
 
-func (a *attempt) set(status contract.ConnectStatus, reason contract.ConnectFailureReason, account contract.AccountID) {
+func (a *attempt) set(status contract.ConnectStatus, account contract.AccountID) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	a.status, a.reason, a.account = status, reason, account
+	a.status, a.account = status, account
 }

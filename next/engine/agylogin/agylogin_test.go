@@ -21,7 +21,7 @@ var validLinkText = "https://accounts.google.com/o/oauth2/auth?client_id=c&respo
 
 // fakeAgy stands in for agy: it records its arguments and a few environment values, prints FAKE_LINK on stdout as agy does (indented, as the
 // last line of a short text), then FAKE_ERR on stderr if set, reads one line, records it, writes the token file into the --gemini-dir
-// and exits with FAKE_EXIT. FAKE_FAST_EXIT makes it exit at once with no link; FAKE_LINK_STDERR prints the link on stderr instead. It
+// and exits with FAKE_EXIT. FAKE_FAST_EXIT makes it exit at once with no link; FAKE_LINK_STDERR prints the link on stderr instead; FAKE_NOREAD makes it sleep without reading its input. It
 // is never the real program.
 const fakeAgy = `#!/bin/sh
 [ -n "$FAKE_FAST_EXIT" ] && { echo "startup failed" >&2; exit 1; }
@@ -30,6 +30,7 @@ while [ $# -gt 0 ]; do [ "$1" = --gemini-dir ] && dir=$2; shift; done
 { echo "args:$args"; echo "display:$DISPLAY"; echo "proxy:$HTTPS_PROXY"; echo "wayland:$WAYLAND_DISPLAY"; } >> "$FAKE_LOG"
 if [ -n "$FAKE_LINK_STDERR" ]; then echo "  $FAKE_LINK" >&2; else printf 'Open this link in a browser to log in with Google:\n\n  %s\n\n' "$FAKE_LINK"; fi
 [ -n "$FAKE_ERR" ] && echo "$FAKE_ERR" >&2
+[ -n "$FAKE_NOREAD" ] && exec sleep 60
 read line || exit 3
 echo "line:$line" >> "$FAKE_LOG"
 [ "${FAKE_EXIT:-0}" != 0 ] && exit $FAKE_EXIT
@@ -73,7 +74,7 @@ func newRig(t *testing.T, link string) *rig {
 			n++
 			return contract.AccountID("agy_test" + string(rune('0'+n))), nil
 		},
-		Add: func(_ context.Context, id contract.AccountID, label string) error {
+		Publish: func(_ context.Context, id contract.AccountID, label string, install func() error) error {
 			r.mu.Lock()
 			defer r.mu.Unlock()
 			if r.addErr != nil {
@@ -85,12 +86,10 @@ func newRig(t *testing.T, link string) *rig {
 				r.atAdd = append(r.atAdd, e.Name())
 			}
 			r.added[id] = label
-			return nil
-		},
-		Remove: func(_ context.Context, id contract.AccountID) error {
-			r.mu.Lock()
-			defer r.mu.Unlock()
-			delete(r.added, id)
+			if err := install(); err != nil {
+				delete(r.added, id)
+				return err
+			}
 			return nil
 		}})
 	return r
@@ -130,7 +129,7 @@ func TestSignInStoresOnlyTheTokenAndDeletesTheFolder(t *testing.T) {
 		t.Fatal(err)
 	}
 	r.logins.Wait(started.Attempt)
-	status, _, id, err := r.logins.Status(started.Attempt)
+	status, id, err := r.logins.Status(started.Attempt)
 	if err != nil || status != contract.ConnectConnected || id == "" || r.added[id] != "second" {
 		t.Fatalf("status %q %q %v added %v", status, id, err, r.added)
 	}
@@ -147,7 +146,7 @@ func TestSignInStoresOnlyTheTokenAndDeletesTheFolder(t *testing.T) {
 	if len(r.folders()) != 0 {
 		t.Fatalf("login folder left: %v", r.folders())
 	}
-	// The row went in while the token was still a half copy, so a crash between the two leaves a listed account and no token.
+	// In Publish the row goes in while the token is still a half copy, so a crash between the two leaves a listed account and no token.
 	if len(r.atAdd) != 1 || !strings.HasPrefix(r.atAdd[0], ".copy-") {
 		t.Fatalf("token folder at the row's insert: %v", r.atAdd)
 	}
@@ -287,23 +286,23 @@ func TestWrongExitStoresNothing(t *testing.T) {
 		t.Fatal(err)
 	}
 	r.logins.Wait(started.Attempt)
-	if status, reason, _, _ := r.logins.Status(started.Attempt); status != contract.ConnectFailed || reason != "" || len(r.added) != 0 || len(r.left()) != 0 || len(r.folders()) != 0 {
-		t.Fatalf("status %q %q added %v left %v %v", status, reason, r.added, r.left(), r.folders())
+	if status, _, _ := r.logins.Status(started.Attempt); status != contract.ConnectFailed || len(r.added) != 0 || len(r.left()) != 0 || len(r.folders()) != 0 {
+		t.Fatalf("status %q added %v left %v %v", status, r.added, r.left(), r.folders())
 	}
 }
 
-// A refusal in agy's output, a 403 or a verification or restriction, is said as such, whichever stream it came on.
-func TestARefusalInTheOutputIsClassed(t *testing.T) {
-	for _, text := range []string{"Error 403: access denied", "Your account needs verification", "This account is restricted"} {
+// Nothing agy prints is read: whatever the text, a failed end is just failed, with no row and nothing kept.
+func TestAnyFailedEndIsJustFailed(t *testing.T) {
+	for _, text := range []string{"Error 403: access denied", "Your account needs verification", "This account is restricted", "plain failure"} {
 		r := newRig(t, validLinkText)
 		t.Setenv("FAKE_EXIT", "1")
 		t.Setenv("FAKE_ERR", text)
 		started, _ := r.logins.Start("a")
 		r.logins.Paste(started.Attempt, "code")
 		r.logins.Wait(started.Attempt)
-		status, reason, _, _ := r.logins.Status(started.Attempt)
-		if status != contract.ConnectFailed || reason != contract.ConnectRestricted || len(r.added) != 0 || len(r.left()) != 0 {
-			t.Fatalf("%q: status %q reason %q added %v left %v", text, status, reason, r.added, r.left())
+		status, _, _ := r.logins.Status(started.Attempt)
+		if status != contract.ConnectFailed || len(r.added) != 0 || len(r.left()) != 0 {
+			t.Fatalf("%q: status %q added %v left %v", text, status, r.added, r.left())
 		}
 	}
 }
@@ -314,7 +313,7 @@ func TestRowFailureStoresNothing(t *testing.T) {
 	started, _ := r.logins.Start("a")
 	r.logins.Paste(started.Attempt, "code")
 	r.logins.Wait(started.Attempt)
-	if status, _, _, _ := r.logins.Status(started.Attempt); status != contract.ConnectFailed || len(r.left()) != 0 {
+	if status, _, _ := r.logins.Status(started.Attempt); status != contract.ConnectFailed || len(r.left()) != 0 {
 		t.Fatalf("status %q left %v", status, r.left())
 	}
 }
@@ -324,7 +323,7 @@ func TestTimeoutKillsAgyAndStoresNothing(t *testing.T) {
 	r.logins.cfg.Life = 50 * time.Millisecond
 	started, _ := r.logins.Start("a")
 	r.logins.Wait(started.Attempt)
-	if status, _, _, _ := r.logins.Status(started.Attempt); status != contract.ConnectExpired || len(r.left()) != 0 || len(r.folders()) != 0 {
+	if status, _, _ := r.logins.Status(started.Attempt); status != contract.ConnectExpired || len(r.left()) != 0 || len(r.folders()) != 0 {
 		t.Fatalf("status %q left %v %v", status, r.left(), r.folders())
 	}
 	if err := r.logins.Paste(started.Attempt, "late"); !errors.Is(err, ErrNoAttempt) {
@@ -357,31 +356,111 @@ func TestCancelThenAddWorksAtOnce(t *testing.T) {
 	}
 	r.logins.Paste(second.Attempt, "code")
 	r.logins.Wait(second.Attempt)
-	if status, _, _, _ := r.logins.Status(second.Attempt); status != contract.ConnectConnected {
+	if status, _, _ := r.logins.Status(second.Attempt); status != contract.ConnectConnected {
 		t.Fatalf("second: %q", status)
 	}
 }
 
-func TestSecondSignInWhileOneRunsIsRefused(t *testing.T) {
+// A new Add ends the sign-in still waiting: its process is gone and its scratch folder deleted, the new link is live, and a paste for
+// the first attempt is refused because it is no longer the current one.
+func TestAddReplacesTheSignInThatWaits(t *testing.T) {
 	r := newRig(t, validLinkText)
 	first, err := r.logins.Start("a")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := r.logins.Start("b"); !errors.Is(err, ErrBusy) {
-		t.Fatalf("second: %v", err)
-	}
-	r.logins.Paste(first.Attempt, "code")
-	r.logins.Wait(first.Attempt)
+	old := r.logins.attempt(first.Attempt)
 	second, err := r.logins.Start("b")
 	if err != nil {
-		t.Fatalf("after the first ended: %v", err)
+		t.Fatalf("second add: %v", err)
 	}
-	if _, _, _, err := r.logins.Status(first.Attempt); !errors.Is(err, ErrNoAttempt) {
-		t.Fatalf("only the last attempt is kept: %v", err)
+	if _, err := os.Stat(r.layout.HostAgyLogin(first.Attempt)); !os.IsNotExist(err) {
+		t.Fatalf("the first scratch folder is left: %v", err)
 	}
-	r.logins.Paste(second.Attempt, "code")
+	if folders := r.folders(); len(folders) != 1 {
+		t.Fatalf("folders %v", folders)
+	}
+	select {
+	case <-old.exited:
+	default:
+		t.Fatal("the first agy is still running")
+	}
+	if err := r.logins.Paste(first.Attempt, "late"); !errors.Is(err, ErrNoAttempt) {
+		t.Fatalf("paste for the replaced attempt: %v", err)
+	}
+	if err := r.logins.Paste(second.Attempt, "code"); err != nil {
+		t.Fatal(err)
+	}
 	r.logins.Wait(second.Attempt)
+	if status, _, _ := r.logins.Status(second.Attempt); status != contract.ConnectConnected || len(r.added) != 1 {
+		t.Fatalf("second: %q added %v", status, r.added)
+	}
+}
+
+// Cancel must get through while a paste is stuck: agy never reads its input, a 16 KiB page address is written, and Cancel returns promptly.
+func TestCancelGetsThroughAPasteAgyNeverReads(t *testing.T) {
+	r := newRig(t, validLinkText)
+	t.Setenv("FAKE_NOREAD", "1")
+	started, err := r.logins.Start("a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	page := "https://antigravity.google/oauth-callback?state=ST1&code=" + strings.Repeat("x", 16_000)
+	pasted := make(chan error, 1)
+	go func() { pasted <- r.logins.Paste(started.Attempt, page) }()
+	done := make(chan error, 1)
+	go func() { done <- r.logins.Cancel(started.Attempt) }()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("Cancel did not return while a paste was stuck")
+	}
+	<-pasted
+	if len(r.folders()) != 0 || len(r.left()) != 0 || len(r.added) != 0 {
+		t.Fatalf("left: %v %v %v", r.folders(), r.left(), r.added)
+	}
+}
+
+// agy's clean exit wins over a Cancel that comes after it or with it: the sign-in happened, so the account is stored. A Cancel after the
+// end changes nothing.
+func TestCleanExitWinsOverACancel(t *testing.T) {
+	r := newRig(t, validLinkText)
+	started, _ := r.logins.Start("a")
+	a := r.logins.attempt(started.Attempt)
+	if err := r.logins.Paste(started.Attempt, "code"); err != nil {
+		t.Fatal(err)
+	}
+	<-a.exited
+	if err := r.logins.Cancel(started.Attempt); err != nil {
+		t.Fatal(err)
+	}
+	r.logins.Wait(started.Attempt)
+	status, id, _ := r.logins.Status(started.Attempt)
+	if status != contract.ConnectConnected || id == "" || len(r.added) != 1 {
+		t.Fatalf("status %q added %v", status, r.added)
+	}
+	if err := r.logins.Cancel(started.Attempt); err != nil {
+		t.Fatalf("cancel after the end: %v", err)
+	}
+	if status, _, _ := r.logins.Status(started.Attempt); status != contract.ConnectConnected {
+		t.Fatalf("a late cancel changed the result: %q", status)
+	}
+}
+
+// T3 reads the raw pathname, so an escaped letter in it is not the same page; and JS trim also strips U+FEFF.
+func TestRawPathAndByteOrderMark(t *testing.T) {
+	if _, ok := validLink(strings.Replace(validLinkText, "/o/oauth2/auth", "/o/oauth2/%61uth", 1)); ok {
+		t.Fatal("an escaped letter in the link's path was accepted")
+	}
+	if _, ok := validResponse("ST1", "https://antigravity.google/oauth-%63allback?state=ST1&code=1"); ok {
+		t.Fatal("an escaped letter in the redirect's path was accepted")
+	}
+	if got, ok := validResponse("ST1", "\ufeff 4/0AbC \ufeff"); !ok || got != "4/0AbC" {
+		t.Fatalf("a byte order mark was not trimmed: %q %v", got, ok)
+	}
 }
 
 func TestNoProgram(t *testing.T) {

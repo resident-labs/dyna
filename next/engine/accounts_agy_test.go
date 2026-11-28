@@ -65,9 +65,7 @@ func newAgyRig(t *testing.T) *agyRig {
 	core := New(st, nil, nil, time.Now)
 	core.SetLayout(layout)
 	actions := NewAccountActions(core, proxy.Connections("k", st, time.Now), proxy.Quotas("k", st, time.Now))
-	logins := agylogin.New(agylogin.Config{Layout: layout, NewID: store.NewAgyAccountID, Add: func(ctx context.Context, id contract.AccountID, label string) error {
-		return st.AddAgyAccount(ctx, id, label, time.Now())
-	}, Remove: st.RemoveAgyAccount})
+	logins := agylogin.New(agylogin.Config{Layout: layout, NewID: store.NewAgyAccountID, Publish: actions.PublishAgy})
 	actions.SetAgyLogin(logins)
 	if err := core.ConfigureOperations(ctx, map[contract.OpKind]approve.Entry{"accounts.action": actions.Entry()}, time.Minute); err != nil {
 		t.Fatal(err)
@@ -83,13 +81,19 @@ func TestAgyAccountIsAddedListedRenamedAndRemoved(t *testing.T) {
 	if _, problem := actions.AccountsConnect(ctx, contract.Principal{Kind: contract.PrincipalSession}, contract.AccountsConnectRequest{Provider: contract.ProviderAgy, Label: "x"}); problem == nil || problem.Code != contract.ErrForbidden {
 		t.Fatalf("session: %v", problem)
 	}
-	started, problem := actions.AccountsConnect(ctx, owner, contract.AccountsConnectRequest{Provider: contract.ProviderAgy, Label: " Second "})
+	started, problem := actions.AccountsConnect(ctx, owner, contract.AccountsConnectRequest{Provider: contract.ProviderAgy, Label: "first"})
 	if problem != nil || started.Flow != contract.ConnectFlowCode || started.Link != os.Getenv("FAKE_LINK") {
 		t.Fatalf("connect: %+v %v", started, problem)
 	}
-	if _, problem := actions.AccountsConnect(ctx, owner, contract.AccountsConnectRequest{Provider: contract.ProviderAgy, Label: "again"}); problem == nil || problem.Code != contract.ErrConflict {
+	// A second Add replaces the first, which is no longer current: a paste for it is refused.
+	replaced, problem := actions.AccountsConnect(ctx, owner, contract.AccountsConnectRequest{Provider: contract.ProviderAgy, Label: " Second "})
+	if problem != nil {
 		t.Fatalf("a second sign-in: %v", problem)
 	}
+	if _, problem := actions.AccountsConnectCallback(ctx, owner, contract.AccountsConnectCallbackRequest{Attempt: started.Attempt, RedirectURL: "the-code"}); problem == nil {
+		t.Fatal("a paste for the replaced sign-in was taken")
+	}
+	started = replaced
 	if _, problem := actions.AccountsConnectCallback(ctx, owner, contract.AccountsConnectCallbackRequest{Attempt: started.Attempt, RedirectURL: "two words"}); problem == nil || problem.Code != contract.ErrInvalid {
 		t.Fatalf("bad paste: %v", problem)
 	}
@@ -164,9 +168,6 @@ func TestAgyCancelThroughTheActionFreesTheNextAdd(t *testing.T) {
 	if problem != nil {
 		t.Fatal(problem)
 	}
-	if _, problem := r.actions.AccountsConnect(r.ctx, owner, contract.AccountsConnectRequest{Provider: contract.ProviderAgy, Label: "b"}); problem == nil || problem.Code != contract.ErrConflict || problem.Message != "an Antigravity sign-in is already in progress" {
-		t.Fatalf("while one runs: %v", problem)
-	}
 	if _, problem := r.actions.AccountsConnectCancel(r.ctx, contract.Principal{Kind: contract.PrincipalSession}, contract.AccountsConnectCancelRequest{Attempt: first.Attempt}); problem == nil || problem.Code != contract.ErrForbidden {
 		t.Fatalf("session cancel: %v", problem)
 	}
@@ -184,9 +185,8 @@ func TestAgyCancelThroughTheActionFreesTheNextAdd(t *testing.T) {
 	}
 }
 
-// A sign-in whose output reads as a refusal ends as restricted, which the page words fixedly and offers no retry for; the text itself
-// is in no status, event or file.
-func TestAgyRefusalEndsRestricted(t *testing.T) {
+// Any sign-in that ends without success is just failed: no reason is given, and what agy printed is in no status, event or file.
+func TestAgyFailedEndIsJustFailed(t *testing.T) {
 	r := newAgyRig(t)
 	t.Setenv("FAKE_EXIT", "1")
 	t.Setenv("FAKE_ERR", "Error 403: PERMISSION-DENIED-TEXT-31f")
@@ -200,13 +200,57 @@ func TestAgyRefusalEndsRestricted(t *testing.T) {
 	}
 	r.logins.Wait(started.Attempt)
 	status, problem := r.actions.AccountsConnectStatus(r.ctx, owner, contract.AccountsConnectStatusRequest{Attempt: started.Attempt})
-	if problem != nil || status.Status != contract.ConnectFailed || status.Reason != contract.ConnectRestricted {
+	if problem != nil || status.Status != contract.ConnectFailed || status.Reason != "" {
 		t.Fatalf("status %+v %v", status, problem)
 	}
 	events, _ := r.st.OwnerEvents(r.ctx, 0, 100)
 	raw, _ := json.Marshal(events)
 	if bytes.Contains(raw, []byte("PERMISSION-DENIED-TEXT-31f")) {
 		t.Fatal("the refusal text reached an event")
+	}
+}
+
+// Publishing and Remove are one critical section: a Remove that arrives while the token file is being installed waits for it, then removes
+// the whole account, so no row and no unlisted token file remain. The 300 ms wait is a bounded negative check.
+func TestAgyRemoveWaitsForAPublication(t *testing.T) {
+	r := newAgyRig(t)
+	owner := contract.Principal{Kind: contract.PrincipalOwner}
+	id, _ := store.NewAgyAccountID()
+	entered, release := make(chan struct{}), make(chan struct{})
+	published := make(chan error, 1)
+	go func() {
+		published <- r.actions.PublishAgy(r.ctx, id, "p", func() error {
+			close(entered)
+			<-release
+			if err := os.MkdirAll(r.layout.HostAgyTokens(), 0o700); err != nil {
+				return err
+			}
+			return os.WriteFile(r.layout.HostAgyToken(string(id)), []byte("t"), 0o600)
+		})
+	}()
+	<-entered
+	removed := make(chan *contract.Error, 1)
+	go func() {
+		_, problem := r.actions.AccountsRemove(r.ctx, owner, contract.AccountsRemoveRequest{AccountID: id})
+		removed <- problem
+	}()
+	select {
+	case <-removed:
+		t.Fatal("Remove finished inside the publication")
+	case <-time.After(300 * time.Millisecond):
+	}
+	close(release)
+	if err := <-published; err != nil {
+		t.Fatal(err)
+	}
+	if problem := <-removed; problem != nil {
+		t.Fatal(problem)
+	}
+	if left, _ := r.st.AgyAccounts(r.ctx); len(left) != 0 {
+		t.Fatalf("row left: %v", left)
+	}
+	if _, err := os.Stat(r.layout.HostAgyToken(string(id))); !os.IsNotExist(err) {
+		t.Fatalf("token file left: %v", err)
 	}
 }
 

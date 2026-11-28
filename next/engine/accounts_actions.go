@@ -7,6 +7,7 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/resident-labs/dyna/contract"
 	"github.com/resident-labs/dyna/engine/agylogin"
@@ -119,9 +120,6 @@ func (s *AccountActions) runAccountAction(ctx context.Context, caller contract.P
 			}
 			if errors.Is(result.err, store.ErrPreferUnserved) {
 				return accountActionResult{}, invalid(result.err.Error())
-			}
-			if errors.Is(result.err, agylogin.ErrBusy) {
-				return accountActionResult{}, &contract.Error{Code: contract.ErrConflict, Message: result.err.Error()}
 			}
 			if errors.Is(result.err, agylogin.ErrNoProgram) || errors.Is(result.err, agylogin.ErrLink) {
 				return accountActionResult{}, &contract.Error{Code: contract.ErrUnavailable, Message: result.err.Error()}
@@ -320,11 +318,11 @@ func (s *AccountActions) AccountsConnectStatus(ctx context.Context, caller contr
 		if caller.Kind != contract.PrincipalOwner {
 			return contract.AccountsConnectStatusResponse{}, &contract.Error{Code: contract.ErrForbidden, Message: "forbidden"}
 		}
-		status, reason, account, err := s.agy.Status(req.Attempt)
+		status, account, err := s.agy.Status(req.Attempt)
 		if err != nil {
 			return contract.AccountsConnectStatusResponse{}, &contract.Error{Code: contract.ErrNotFound, Message: err.Error()}
 		}
-		return contract.AccountsConnectStatusResponse{Status: status, AccountID: account, Reason: reason}, nil
+		return contract.AccountsConnectStatusResponse{Status: status, AccountID: account}, nil
 	}
 	s.removeMu.Lock()
 	defer s.removeMu.Unlock()
@@ -390,6 +388,22 @@ func (s *AccountActions) AccountsImportOAuth(ctx context.Context, caller contrac
 		return accountActionResult{imported: out, err: err}
 	})
 	return result.imported, problem
+}
+
+// PublishAgy is how a new Antigravity account comes to exist: its row, then install (the token file's rename), as one step under removeMu,
+// the lock Remove runs under, so a Remove sees the account whole or not at all. A failed install takes the row back. A crash between the
+// two leaves a listed account with no sign-in, which the owner can remove.
+func (s *AccountActions) PublishAgy(ctx context.Context, id contract.AccountID, label string, install func() error) error {
+	s.removeMu.Lock()
+	defer s.removeMu.Unlock()
+	if err := s.service.store.AddAgyAccount(ctx, id, label, time.Now()); err != nil {
+		return err
+	}
+	if err := install(); err != nil {
+		s.service.store.RemoveAgyAccount(ctx, id)
+		return err
+	}
+	return nil
 }
 
 // removeAgy deletes an added Antigravity account: its token file, then its row. A missing file is not an error.

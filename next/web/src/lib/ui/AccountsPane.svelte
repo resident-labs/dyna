@@ -122,7 +122,7 @@
         if (ticket !== generation) return;
         if (result.status === "connected") { codeAttempt = undefined; if (reconnect) { cancel(); refresh(); } else void added(result.accountId); }
         else if (result.status === "pending") watch(id, ticket);
-        else { connectState = result.status; error = result.reason === "restricted" ? restrictedText : result.reason === "wrong_account" ? "That sign-in belongs to a different account." : result.reason === "adoption_failed" ? "Dyna cannot reconnect this sign-in. Remove it and add it again." : ""; }
+        else { connectState = result.status; error = attempt?.flow === "code" ? loginUnfinished : result.reason === "wrong_account" ? "That sign-in belongs to a different account." : result.reason === "adoption_failed" ? "Dyna cannot reconnect this sign-in. Remove it and add it again." : ""; }
       }, () => { if (ticket === generation) { connectState = "failed"; error = "Could not reach the service. Try again."; } });
     }, 2000);
   }
@@ -156,7 +156,7 @@
       if (popup) { popup.location.href = result.link; opened = true; }
     }, (reason: unknown) => {
       popup?.close();
-      if (!gone(reason) && ticket === generation) { connectState = "failed"; error = reconnectUnavailable(reason) ? "Dyna cannot reconnect this sign-in. Remove it and add it again." : refused(reason) ? chosen.connectFlow === "code" ? "A sign-in is already in progress. Cancel it, or wait for it to end." : "The provider did not accept the sign-in." : "Could not reach the service. Try again."; }
+      if (!gone(reason) && ticket === generation) { connectState = "failed"; error = reconnectUnavailable(reason) ? "Dyna cannot reconnect this sign-in. Remove it and add it again." : chosen.connectFlow === "code" ? loginUnfinished : refused(reason) ? "The provider did not accept the sign-in." : "Could not reach the service. Try again."; }
     });
     busy = false;
   }
@@ -214,8 +214,8 @@
     if (field && saved !== undefined && labelDraft !== saved) { event.preventDefault(); labelDraft = saved; labelError = ""; }
     else if (attempt) { event.preventDefault(); cancel(); }
   }
-  // Google refused or held the account: the page says so in these words and offers nothing to try again; the owner decides.
-  const restrictedText = "Google refused or restricted this sign-in. Do not try again; look at the account with Google first.";
+  // Every Antigravity sign-in that ends without success says this and nothing of what agy printed: Dyna reads none of it, and an owner who sees a Google refusal must not retry.
+  const loginUnfinished = "The login did not finish. If Google showed a verification or restriction message, stop and tell root; otherwise use Add again.";
   const ways: Record<ConnectFlow, string> = { callback: "Sign in with your plan", device: "Sign in with a code", key: "API key",
     code: "Adds one more Antigravity sign-in. Dyna keeps it but does not use it until you switch to it." };
   const connected: Record<ConnectFlow, string> = { callback: "signed in with a plan", device: "signed in with a code", key: "API key", code: "stored, not in use" };
@@ -277,7 +277,7 @@
 {/snippet}
 
 {#snippet failure()}
-  {#if connectState === "expired"}<p class="problem" role="alert">The sign-in expired. Cancel and try again.</p>{/if}
+  {#if connectState === "expired" && attempt?.flow !== "code"}<p class="problem" role="alert">The sign-in expired. Cancel and try again.</p>{/if}
   {#if error}<p class="problem" role="alert">{error}</p>{/if}
 {/snippet}
 
