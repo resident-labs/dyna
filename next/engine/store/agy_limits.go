@@ -51,7 +51,7 @@ func (s *Store) agyLimited(ctx context.Context, q sqlQuery, now time.Time) (bool
 }
 
 // releaseAgyLimits ends the limits that have reset: it deletes their rows and, in the same transaction, queues a dispatch for every open
-// agy session through the path a new input takes. A session with a pending waking input starts; the rest stay idle. Nothing else of a
+// agy session through the path a new input takes, for the streams that are connected; a stopped box is started by WakeStopped, which runs right after this in the same pass and keeps the paused-room rule. A session with a pending waking input starts; the rest stay idle. Nothing else of a
 // held session was touched while it was held, so a Stop and an owner's post mean what they always do. A restart keeps the rows, and this
 // is what releases them.
 func (s *Store) releaseAgyLimits(ctx context.Context, now time.Time) error {
@@ -87,10 +87,6 @@ func (s *Store) releaseAgyLimits(ctx context.Context, now time.Time) error {
 			return err
 		}
 		for _, id := range ids {
-			// A box stopped for being quiet starts again for an input that waits, as it does for a retry that falls due.
-			if _, err := tx.ExecContext(ctx, "UPDATE boxes SET want='run' WHERE session=? AND want='stop' AND EXISTS (SELECT 1 FROM deliveries WHERE to_kind='session' AND to_id=? AND state='pending' AND wake=1)", id, id); err != nil {
-				return err
-			}
 			s.wakePending = append(s.wakePending, id)
 		}
 		return nil

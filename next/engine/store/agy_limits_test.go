@@ -391,3 +391,33 @@ func TestAgyLimitSurvivesARestartAndIsReleasedAfterIt(t *testing.T) {
 		t.Fatal("b did not start after the release")
 	}
 }
+
+// The release starts no box itself: a stopped box with a waiting input starts through WakeStopped, which waits for a paused room's resume.
+func TestAgyLimitReleaseLeavesAStoppedBoxInAPausedRoomStopped(t *testing.T) {
+	r := newLimitRig(t)
+	r.limited(3600)
+	if _, err := r.s.writer.Exec("UPDATE boxes SET state='stopped',want='stop' WHERE session='b'; UPDATE rooms SET paused_at=1"); err != nil {
+		t.Fatal(err)
+	}
+	r.input("b", owner, true)
+	r.now = r.now.Add(time.Hour)
+	r.sweep()
+	if err := r.s.WakeStopped(r.ctx); err != nil {
+		t.Fatal(err)
+	}
+	want := func(state string) {
+		t.Helper()
+		var got string
+		if err := r.s.Read().QueryRowContext(r.ctx, "SELECT want FROM boxes WHERE session='b'").Scan(&got); err != nil || got != state {
+			t.Fatalf("b's box wants %q, want %q: %v", got, state, err)
+		}
+	}
+	want("stop")
+	if _, err := r.s.writer.Exec("UPDATE rooms SET paused_at=NULL"); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.s.WakeStopped(r.ctx); err != nil {
+		t.Fatal(err)
+	}
+	want("run")
+}
