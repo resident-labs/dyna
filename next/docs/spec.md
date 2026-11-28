@@ -155,6 +155,7 @@ This table lists the current tables in `engine/store/schema.sql`, the authority 
 | `deliveries` | Recipient/sequence primary key; `deliveries_open` indexes open inputs, and `deliveries_by_turn(to_kind,to_id,turn,seq)` recovers all reply channels for a turn in sequence order, including read inputs. |
 | `turns` |
 | `hosts` |
+| `agy_limits` | One row per Antigravity account, with the time its usage limit resets (the reset an agy turn stated); a session of that account starts no turn before it. |
 | `disk_warnings` |
 | `pools` |
 | `room_shared` |

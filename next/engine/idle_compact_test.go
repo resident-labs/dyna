@@ -91,7 +91,7 @@ func TestARestartedEngineDoesNotRepeatARecordedCompaction(t *testing.T) {
 	b := newQuietBox(t)
 	ask := b.ask(t)
 	b.answer(t, contract.BoxCompactedRequest{Turn: ask.Turn, Compacted: true})
-	if turn, due, err := b.s.store.CompactionDue(b.ctx, b.id, false); err != nil || due || turn != ask.Turn {
+	if turn, due, err := b.s.store.CompactionDue(b.ctx, b.id, false, b.s.now()); err != nil || due || turn != ask.Turn {
 		t.Fatalf("due %s %v: %v", turn, due, err)
 	}
 }
