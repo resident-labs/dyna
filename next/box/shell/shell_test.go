@@ -10,6 +10,7 @@ import (
 	"strings"
 	"syscall"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/resident-labs/dyna/contract"
@@ -484,6 +485,53 @@ func TestClosingDetachesHostRuns(t *testing.T) {
 		t.Fatalf("close stopped host run %q", got)
 	default:
 	}
+}
+
+func TestClosingWaitsForAnExplicitHostStop(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		r, started, _ := stoppableHostRig(false)
+		inFlight, delivered := make(chan string, 1), make(chan string, 1)
+		release := make(chan struct{}, 1)
+		r.server.cfg.HostStop = func(ctx context.Context, id string) error {
+			inFlight <- id
+			select {
+			case <-release:
+				delivered <- id
+				return nil
+			case <-ctx.Done():
+				return ctx.Err()
+			}
+		}
+		startHostJob(t, r)
+		id := <-started
+		stopped := make(chan string, 1)
+		go func() {
+			_, body := call(t, r.server.Handler(), "/job", `{"action":"stop","job":"job_1"}`)
+			stopped <- body
+		}()
+		if got := <-inFlight; got != id {
+			t.Fatalf("stopping %q, started %q", got, id)
+		}
+		closed := make(chan struct{})
+		go func() {
+			r.server.Close()
+			close(closed)
+		}()
+		synctest.Wait()
+		select {
+		case <-closed:
+			t.Error("box closed before the explicit stop reached the engine")
+		default:
+		}
+		release <- struct{}{}
+		<-closed
+		if got := <-delivered; got != id {
+			t.Fatalf("stop reached the engine for %q, want %q", got, id)
+		}
+		if body := <-stopped; !strings.Contains(body, `"status":"stopped"`) {
+			t.Fatalf("stop = %s", body)
+		}
+	})
 }
 
 func TestLateHostRefusalReachesTheJobOutput(t *testing.T) {

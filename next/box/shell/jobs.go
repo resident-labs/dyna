@@ -100,6 +100,7 @@ type hostProcess struct {
 	cancel   context.CancelFunc // ends the call
 	stop     func()             // asks the engine to stop the run
 	stopOnce sync.Once
+	stopped  chan struct{} // the explicit stop call returned, or none was needed
 	code     int
 	refused  *contract.Error // the engine ran nothing
 	canceled bool            // the call ended without a result
@@ -118,8 +119,12 @@ func (p *hostProcess) Signal(sig syscall.Signal) {
 	p.stopOnce.Do(func() {
 		select {
 		case <-p.done:
+			close(p.stopped)
 		default:
-			go p.stop()
+			go func() {
+				defer close(p.stopped)
+				p.stop()
+			}()
 		}
 	})
 	if sig == syscall.SIGKILL {
@@ -335,7 +340,7 @@ func (s *Server) startHost(r Run, out io.Writer) *hostProcess {
 	_, _ = rand.Read(id[:])
 	r.ClientID = hex.EncodeToString(id[:])
 	ctx, cancel := context.WithCancel(context.Background())
-	p := &hostProcess{done: make(chan struct{}), cancel: cancel}
+	p := &hostProcess{done: make(chan struct{}), cancel: cancel, stopped: make(chan struct{})}
 	p.stop = func() {
 		stopCtx, cancel := context.WithTimeout(context.Background(), stopGrace)
 		defer cancel()
@@ -600,17 +605,25 @@ func (s *Server) Running() (jobs, hosts []contract.ShellJobID) {
 	return jobs, hosts
 }
 
-// Close kills box-local job groups. Host runs belong to the engine: closing this box only detaches its calls.
+// Close kills box-local job groups and detaches host runs. It waits up to the stop grace period for explicit host stops
+// already requested, without requesting new ones.
 func (s *Server) Close() {
 	close(s.closed)
 	s.mu.Lock()
-	defer s.mu.Unlock()
+	var stops []chan struct{}
 	for _, j := range s.jobs {
 		if host, ok := j.proc.(*hostProcess); ok {
+			// If no explicit stop won stopOnce, there is nothing to wait for.
+			host.stopOnce.Do(func() { close(host.stopped) })
 			host.cancel()
+			stops = append(stops, host.stopped)
 		} else {
 			j.proc.Signal(syscall.SIGKILL)
 		}
+	}
+	s.mu.Unlock()
+	for _, stopped := range stops {
+		<-stopped
 	}
 }
 
