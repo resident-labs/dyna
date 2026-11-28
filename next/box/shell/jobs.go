@@ -100,9 +100,10 @@ type hostProcess struct {
 	cancel   context.CancelFunc // ends the call
 	stop     func()             // asks the engine to stop the run
 	stopOnce sync.Once
-	stopped  chan struct{} // closes once the stop was asked, or was not needed
+	stopped  chan struct{} // the explicit stop call returned, or none was needed
 	code     int
 	refused  *contract.Error // the engine ran nothing
+	canceled bool            // the call ended without a result
 }
 
 func (p *hostProcess) Wait() (int, string) {
@@ -352,8 +353,8 @@ func (s *Server) startHost(r Run, out io.Writer) *hostProcess {
 		defer cancel()
 		p.code, p.refused = s.cfg.Host(ctx, r, out)
 		if p.refused != nil && ctx.Err() != nil {
-			// The job was stopped, which ended the call; the engine refused nothing.
-			p.code, p.refused = -1, nil
+			// The box stopped waiting; the engine refused nothing.
+			p.code, p.refused, p.canceled = -1, nil, true
 			return
 		}
 		if p.refused != nil {
@@ -537,6 +538,13 @@ func (s *Server) dropOldFinished() []*job {
 }
 
 func (s *Server) report(j *job) {
+	if host, ok := j.proc.(*hostProcess); ok && host.canceled {
+		select {
+		case <-s.closed:
+			return // The engine reports a detached host run's result.
+		default:
+		}
+	}
 	j.mu.Lock()
 	text := Mask(string(j.output)) // mask first: cutting first could split a token
 	tail := strings.ToValidUTF8(text[max(0, len(text)-tailLimit):], "")
@@ -578,32 +586,39 @@ func (s *Server) stop(j *job) {
 	<-j.done
 }
 
-// Running names the jobs that have not ended. Each turn's output carries them, for the engine's list of what a session holds.
-func (s *Server) Running() []contract.ShellJobID {
+// Running names the jobs that have not ended and which of them run on a host.
+func (s *Server) Running() (jobs, hosts []contract.ShellJobID) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	var running []contract.ShellJobID
 	for _, j := range s.jobs {
 		select {
 		case <-j.done:
 		default:
-			running = append(running, j.id)
+			jobs = append(jobs, j.id)
+			if j.host != "" {
+				hosts = append(hosts, j.id)
+			}
 		}
 	}
-	slices.Sort(running)
-	return running
+	slices.Sort(jobs)
+	slices.Sort(hosts)
+	return jobs, hosts
 }
 
-// Close kills every job group, as the agent stops. It waits for each host run's stop to reach the engine, which takes at
-// most the stop grace period.
+// Close kills box-local job groups and detaches host runs. It waits up to the stop grace period for explicit host stops
+// already requested, without requesting new ones.
 func (s *Server) Close() {
 	close(s.closed)
 	s.mu.Lock()
 	var stops []chan struct{}
 	for _, j := range s.jobs {
-		j.proc.Signal(syscall.SIGKILL)
 		if host, ok := j.proc.(*hostProcess); ok {
+			// If no explicit stop won stopOnce, there is nothing to wait for.
+			host.stopOnce.Do(func() { close(host.stopped) })
+			host.cancel()
 			stops = append(stops, host.stopped)
+		} else {
+			j.proc.Signal(syscall.SIGKILL)
 		}
 	}
 	s.mu.Unlock()

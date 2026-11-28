@@ -10,6 +10,7 @@ import (
 	"strings"
 	"syscall"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/resident-labs/dyna/contract"
@@ -92,8 +93,8 @@ func TestSlowCommandMovesToBackgroundAndReportsItsEnd(t *testing.T) {
 	if got := result(j); !got.Running || got.Status != "running" || got.ExitCode != nil || !strings.Contains(got.Output, "building") {
 		t.Fatalf("unexpected foreground result %+v", got)
 	}
-	if len(r.server.Running()) != 1 {
-		t.Fatalf("running = %v, want 1", r.server.Running())
+	if running, _ := r.server.Running(); len(running) != 1 {
+		t.Fatalf("running = %v, want 1", running)
 	}
 	r.proc.exit <- 3
 	report := <-r.reports
@@ -101,8 +102,8 @@ func TestSlowCommandMovesToBackgroundAndReportsItsEnd(t *testing.T) {
 		t.Fatalf("unexpected report %+v", report)
 	}
 	<-j.done
-	if len(r.server.Running()) != 0 {
-		t.Fatalf("running = %v, want 0", r.server.Running())
+	if running, _ := r.server.Running(); len(running) != 0 {
+		t.Fatalf("running = %v, want 0", running)
 	}
 }
 
@@ -121,7 +122,7 @@ func TestAMessageMovesAForegroundCommandToTheBackground(t *testing.T) {
 		t.Fatalf("run = %s", body)
 	}
 	r.server.StepAside(contract.Interrupt{Kind: contract.InterruptOwner})
-	if running := r.server.Running(); len(running) != 1 {
+	if running, _ := r.server.Running(); len(running) != 1 {
 		t.Fatalf("running = %v, want the moved job", running)
 	}
 	r.proc.exit <- 3
@@ -464,20 +465,73 @@ func TestAHostRunThatOutlastsItsStopEndsTheJob(t *testing.T) {
 	}
 }
 
-// Closing the box stops its host runs, and waits for those stops to reach the engine.
-func TestClosingStopsHostRuns(t *testing.T) {
+func TestClosingDetachesHostRuns(t *testing.T) {
 	r, started, stops := stoppableHostRig(false)
 	startHostJob(t, r)
-	id := <-started
+	<-started
+	jobs, hosts := r.server.Running()
+	if len(jobs) != 1 || len(hosts) != 1 || jobs[0] != "job_1" || hosts[0] != jobs[0] {
+		t.Fatalf("jobs=%v hosts=%v", jobs, hosts)
+	}
+	j, _ := r.server.find(jobs[0])
 	r.server.Close()
 	select {
-	case got := <-stops:
-		if got != id {
-			t.Fatalf("stopped %q, ran %q", got, id)
-		}
-	default:
-		t.Fatal("close returned before the stop was asked")
+	case <-j.done:
+	case <-time.After(time.Second):
+		t.Fatal("close did not detach the host call")
 	}
+	select {
+	case got := <-stops:
+		t.Fatalf("close stopped host run %q", got)
+	default:
+	}
+}
+
+func TestClosingWaitsForAnExplicitHostStop(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		r, started, _ := stoppableHostRig(false)
+		inFlight, delivered := make(chan string, 1), make(chan string, 1)
+		release := make(chan struct{}, 1)
+		r.server.cfg.HostStop = func(ctx context.Context, id string) error {
+			inFlight <- id
+			select {
+			case <-release:
+				delivered <- id
+				return nil
+			case <-ctx.Done():
+				return ctx.Err()
+			}
+		}
+		startHostJob(t, r)
+		id := <-started
+		stopped := make(chan string, 1)
+		go func() {
+			_, body := call(t, r.server.Handler(), "/job", `{"action":"stop","job":"job_1"}`)
+			stopped <- body
+		}()
+		if got := <-inFlight; got != id {
+			t.Fatalf("stopping %q, started %q", got, id)
+		}
+		closed := make(chan struct{})
+		go func() {
+			r.server.Close()
+			close(closed)
+		}()
+		synctest.Wait()
+		select {
+		case <-closed:
+			t.Error("box closed before the explicit stop reached the engine")
+		default:
+		}
+		release <- struct{}{}
+		<-closed
+		if got := <-delivered; got != id {
+			t.Fatalf("stop reached the engine for %q, want %q", got, id)
+		}
+		if body := <-stopped; !strings.Contains(body, `"status":"stopped"`) {
+			t.Fatalf("stop = %s", body)
+		}
+	})
 }
 
 func TestLateHostRefusalReachesTheJobOutput(t *testing.T) {
