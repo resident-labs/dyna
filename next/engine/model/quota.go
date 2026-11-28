@@ -36,6 +36,7 @@ type Quotas struct {
 	management managementClient
 	store      AccountStore
 	now        func() time.Time
+	onRecovery func(time.Time)
 	slots      chan struct{}
 	reads      singleflight.Group
 	mu         sync.Mutex
@@ -49,6 +50,9 @@ type Quotas struct {
 func (p *Proxy) Quotas(key string, st AccountStore, now func() time.Time) *Quotas {
 	return &Quotas{management: managementClient{client: p.client, key: key}, store: st, now: now, slots: make(chan struct{}, quotaReads), cache: make(map[string]quotaEntry)}
 }
+
+// OnRecovery registers a hook before reads begin. It runs once per whole read that finds any previously spent account recovered.
+func (q *Quotas) OnRecovery(hook func(time.Time)) { q.onRecovery = hook }
 
 // Clear drops observations after an account is removed.
 func (q *Quotas) Clear() {
@@ -121,9 +125,24 @@ func (q *Quotas) Read(ctx context.Context) (contract.AccountsQuotaResponse, erro
 	reads.Wait()
 	q.markActive(ctx, bound, result.Accounts)
 	q.mu.Lock()
-	q.latest, q.latestAt = result.Accounts, q.now()
+	recovered := q.onRecovery != nil && slices.ContainsFunc(result.Accounts, func(account contract.AccountUsage) bool {
+		// No windows or a failed observation cannot show that an account recovered.
+		return account.Cause == contract.UsageOK && len(account.Windows) > 0 && !quotaSpent(account) &&
+			slices.ContainsFunc(q.latest, func(previous contract.AccountUsage) bool {
+				return previous.AccountID == account.AccountID && quotaSpent(previous)
+			})
+	})
+	now := q.now()
+	q.latest, q.latestAt = result.Accounts, now
 	q.mu.Unlock()
+	if recovered {
+		q.onRecovery(now)
+	}
 	return result, nil
+}
+
+func quotaSpent(account contract.AccountUsage) bool {
+	return slices.ContainsFunc(account.Windows, func(w contract.UsageWindow) bool { return w.UsedPercent >= 100 })
 }
 
 // Latest returns the last whole reading at once, for the context snapshot of a turn being dispatched. Once that reading

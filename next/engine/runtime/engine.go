@@ -256,6 +256,11 @@ func Run(ctx context.Context, cfg Config) error {
 	boxes.Compose = &compose.Files{Layout: layout, Repo: mirror, Images: service.Images()}
 	service.SetCompose(boxes.Compose)
 	quotas := proxy.Quotas(managementKey, st, time.Now)
+	quotas.OnRecovery(func(now time.Time) {
+		if err := st.ReleaseModelRetries(ctx, now); err != nil && ctx.Err() == nil {
+			log.Printf("model quota recovery: release retries: %v", err)
+		}
+	})
 	service.SetWebSearchProxy(proxy, quotas)
 	service.SetUsage(quotas)
 	connections := proxy.Connections(managementKey, st, time.Now)
