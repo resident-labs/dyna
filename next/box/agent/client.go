@@ -52,7 +52,7 @@ func refusal(call string, resp *http.Response) apiError {
 
 // Client owns the box socket and a bounded outgoing buffer.
 type Client struct {
-	shellJobs func() []contract.ShellJobID
+	shellJobs func() ([]contract.ShellJobID, []contract.ShellJobID)
 	http      *http.Client
 	mu        sync.Mutex
 	size      int
@@ -64,7 +64,7 @@ func NewClient(socket string) *Client {
 	transport := &http.Transport{DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
 		return (&net.Dialer{}).DialContext(ctx, "unix", socket)
 	}}
-	return &Client{shellJobs: func() []contract.ShellJobID { return nil }, http: &http.Client{Transport: transport}, space: make(chan struct{}), queue: make(chan outgoing, 128)}
+	return &Client{shellJobs: func() ([]contract.ShellJobID, []contract.ShellJobID) { return nil, nil }, http: &http.Client{Transport: transport}, space: make(chan struct{}), queue: make(chan outgoing, 128)}
 }
 
 // backoff spaces attempts to reach the engine: half a second at first, doubling to ten seconds. The call queue, the channel
@@ -334,8 +334,8 @@ func (c *Client) TranscriptAppend(ctx context.Context, req contract.TranscriptAp
 }
 
 func (c *Client) TurnOutput(ctx context.Context, result contract.TurnEnded) error {
-	jobs := c.shellJobs()
-	body, err := json.Marshal(contract.TurnOutputRequest{ShellJobs: len(jobs), Jobs: jobs, Turn: result.Turn, Outcome: result.Outcome, Error: result.Error, Cause: result.Cause, Final: result.Final, Data: result.Data, EndPosts: result.EndPosts, Model: result.Usage.Model, Usage: result.Usage, Unread: result.Unread, ModelRetryAfterSeconds: result.ModelRetryAfterSeconds})
+	jobs, hostJobs := c.shellJobs()
+	body, err := json.Marshal(contract.TurnOutputRequest{ShellJobs: len(jobs), Jobs: jobs, HostJobs: hostJobs, Turn: result.Turn, Outcome: result.Outcome, Error: result.Error, Cause: result.Cause, Final: result.Final, Data: result.Data, EndPosts: result.EndPosts, Model: result.Usage.Model, Usage: result.Usage, Unread: result.Unread, ModelRetryAfterSeconds: result.ModelRetryAfterSeconds})
 	if err != nil {
 		return err
 	}

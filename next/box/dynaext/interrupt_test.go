@@ -95,7 +95,7 @@ func TestScriptCancellationLeavesNestedBashAndOneCompletion(t *testing.T) {
 	if got := b.toolResult(t, 1); !strings.Contains(got, "Script stopped") || !strings.Contains(got, "partial") || !strings.Contains(got, "bash: done") {
 		t.Fatal(got)
 	}
-	if len(b.shell.Running()) != 1 {
+	if running, _ := b.shell.Running(); len(running) != 1 {
 		t.Fatal("nested bash did not survive")
 	}
 	f, err := os.OpenFile(pipe, os.O_WRONLY, 0600)
@@ -149,7 +149,8 @@ func TestLoopingBashScriptStopsInsteadOfWaitingForEveryCommand(t *testing.T) {
 	if got := b.toolResult(t, 1); !strings.Contains(got, "Script stopped") || !strings.Contains(got, "ran 0") {
 		t.Fatal(got)
 	}
-	running := len(b.shell.Running())
+	jobs, _ := b.shell.Running()
+	running := len(jobs)
 	if running < 1 || running > 2 {
 		t.Fatalf("started %d commands, expected at most the next one", running)
 	}

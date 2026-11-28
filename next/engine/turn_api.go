@@ -260,7 +260,7 @@ func (s *Service) TurnOutput(ctx context.Context, caller contract.Principal, req
 			return contract.TurnOutputResponse{}, failure(err)
 		}
 	}
-	event, err := s.event(session.Room, caller, contract.TurnEnded{Session: session.ID, Turn: req.Turn, Outcome: req.Outcome, Final: req.Final, Data: req.Data, DataAttachment: req.DataAttachment, Attachments: req.Attachments, Usage: req.Usage, Error: req.Error, Cause: req.Cause, ShellJobs: req.ShellJobs, Jobs: req.Jobs})
+	event, err := s.event(session.Room, caller, contract.TurnEnded{Session: session.ID, Turn: req.Turn, Outcome: req.Outcome, Final: req.Final, Data: req.Data, DataAttachment: req.DataAttachment, Attachments: req.Attachments, Usage: req.Usage, Error: req.Error, Cause: req.Cause, ShellJobs: req.ShellJobs, Jobs: req.Jobs, HostJobs: req.HostJobs})
 	if err != nil {
 		return contract.TurnOutputResponse{}, failure(err)
 	}

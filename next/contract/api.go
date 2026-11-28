@@ -934,7 +934,8 @@ type TurnOutputRequest struct {
 	Data           JSONData     `json:"data,omitempty"`
 	Attachments    []Attachment `json:"-"`
 	ShellJobs      int          `json:"shellJobs"`
-	Jobs           []ShellJobID `json:"jobs,omitempty"` // the jobs ShellJobs counts
+	Jobs           []ShellJobID `json:"jobs,omitempty"`     // the jobs ShellJobs counts
+	HostJobs       []ShellJobID `json:"hostJobs,omitempty"` // the subset of Jobs that run outside the box
 	Error          string       `json:"error,omitempty"`
 	Cause          FailureCause `json:"cause,omitempty"`
 	Turn           TurnID       `json:"turn"`

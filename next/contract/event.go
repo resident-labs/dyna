@@ -265,7 +265,8 @@ type TurnEnded struct {
 	// end wakes the session, so the next turn.ended carries the new count.
 	ShellJobs int `json:"shellJobs,omitempty"`
 	// Jobs names the jobs ShellJobs counts. A box agent too old to name them sends only the count.
-	Jobs []ShellJobID `json:"jobs,omitempty"`
+	Jobs     []ShellJobID `json:"jobs,omitempty"`
+	HostJobs []ShellJobID `json:"hostJobs,omitempty"` // the subset of Jobs that run outside the box
 	// EndPosts carries the harness's result to TurnOutputRequest.EndPosts. The event records the same fact in Replies.
 	EndPosts []EventID `json:"-"`
 	// Workflow worker outputs are local to the box. Only schema steps collect the tool result and closing messages.

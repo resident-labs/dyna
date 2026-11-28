@@ -49,16 +49,16 @@ const idleService = `r.sub!='' AND r.key='' AND r.state='running' AND r.served!=
 
 // responsibilityQuery reads the lists of a JSON array of sessions in one statement. Each branch walks an index by session.
 //
-// sessions.shell_jobs counts a session's shell jobs and the last turn.ended names them. A job that ended since is in
-// shell_jobs. A box agent too old to name its jobs leaves only the count, which reads as one unnamed job.
+// sessions.shell_jobs counts a session's shell jobs and the last turn.ended names them. Only local jobs need the box.
+// A job that ended since is in shell_jobs. A box agent too old to name its jobs leaves only the count, which reads as one unnamed job.
 //
 // A run needs its turn: a crew whose turn failed waits for a restart, and its box does nothing until then.
 const responsibilityQuery = `WITH wanted(id) AS (SELECT value FROM json_each(?)),
-jobs(session,ids) AS (SELECT s.id,(SELECT json_extract(CAST(e.body AS TEXT),'$.jobs') FROM events e WHERE e.room=s.room AND e.from_kind='session' AND e.from_id=s.id AND e.type='turn.ended' ORDER BY e.seq DESC LIMIT 1) FROM sessions s JOIN wanted w ON w.id=s.id WHERE s.shell_jobs>0)
+jobs(session,body) AS (SELECT s.id,(SELECT CAST(e.body AS TEXT) FROM events e WHERE e.room=s.room AND e.from_kind='session' AND e.from_id=s.id AND e.type='turn.ended' ORDER BY e.seq DESC LIMIT 1) FROM sessions s JOIN wanted w ON w.id=s.id WHERE s.shell_jobs>0)
 SELECT session,kind,id,blocked FROM (
 	SELECT t.session session,'turn' kind,t.id id,0 blocked FROM turns t JOIN wanted w ON w.id=t.session WHERE t.ended_at IS NULL AND NOT EXISTS (SELECT 1 FROM workflow_runs r WHERE r.session=t.session AND ` + idleService + `)
-	UNION ALL SELECT j.session,'shell_job',e.value,0 FROM jobs j,json_each(j.ids) e WHERE NOT EXISTS (SELECT 1 FROM shell_jobs x WHERE x.session=j.session AND x.job=e.value)
-	UNION ALL SELECT session,'shell_job','',0 FROM jobs WHERE ids IS NULL
+	UNION ALL SELECT j.session,'shell_job',e.value,0 FROM jobs j,json_each(j.body,'$.jobs') e WHERE NOT EXISTS (SELECT 1 FROM shell_jobs x WHERE x.session=j.session AND x.job=e.value) AND NOT EXISTS (SELECT 1 FROM json_each(j.body,'$.hostJobs') h WHERE h.value=e.value)
+	UNION ALL SELECT session,'shell_job','',0 FROM jobs WHERE json_extract(body,'$.jobs') IS NULL
 	UNION ALL SELECT r.session,'workflow',r.id,0 FROM workflow_runs r JOIN wanted w ON w.id=r.session JOIN turns t ON t.session=r.session AND t.ended_at IS NULL WHERE r.state='running' AND NOT (` + idleService + `)
 	UNION ALL SELECT g.session,'goal','g'||g.number,0 FROM goals g JOIN wanted w ON w.id=g.session WHERE g.state='active'
 	UNION ALL SELECT p.session,'pr',p.repo||'#'||p.number,0 FROM pr_owners p JOIN wanted w ON w.id=p.session WHERE p.state='open'

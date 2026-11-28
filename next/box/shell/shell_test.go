@@ -92,8 +92,8 @@ func TestSlowCommandMovesToBackgroundAndReportsItsEnd(t *testing.T) {
 	if got := result(j); !got.Running || got.Status != "running" || got.ExitCode != nil || !strings.Contains(got.Output, "building") {
 		t.Fatalf("unexpected foreground result %+v", got)
 	}
-	if len(r.server.Running()) != 1 {
-		t.Fatalf("running = %v, want 1", r.server.Running())
+	if running, _ := r.server.Running(); len(running) != 1 {
+		t.Fatalf("running = %v, want 1", running)
 	}
 	r.proc.exit <- 3
 	report := <-r.reports
@@ -101,8 +101,8 @@ func TestSlowCommandMovesToBackgroundAndReportsItsEnd(t *testing.T) {
 		t.Fatalf("unexpected report %+v", report)
 	}
 	<-j.done
-	if len(r.server.Running()) != 0 {
-		t.Fatalf("running = %v, want 0", r.server.Running())
+	if running, _ := r.server.Running(); len(running) != 0 {
+		t.Fatalf("running = %v, want 0", running)
 	}
 }
 
@@ -121,7 +121,7 @@ func TestAMessageMovesAForegroundCommandToTheBackground(t *testing.T) {
 		t.Fatalf("run = %s", body)
 	}
 	r.server.StepAside(contract.Interrupt{Kind: contract.InterruptOwner})
-	if running := r.server.Running(); len(running) != 1 {
+	if running, _ := r.server.Running(); len(running) != 1 {
 		t.Fatalf("running = %v, want the moved job", running)
 	}
 	r.proc.exit <- 3
@@ -464,19 +464,25 @@ func TestAHostRunThatOutlastsItsStopEndsTheJob(t *testing.T) {
 	}
 }
 
-// Closing the box stops its host runs, and waits for those stops to reach the engine.
-func TestClosingStopsHostRuns(t *testing.T) {
+func TestClosingDetachesHostRuns(t *testing.T) {
 	r, started, stops := stoppableHostRig(false)
 	startHostJob(t, r)
-	id := <-started
+	<-started
+	jobs, hosts := r.server.Running()
+	if len(jobs) != 1 || len(hosts) != 1 || jobs[0] != "job_1" || hosts[0] != jobs[0] {
+		t.Fatalf("jobs=%v hosts=%v", jobs, hosts)
+	}
+	j, _ := r.server.find(jobs[0])
 	r.server.Close()
 	select {
+	case <-j.done:
+	case <-time.After(time.Second):
+		t.Fatal("close did not detach the host call")
+	}
+	select {
 	case got := <-stops:
-		if got != id {
-			t.Fatalf("stopped %q, ran %q", got, id)
-		}
+		t.Fatalf("close stopped host run %q", got)
 	default:
-		t.Fatal("close returned before the stop was asked")
 	}
 }
 

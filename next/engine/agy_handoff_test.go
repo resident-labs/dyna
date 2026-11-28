@@ -4,11 +4,14 @@ import (
 	"context"
 	"database/sql"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/resident-labs/dyna/box"
 	"github.com/resident-labs/dyna/contract"
+	"github.com/resident-labs/dyna/engine/store"
+	"github.com/resident-labs/dyna/harness/testutil"
 )
 
 func readySession(t *testing.T, s *Service, sid contract.SessionID) {
@@ -52,6 +55,85 @@ func TestHarnessSwitchPigToAgyAndBack(t *testing.T) {
 	}
 	if session, err := s.store.Session(ctx, sid); err != nil || session.Profile != "other" || !session.Handoff {
 		t.Fatalf("session after the switch back: %+v %v", session, err)
+	}
+}
+
+func TestHostJobDoesNotHoldTheBoxDuringHarnessSwitch(t *testing.T) {
+	s, room, _, owner := agySetup(t)
+	ctx := t.Context()
+	host := &dormantHost{}
+	s.boxes = host
+	resetLifecycle(s)
+	sid := startOn(t, s, room, "host-job", "other", "hermeslab")
+	passLifecycle(t, s, ctx)
+	caller := boxCaller(sid)
+	if _, problem := s.BoxHello(ctx, caller, contract.BoxHelloRequest{CanHandoff: true, LaunchGen: launchGen(t, s, sid)}); problem != nil {
+		t.Fatal(problem)
+	}
+	if err := s.store.CreateGrant(ctx, contract.Grant{ID: "grant_switch", Kind: contract.GrantHostExec, Room: room, To: caller, By: owner, Created: s.now(), Hosts: []contract.HostName{"hermeslab"}}); err != nil {
+		t.Fatal(err)
+	}
+	runner := newStoppableHostexec()
+	release := sync.OnceFunc(func() { close(runner.release) })
+	t.Cleanup(release)
+	hostexecRun(t, s, ctx, runner)
+	turns, disconnect := connectBox(t, s, ctx, sid, "")
+	wakeSession(t, s, ctx, room, sid)
+	var turn contract.TurnID
+	select {
+	case start := <-turns:
+		turn = start.Turn
+	case <-time.After(5 * time.Second):
+		t.Fatal("no turn on the original box")
+	}
+	runCtx, cancelRun := context.WithCancel(ctx)
+	defer cancelRun()
+	detached := make(chan struct{})
+	go func() {
+		defer close(detached)
+		_, _ = s.HostexecRun(runCtx, caller, contract.HostexecRunRequest{Host: "hermeslab", Command: "true", ClientID: "host-job"})
+	}()
+	select {
+	case <-runner.entered:
+	case <-detached:
+		t.Fatal("host run returned without starting")
+	case <-time.After(5 * time.Second):
+		t.Fatal("host run did not start")
+	}
+	jobs := []contract.ShellJobID{testJob}
+	if _, problem := s.TurnOutput(ctx, caller, contract.TurnOutputRequest{Turn: turn, Outcome: contract.TurnCompleted, ShellJobs: 1, Jobs: jobs, HostJobs: jobs}); problem != nil {
+		t.Fatal(problem)
+	}
+	if _, problem := s.SessionSetProfile(ctx, owner, contract.SessionSetProfileRequest{Session: sid, Profile: "gem"}); problem != nil {
+		t.Fatal(problem)
+	}
+	waitWant(t, s, ctx, sid, "stop")
+	passLifecycle(t, s, ctx)
+	if host.stops != 1 || stateOf(t, s, ctx, sid) != contract.BoxStopped {
+		t.Fatalf("stops=%d state=%s", host.stops, stateOf(t, s, ctx, sid))
+	}
+	disconnect()
+	cancelRun() // the original box's request ends, not the host run
+	<-detached
+	release()
+	testutil.Eventually(t, 5*time.Second, "host result wake", func() bool { return opRanWakes(t, s, sid) == 1 })
+	// The operation wake can start the next turn once the input batch window has passed.
+	afterBatch := s.now().Add(store.InputBatchWindow)
+	s.now = func() time.Time { return afterBatch }
+	passLifecycle(t, s, ctx)
+	if stateOf(t, s, ctx, sid) != contract.BoxStarting {
+		t.Fatalf("host result did not start the replacement: state=%s", stateOf(t, s, ctx, sid))
+	}
+	hello, problem := s.BoxHello(ctx, caller, contract.BoxHelloRequest{CanHandoff: true, LaunchGen: launchGen(t, s, sid)})
+	if problem != nil || hello.Harness != contract.HarnessAgy {
+		t.Fatalf("replacement hello: %+v, %v", hello, problem)
+	}
+	turns, _ = connectBox(t, s, ctx, sid, "")
+	if text := turnInputs(t, turns); !strings.Contains(text, "finished\n") {
+		t.Fatalf("replacement did not receive the host result: %q", text)
+	}
+	if len(runner.stops) != 0 || opRanWakes(t, s, sid) != 1 {
+		t.Fatal("host run was stopped or its result did not wake the session exactly once")
 	}
 }
 
