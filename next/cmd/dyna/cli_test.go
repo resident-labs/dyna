@@ -1082,8 +1082,14 @@ func TestAgyUseAndImportCLI(t *testing.T) {
 	if got := runCLI(t, f, "agy", "import", "First", "--file", "first.oauth-token.bak"); strings.TrimSpace(got) != "agy_x" || f.agyImport == nil || f.agyImport.Label != "First" || f.agyImport.File != "first.oauth-token.bak" {
 		t.Fatalf("import: %q %+v", got, f.agyImport)
 	}
-	runCLI(t, f, "agy", "import", "Main")
-	if f.agyImport.File != "" {
-		t.Fatalf("import of main: %+v", f.agyImport)
+	// --active is sent as given; the engine verifies it by comparison.
+	runCLI(t, f, "agy", "import", "Second", "--file", "second", "--active")
+	if f.agyImport.File != "second" || !f.agyImport.Active {
+		t.Fatalf("import --active: %+v", f.agyImport)
+	}
+	// --file is required: an import of main's own sign-in no longer exists, and nothing is sent.
+	f.agyImport = nil
+	if _, err := execCLI(f, "agy", "import", "Main"); err == nil || !strings.Contains(err.Error(), "file") || f.agyImport != nil {
+		t.Fatalf("import with no file: %v %+v", err, f.agyImport)
 	}
 }
