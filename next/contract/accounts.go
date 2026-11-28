@@ -17,6 +17,9 @@ const (
 	ProviderDeepSeek    AccountProvider = "deepseek"
 	ProviderMeta        AccountProvider = "meta"
 	ProviderAntigravity AccountProvider = "antigravity"
+	// ProviderAgy is an Antigravity CLI sign-in (`agy`), kept as a token file by the engine host. ProviderAntigravity above is the model
+	// proxy's own provider, a different thing.
+	ProviderAgy AccountProvider = "agy"
 )
 
 type AccountAction string
@@ -28,6 +31,7 @@ const (
 	AccountActionSetKey      AccountAction = "set_key"
 	AccountActionImportOAuth AccountAction = "import_oauth"
 	AccountActionComplete    AccountAction = "complete"
+	AccountActionCancel      AccountAction = "cancel"
 	AccountActionRemove      AccountAction = "remove"
 	AccountActionSetLimits   AccountAction = "set_limits"
 	AccountActionRename      AccountAction = "rename"
@@ -90,6 +94,8 @@ const (
 	ConnectFlowCallback ConnectFlow = "callback"
 	ConnectFlowDevice   ConnectFlow = "device"
 	ConnectFlowKey      ConnectFlow = "key"
+	// ConnectFlowCode: the link is opened and the code the page shows (or the page's address) is sent back as the callback's RedirectURL.
+	ConnectFlowCode ConnectFlow = "code"
 )
 
 type ConnectStatus string
@@ -128,6 +134,12 @@ type AccountsConnectCallbackRequest struct {
 	RedirectURL string `json:"redirectUrl"`
 }
 type AccountsConnectCallbackResponse struct{}
+
+// AccountsConnectCancelRequest ends a sign-in that waits, on the engine: an Antigravity sign-in is a process, which this kills and deletes. Another attempt's id is not found.
+type AccountsConnectCancelRequest struct {
+	Attempt string `json:"attempt"`
+}
+type AccountsConnectCancelResponse struct{}
 type AccountsConnectStatusRequest struct {
 	Attempt string `json:"attempt"`
 }

@@ -342,6 +342,7 @@ func (a *API) handler(c Caller) http.Handler {
 	call(mux, contract.MethodAccountsReconnect, c, a.service.AccountsReconnect)
 	call(mux, contract.MethodAccountsConnectCallback, c, a.service.AccountsConnectCallback)
 	call(mux, contract.MethodAccountsConnectStatus, c, a.service.AccountsConnectStatus)
+	call(mux, contract.MethodAccountsConnectCancel, c, a.service.AccountsConnectCancel)
 	call(mux, contract.MethodAccountsSetKey, c, a.service.AccountsSetKey)
 	call(mux, contract.MethodAccountsImportOAuth, c, a.service.AccountsImportOAuth)
 	call(mux, contract.MethodAccountsQuota, c, a.service.AccountsQuota)

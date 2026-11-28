@@ -66,7 +66,7 @@ export function usageNote(item: AccountItem): string | undefined {
   return visibleWindows(item.usage?.windows ?? []).length || item.usage?.balances?.length ? undefined : "This provider reports no usage limits.";
 }
 
-const flows: readonly ConnectFlow[] = ["callback", "device", "key"];
+const flows: readonly ConnectFlow[] = ["callback", "device", "code", "key"];
 
 // The providers Add offers: plan sign-ins, then codes, then keys, of which the first ten show until a search or Show
 // more, as the key list is long. more is how many keys wait behind Show more.
@@ -94,6 +94,21 @@ export const reconnectUnavailable = (error: unknown) => error instanceof APIErro
 
 // What Remove's confirm says it deletes.
 export const removalPrompt = (method: ConnectMethod) => `Dyna deletes its ${method === "key" ? "key" : "sign-in"} where Dyna runs.`;
+
+export const invalidInput = (error: unknown) => error instanceof APIError && error.detail.code === "invalid";
+
+// Every Antigravity sign-in that ends without success says this and nothing of what agy printed: Dyna reads none of it, and an owner who sees a Google refusal must not retry.
+export const loginUnfinished = "The login did not finish. If Google showed a verification or restriction message, stop and tell root; otherwise use Add again.";
+
+// What a failed paste means. A paste the engine calls invalid stays correctable. Any other failure of the Antigravity flow (the process ended
+// before the paste arrived, so the engine no longer has the sign-in) ends it with the fixed message and no Finish; other flows keep their retry.
+export function pasteFailure(flow: ConnectFlow, error: unknown): { text: string; ended: boolean } {
+  if (invalidInput(error)) return { text: "That is not the code for this sign-in. Paste the code the page shows, or the page's address.", ended: false };
+  return flow === "code" ? { text: loginUnfinished, ended: true } : { text: "Could not finish sign-in. Try again.", ended: false };
+}
+
+// A status poll that failed to arrive: the Antigravity flow cannot be told to retry, as the sign-in may already have ended.
+export const pollFailure = (flow: ConnectFlow) => flow === "code" ? loginUnfinished : "Could not reach the service. Try again.";
 
 export const refused = (error: unknown) => error instanceof APIError && error.detail.code === "conflict";
 

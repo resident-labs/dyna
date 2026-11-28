@@ -101,16 +101,27 @@ func (d devService) AccountsList(context.Context, contract.Principal, contract.A
 			accounts = append(accounts, contract.Account{ID: a.usage.AccountID, Provider: a.provider, Label: a.usage.Label, State: state})
 		}
 	}
-	return contract.AccountsListResponse{Providers: model.AccountProviders(nil), Accounts: accounts}, nil
+	return contract.AccountsListResponse{Providers: append(model.AccountProviders(nil), contract.AccountProviderInfo{ID: contract.ProviderAgy, DisplayName: "Antigravity", ConnectMethod: contract.ConnectOAuth, ConnectFlow: contract.ConnectFlowCode}), Accounts: accounts}, nil
 }
-func (devService) AccountsConnect(context.Context, contract.Principal, contract.AccountsConnectRequest) (contract.AccountsConnectResponse, *contract.Error) {
+
+// An Antigravity sign-in shows its link and waits for a paste that never comes: the page's two steps, with an invented link.
+func (devService) AccountsConnect(_ context.Context, _ contract.Principal, req contract.AccountsConnectRequest) (contract.AccountsConnectResponse, *contract.Error) {
+	if req.Provider == contract.ProviderAgy {
+		return contract.AccountsConnectResponse{Attempt: "dev-agy", Flow: contract.ConnectFlowCode, Link: "https://accounts.google.com/o/oauth2/auth?response_type=code&state=dev&redirect_uri=https%3A%2F%2Fantigravity.google%2Foauth-callback", ExpiresAt: time.Now().Add(5 * time.Minute)}, nil
+	}
 	return contract.AccountsConnectResponse{}, &contract.Error{Code: contract.ErrUnavailable, Message: "accounts unavailable in webdev"}
 }
 func (devService) AccountsReconnect(context.Context, contract.Principal, contract.AccountsReconnectRequest) (contract.AccountsReconnectResponse, *contract.Error) {
 	return contract.AccountsReconnectResponse{}, &contract.Error{Code: contract.ErrUnavailable, Message: "accounts unavailable in webdev"}
 }
-func (devService) AccountsConnectStatus(context.Context, contract.Principal, contract.AccountsConnectStatusRequest) (contract.AccountsConnectStatusResponse, *contract.Error) {
+func (devService) AccountsConnectStatus(_ context.Context, _ contract.Principal, req contract.AccountsConnectStatusRequest) (contract.AccountsConnectStatusResponse, *contract.Error) {
+	if req.Attempt == "dev-agy" {
+		return contract.AccountsConnectStatusResponse{Status: contract.ConnectPending}, nil
+	}
 	return contract.AccountsConnectStatusResponse{}, &contract.Error{Code: contract.ErrUnavailable, Message: "accounts unavailable in webdev"}
+}
+func (devService) AccountsConnectCancel(context.Context, contract.Principal, contract.AccountsConnectCancelRequest) (contract.AccountsConnectCancelResponse, *contract.Error) {
+	return contract.AccountsConnectCancelResponse{}, nil
 }
 func (devService) AccountsConnectCallback(context.Context, contract.Principal, contract.AccountsConnectCallbackRequest) (contract.AccountsConnectCallbackResponse, *contract.Error) {
 	return contract.AccountsConnectCallbackResponse{}, &contract.Error{Code: contract.ErrUnavailable, Message: "accounts unavailable in webdev"}

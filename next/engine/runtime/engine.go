@@ -23,6 +23,7 @@ import (
 	"github.com/resident-labs/dyna/box/podman"
 	"github.com/resident-labs/dyna/contract"
 	"github.com/resident-labs/dyna/engine"
+	"github.com/resident-labs/dyna/engine/agylogin"
 	"github.com/resident-labs/dyna/engine/api"
 	"github.com/resident-labs/dyna/engine/approve"
 	"github.com/resident-labs/dyna/engine/ci"
@@ -260,6 +261,7 @@ func Run(ctx context.Context, cfg Config) error {
 	service.SetUsage(quotas)
 	connections := proxy.Connections(managementKey, st, time.Now)
 	accounts := engine.NewAccountActions(service, connections, quotas)
+	accounts.SetAgyLogin(agylogin.New(agylogin.Config{Layout: layout, NewID: store.NewAgyAccountID, Publish: accounts.PublishAgy}))
 	if err := service.ConfigureOperations(ctx, map[contract.OpKind]approve.Entry{"accounts.action": accounts.Entry(), "addon.global": service.AddonGlobal(), "pr.stack": service.PrStack(token, &url.URL{Scheme: "https", Host: "api.github.com"}, http.DefaultTransport), "pr.open": service.PrOpen(token, &url.URL{Scheme: "https", Host: "api.github.com"}, http.DefaultTransport), "hostexec.grant": service.HostexecGrant(), "hostexec.run": service.HostexecRunEntry(), "pool.add": service.PoolAddEntry(), "room.hosts": service.RoomHostsEntry()}, cfg.ApprovalsExpiry); err != nil {
 		return err
 	}
