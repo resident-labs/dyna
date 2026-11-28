@@ -193,7 +193,7 @@ func TestUseRefusesWhenNoAccountIsActive(t *testing.T) {
 
 // A switch installs the stored copy on every host and never copies the live token back: a refreshed token in main is replaced, and the
 // outgoing account's stored copy stays as it was signed in.
-func TestUseInstallsEveryHostNeverCopiesBackAndActivatesInOneStep(t *testing.T) {
+func TestUseInstallsEveryHost(t *testing.T) {
 	r := newUseRig(t)
 	writeFile(t, mainToken(r.layout), tokOld+"-REFRESHED")
 	out, problem := r.use("New")
@@ -224,7 +224,7 @@ func TestUseInstallsEveryHostNeverCopiesBackAndActivatesInOneStep(t *testing.T) 
 	}
 }
 
-func TestUseWithAHostFailingStaysHeldNamesItAndARerunSkipsHostsDone(t *testing.T) {
+func TestUseHostFailStaysHeld(t *testing.T) {
 	r := newUseRig(t)
 	r.hosts.failOn["node"] = errors.New("could not swap the token file on the host")
 	out, problem := r.use("New")
@@ -260,7 +260,7 @@ func TestUseWithAHostFailingStaysHeldNamesItAndARerunSkipsHostsDone(t *testing.T
 // A switch whose hermeslab swap finished but whose result was lost (the engine went down, or the caller left) is held with its target.
 // Only a run for that target is accepted: it finds hermeslab done and finishes; the old account is refused with the
 // text, and the old account's stored copy is never overwritten with the new token.
-func TestAHeldSwitchAcceptsOnlyItsTargetAndARerunFinishes(t *testing.T) {
+func TestHeldSwitchOnlyItsTarget(t *testing.T) {
 	r := newUseRig(t)
 	// The state a lost result leaves: held for the new account, hermeslab already holding the new token, node not swapped.
 	if _, err := r.st.BeginAgySwitch(r.ctx, r.new); err != nil {
@@ -314,7 +314,7 @@ func TestAHeldSwitchSurvivesAnEngineRestart(t *testing.T) {
 
 // A preflight failure while the switch is already held records the host that failed, so the pane names it after a reload or a restart; a
 // fresh switch whose preflight fails records nothing and holds nothing.
-func TestAPreflightFailureOfAHeldSwitchNamesItsHostAndAFreshOneRecordsNothing(t *testing.T) {
+func TestUsePreflightStickNamesTheHost(t *testing.T) {
 	r := newUseRig(t)
 	r.hosts.down["node"] = errors.New("ssh timed out")
 	if _, problem := r.use("New"); problem == nil {
@@ -361,7 +361,7 @@ func TestAStalledHostFailsWithinItsBoundAndStaysHeld(t *testing.T) {
 
 // Remove and a switch's target. Remove wins when it runs between the switch's checks and its lock: the switch fails before anything is
 // held. The hook blocks the switch there, and Remove runs meanwhile.
-func TestRemovingTheTargetBetweenTheChecksAndTheHoldWins(t *testing.T) {
+func TestRemoveVersusHoldRace(t *testing.T) {
 	r := newUseRig(t)
 	reached, proceed := make(chan struct{}), make(chan struct{})
 	r.actions.afterAgyPreflight = func() { close(reached); <-proceed }
@@ -421,7 +421,7 @@ func TestTurnsStillRunningKeepAnEarlierRunsHold(t *testing.T) {
 }
 
 // Turns still running after the wait release the hold and fail with their count, and nothing was swapped.
-func TestUseWithTurnsStillRunningReleasesAndFailsWithTheCount(t *testing.T) {
+func TestUseTurnsRunningReleases(t *testing.T) {
 	r := newUseRig(t)
 	sqlExec(t, r.st, `INSERT INTO rooms(id,name,created_at,cpus,mem_bytes) VALUES('r','r',0,0,0);
  INSERT INTO sessions(id,room,name,profile,state,goal,created_at) VALUES('a','r','a','p','open','',0),('b','r','b','p','open','',0);
@@ -448,7 +448,7 @@ func TestUseWithTurnsStillRunningReleasesAndFailsWithTheCount(t *testing.T) {
 }
 
 // Seed is refused while a switch is held or running, and Remove refuses an account the switch uses.
-func TestHeldSwitchRefusesRemovalOfItsAccountsAndShowsInTheList(t *testing.T) {
+func TestHeldSwitchRefusesRemoval(t *testing.T) {
 	r := newUseRig(t)
 	if _, problem := r.actions.AccountsRemove(r.ctx, owner, contract.AccountsRemoveRequest{AccountID: r.old}); problem == nil || problem.Code != contract.ErrConflict {
 		t.Fatalf("removed the active account: %v", problem)
@@ -482,7 +482,7 @@ func TestHeldSwitchRefusesRemovalOfItsAccountsAndShowsInTheList(t *testing.T) {
 		t.Fatalf("removed the target: %v", problem)
 	}
 }
-func TestImportTakesAFileNeverMainAndEveryUnsafeNameIsRefused(t *testing.T) {
+func TestImportFileAndUnsafeNames(t *testing.T) {
 	r := newAgyRig(t)
 	ctx, layout := r.ctx, r.layout
 	writeFile(t, mainToken(layout), tokNew)
@@ -531,7 +531,7 @@ func TestImportTakesAFileNeverMainAndEveryUnsafeNameIsRefused(t *testing.T) {
 
 // --active records the imported account as the one signed in now, on the owner's word, without opening main (here main does not exist, so
 // any read of it would fail the import), and only while no account is active.
-func TestImportActiveRecordsTheOwnersWordWithoutReadingMainAndOnlyForTheFirst(t *testing.T) {
+func TestImportActiveIsTheOwnersWord(t *testing.T) {
 	r := newAgyRig(t)
 	ctx, layout := r.ctx, r.layout
 	writeFile(t, filepath.Join(layout.HostAgyAccounts(), "second"), tokNew)
@@ -572,7 +572,7 @@ func TestImportActiveRecordsTheOwnersWordWithoutReadingMainAndOnlyForTheFirst(t 
 
 // A name may be a sign-in folder such as accounts/second: its antigravity-acp/antigravity-oauth-token is taken, whole. A link at the name, at
 // the inner folder or at the file, a folder with no token, and a token that is a folder are refused with nothing left behind.
-func TestImportTakesASignInFolderAndRefusesLinksAndAFolderWithNoToken(t *testing.T) {
+func TestImportFolderAndItsLinks(t *testing.T) {
 	r := newAgyRig(t)
 	ctx, layout := r.ctx, r.layout
 	accounts := layout.HostAgyAccounts()
